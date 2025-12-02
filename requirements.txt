@@ -1,0 +1,11 @@
+avalanche-lib @ git+https://github.com/ContinualAI/avalanche  # Published version doesn't include IL2M
+isort
+mlflow
+numpy
+pylint
+pyyaml
+ruff
+torch
+torchvision
+tqdm
+yapf
