@@ -1,0 +1,111 @@
+experiment_name: retrieval_controllers_split_cifar100
+scenario: split_cifar100
+num_experiences: 10
+num_epochs: 10
+repair_budget_per_class: 100
+replay_memory_size: 2000
+replay_batch_size: 128
+train_batch_size: 128
+eval_batch_size: 128
+eval_every: -1
+seed: 1
+deterministic: false
+device: auto
+mlflow_tracking_uri: null
+dataset_path: null
+runs_config:
+  - run_name: logit_bias
+    eval_mode: compare
+    strategy:
+      name: naive
+      params: {}
+    optimizer:
+      name: sgd
+      params:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    controller:
+      name: logit_bias
+      params:
+        lr: 0.1
+  - run_name: linear_probe
+    eval_mode: compare
+    strategy:
+      name: naive
+      params: {}
+    optimizer:
+      name: sgd
+      params:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    controller:
+      name: linear_probe
+      params:
+        lr: 0.1
+  - run_name: bic
+    strategy:
+      name: naive
+      params: {}
+    optimizer:
+      name: sgd
+      params:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    controller:
+      name: bic
+      params: {}
+  - run_name: il2m
+    strategy:
+      name: naive
+      params: {}
+    optimizer:
+      name: sgd
+      params:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    controller:
+      name: il2m
+      params: {}
+  - run_name: cn
+    strategy:
+      name: naive
+      params: {}
+    optimizer:
+      name: sgd
+      params:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    controller:
+      name: cn
+      params: {}
+  - run_name: tbbn
+    strategy:
+      name: replay
+      params: {}
+    optimizer:
+      name: sgd
+      params:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    controller:
+      name: tbbn
+      params: {}
+  - run_name: bace
+    strategy:
+      name: naive
+      params: {}
+    optimizer:
+      name: sgd
+      params:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    controller:
+      name: bace
+      params: {}

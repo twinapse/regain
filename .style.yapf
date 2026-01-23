@@ -1,0 +1,6 @@
+[style]
+based_on_style = google
+column_limit = 120
+indent_width = 4
+
+# Check more options with `yapf --style-help`
