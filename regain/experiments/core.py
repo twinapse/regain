@@ -512,6 +512,17 @@ def _train_and_evaluate_strategy(
             model = ResNet18Classifier(n_classes=benchmark.n_classes)
             model.to(experiment_config.device)
 
+            # Initialize the controller's parameters (only for repair controllers)
+            if isinstance(controller_plugin, RepairControllerPlugin):
+                if len(benchmark.train_stream) > 0:
+                    probe_dataset = benchmark.train_stream[0].dataset
+                else:
+                    probe_dataset = None
+                controller_plugin.initialize_parameters(model=model, dataset=probe_dataset)
+
+            # Count controller model parameters
+            controller_model_param_count = count_trainable_parameters(controller)
+
             # Build the optimizer and criterion
             optimizer, optimizer_params = _build_optimizer(model=model, optimizer_config=run_config.optimizer)
             criterion = CrossEntropyLoss()
@@ -535,7 +546,7 @@ def _train_and_evaluate_strategy(
                 run_config=run_config,
                 deterministic_algorithms_enabled=deterministic_algorithms_enabled,
                 optimizer_params=optimizer_params,
-                controller_model_param_count=count_trainable_parameters(controller),
+                controller_model_param_count=controller_model_param_count,
                 num_classes=benchmark.n_classes,
             )
 

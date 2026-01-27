@@ -145,7 +145,7 @@ class ScalarStageGainController(_ScalarUnitGainController):
         momentum (float): SGD momentum.
         weight_decay (float): SGD weight decay.
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
-        max_stages (int): Maximum number of stages to include.
+        max_stages (int | None): Maximum number of stages to include. None means all stages.
         device (str | None): Device used for controller parameters and fitting.
         seed (int): Random seed for dataloader shuffling.
         lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
@@ -165,7 +165,7 @@ class ScalarStageGainController(_ScalarUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
-        max_stages: int = 8,
+        max_stages: int | None = None,
         device: str | None = None,
         seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
@@ -176,7 +176,7 @@ class ScalarStageGainController(_ScalarUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
-            max_units=int(max_stages),
+            max_units=max_stages,
             unit_resolver=resolve_stage_units,
             device=device,
             seed=seed,
@@ -194,7 +194,7 @@ class ScalarBlockGainController(_ScalarUnitGainController):
         momentum (float): SGD momentum.
         weight_decay (float): SGD weight decay.
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
-        max_blocks (int): Maximum number of blocks to include.
+        max_blocks (int | None): Maximum number of blocks to include. None means all blocks.
         device (str | None): Device used for controller parameters and fitting.
         seed (int): Random seed for dataloader shuffling.
         lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
@@ -214,7 +214,7 @@ class ScalarBlockGainController(_ScalarUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
-        max_blocks: int = 64,
+        max_blocks: int | None = None,
         device: str | None = None,
         seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
@@ -225,7 +225,7 @@ class ScalarBlockGainController(_ScalarUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
-            max_units=int(max_blocks),
+            max_units=max_blocks,
             unit_resolver=resolve_block_units,
             device=device,
             seed=seed,

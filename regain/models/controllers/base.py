@@ -228,6 +228,20 @@ class RepairController(nn.Module, ABC):
         super().__init__()
         self._enabled: bool = False
 
+    def initialize_parameters(self, *, model: nn.Module, sample_inputs: Any | None = None) -> None:
+        """
+        Initialize controller parameters based on the model and sample inputs.
+
+        Args:
+            model (nn.Module): Model used to determine lazy parameter shapes.
+            sample_inputs (Any | None): Representative inputs for probing, if needed.
+
+        Returns:
+            None.
+        """
+        del model, sample_inputs
+        return
+
     def enable(self) -> None:
         """
         Enable controller application during evaluation.

@@ -16,6 +16,7 @@ import mlflow
 import torch
 import torch.nn as nn
 from torch.utils.data import ConcatDataset
+from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
 from regain.analysis import build_analysis_artifacts
@@ -32,7 +33,9 @@ from regain.models.controllers import BackboneControllerInterface
 from regain.models.controllers import PreventionController
 from regain.models.controllers import RepairController
 from regain.models.controllers import TrainingObjectiveControllerInterface
+from regain.models.controllers.repair.common import extract_probe_inputs
 from regain.utils import extract_targets
+from regain.utils import module_device
 from regain.utils import RegainDataset
 
 __all__ = [
@@ -303,6 +306,24 @@ class RepairControllerPlugin(SupervisedPlugin):
         self.fit_after_experience = fit_after_experience
         self._repair_datasets: list[Dataset] = []
         self._seen_classes: set[int] = set()
+
+    def initialize_parameters(self, *, model: nn.Module, dataset: Dataset | None) -> None:
+        """
+        Initialize the controller parameters with a probe batch from a dataset.
+
+        Args:
+            model (nn.Module): Model used to probe controller parameters.
+            dataset (Dataset | None): Dataset used to extract a probe batch.
+
+        Returns:
+            None.
+        """
+        if dataset is not None:
+            probe_loader = DataLoader(dataset, batch_size=1, shuffle=False)
+            probe_inputs = extract_probe_inputs(dataloader=probe_loader, device=module_device(model, 'cpu'))
+        else:
+            probe_inputs = None
+        self.controller.initialize_parameters(model=model, sample_inputs=probe_inputs)
 
     def enable(self) -> None:
         """
