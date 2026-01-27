@@ -5,7 +5,6 @@ These controllers use a small gating MLP to predict per-unit gains from the curr
 then apply the predicted gains through temporary forward hooks during a gain-conditioned forward pass.
 """
 
-import math
 from typing import Any, Callable
 
 import torch
@@ -17,12 +16,14 @@ from regain.models.controllers.base import RepairController
 from regain.models.controllers.repair.common import bounded_positive_gain
 from regain.models.controllers.repair.common import build_sgd_optimizer_and_scheduler
 from regain.models.controllers.repair.common import fit_repair_controller
+from regain.models.controllers.repair.common import log_gain_max
 from regain.models.controllers.repair.common import maybe_correct_outputs
 from regain.models.controllers.repair.common import prepare_repair_fit_context
 from regain.models.controllers.repair.common import resolve_backbone_or_raise
 from regain.models.controllers.repair.common import resolve_block_units
 from regain.models.controllers.repair.common import resolve_stage_units
 from regain.models.controllers.repair.common import run_model_with_hooks
+from regain.utils import cast_tensor
 from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval
 
@@ -75,15 +76,11 @@ class _GainGatingMLP(nn.Module):
         # Require a non-negative number of hidden layers.
         if int(num_hidden_layers) < 0:
             raise ValueError('num_hidden_layers must be >= 0.')
-        # Require a gain upper bound above 1.0.
-        if float(gain_max) <= 1.0:
-            raise ValueError('gain_max must be > 1.0.')
-
         self.in_dim = int(in_dim)
         self.hidden_dim = int(hidden_dim)
         self.num_hidden_layers = int(num_hidden_layers)
         self.gain_max = float(gain_max)
-        self._log_gain_max = float(math.log(float(gain_max)))
+        self._log_gain_max = log_gain_max(gain_max=self.gain_max)
 
         self.unit_keys: list[str] = list(unit_keys)
 
@@ -506,7 +503,7 @@ class _InputConditionedUnitGainController(RepairController):
                     return out
 
                 # Broadcast the per-example gain to the unit output shape.
-                g = gains[:, unit_index].to(device=out.device, dtype=out.dtype)
+                g = cast_tensor(tensor=gains[:, unit_index], ref_tensor=out)
                 # Scale spatial outputs.
                 if out.ndim == 4:
                     return out * g.view(-1, 1, 1, 1)

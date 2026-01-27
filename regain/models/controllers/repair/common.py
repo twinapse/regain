@@ -7,6 +7,7 @@ The helpers are designed for ResNet-like backbones but keep the public controlle
 from abc import ABC
 from abc import abstractmethod
 from contextlib import contextmanager
+import math
 from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
@@ -29,8 +30,10 @@ __all__ = [
     'build_repair_dataloader',
     'build_unit_gain_hooks',
     'build_sgd_optimizer_and_scheduler',
+    'effective_gains_from_raw',
     'extract_probe_inputs',
     'fit_repair_controller',
+    'log_gain_max',
     'mean_l2_distance_to_one',
     'maybe_correct_outputs',
     'prepare_repair_fit_context',
@@ -207,6 +210,46 @@ def bounded_positive_gain(*, raw: torch.Tensor, log_gain_max: float) -> torch.Te
         torch.Tensor: Gains in [1 / gain_max, gain_max].
     """
     return torch.exp(float(log_gain_max) * torch.tanh(raw))
+
+
+def log_gain_max(*, gain_max: float) -> float:
+    """
+    Compute log(gain_max) with validation.
+
+    Args:
+        gain_max (float): Maximum gain value (> 1.0).
+
+    Returns:
+        float: log(gain_max).
+
+    Raises:
+        ValueError: If `gain_max` <= 1.0.
+    """
+    gain_max = float(gain_max)
+    if gain_max <= 1.0:
+        raise ValueError('gain_max must be > 1.0.')
+    return math.log(gain_max)
+
+
+def effective_gains_from_raw(
+    *,
+    raw_gains: Mapping[str, torch.Tensor],
+    log_gain_max_value: float,
+) -> dict[str, torch.Tensor]:
+    """
+    Convert raw gains to effective bounded gains.
+
+    Args:
+        raw_gains (Mapping[str, torch.Tensor]): Mapping from unit keys to raw gain parameters.
+        log_gain_max_value (float): log(gain_max) for the bounded transform.
+
+    Returns:
+        dict[str, torch.Tensor]: Mapping from unit keys to effective gains.
+    """
+    return {
+        k: bounded_positive_gain(raw=v, log_gain_max=log_gain_max_value)
+        for k, v in raw_gains.items()
+    }
 
 
 def mean_l2_distance_to_one(*, gains: Mapping[str, torch.Tensor], device: torch.device) -> torch.Tensor:

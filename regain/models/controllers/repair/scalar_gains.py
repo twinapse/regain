@@ -7,19 +7,20 @@ ResNet-like backbones). Gains are applied multiplicatively to unit outputs via t
 This provides a compact intermediate-capacity controller between logit calibration and per-channel gains.
 """
 
-import math
 from typing import Any, Callable
 
 import torch
 from torch import nn
 
 from regain.models.controllers.repair.common import BaseUnitGainController
-from regain.models.controllers.repair.common import bounded_positive_gain
 from regain.models.controllers.repair.common import build_unit_gain_hooks
+from regain.models.controllers.repair.common import effective_gains_from_raw
+from regain.models.controllers.repair.common import log_gain_max
 from regain.models.controllers.repair.common import mean_l2_distance_to_one
 from regain.models.controllers.repair.common import resolve_block_units
 from regain.models.controllers.repair.common import resolve_stage_units
 from regain.models.controllers.repair.common import run_model_with_hooks
+from regain.utils import cast_tensor
 
 __all__ = [
     'ScalarBlockGainController',
@@ -46,13 +47,11 @@ class _ScalarUnitGainController(BaseUnitGainController):
         gain_max: float = 2.0,
         **kwargs,
     ) -> None:
-        if float(gain_max) <= 1.0:
-            raise ValueError(f'{type(self).__name__} requires gain_max > 1.0.')
         super().__init__(**kwargs)
         # Initialize gain parameters and resolver.
         self._raw_gains = nn.ParameterDict()
         self._unit_resolver = unit_resolver
-        self._log_gain_max = float(math.log(float(gain_max)))
+        self._log_gain_max = log_gain_max(gain_max=gain_max)
 
     def _ensure_initialized(self, *, model: nn.Module, device: torch.device, sample_inputs: torch.Tensor) -> None:
         """
@@ -102,10 +101,10 @@ class _ScalarUnitGainController(BaseUnitGainController):
         Raises:
             ValueError: If model forward does not return tensor logits.
         """
-        effective_gains = {
-            k: bounded_positive_gain(raw=p, log_gain_max=self._log_gain_max)
-            for k, p in self._raw_gains.items()
-        }
+        effective_gains = effective_gains_from_raw(
+            raw_gains=self._raw_gains,
+            log_gain_max_value=self._log_gain_max,
+        )
 
         def _make_hook(gain: torch.Tensor):
             def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
@@ -113,10 +112,7 @@ class _ScalarUnitGainController(BaseUnitGainController):
                 if not torch.is_tensor(out):
                     return out
                 # Apply the scalar gain to any tensor output.
-                if gain.device != out.device or gain.dtype != out.dtype:
-                    gain_cast = gain.to(device=out.device, dtype=out.dtype)
-                else:
-                    gain_cast = gain
+                gain_cast = cast_tensor(tensor=gain, ref_tensor=out)
                 return out * gain_cast
             return _hook
 
@@ -148,10 +144,10 @@ class _ScalarUnitGainController(BaseUnitGainController):
         Returns:
             torch.Tensor: Scalar regularization term.
         """
-        effective_gains = {
-            k: bounded_positive_gain(raw=p, log_gain_max=self._log_gain_max)
-            for k, p in self._raw_gains.items()
-        }
+        effective_gains = effective_gains_from_raw(
+            raw_gains=self._raw_gains,
+            log_gain_max_value=self._log_gain_max,
+        )
         return mean_l2_distance_to_one(gains=effective_gains, device=device)
 
 

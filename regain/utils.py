@@ -10,6 +10,7 @@ from torch.utils.data import Subset
 
 __all__ = [
     'RegainDataset',
+    'cast_tensor',
     'extract_targets',
     'get_logger',
     'get_targets',
@@ -109,6 +110,22 @@ def module_device(module: nn.Module, fallback: str) -> torch.device:
     """
     first_param = next(module.parameters(), None)
     return first_param.device if first_param is not None else torch.device(fallback)
+
+
+def cast_tensor(*, tensor: torch.Tensor, ref_tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Cast a tensor to match the device and dtype of a reference tensor.
+
+    Args:
+        tensor (torch.Tensor): Tensor to cast.
+        ref_tensor (torch.Tensor): Reference tensor that provides device and dtype.
+
+    Returns:
+        torch.Tensor: Tensor on the same device and dtype as `ref_tensor`.
+    """
+    if tensor.device == ref_tensor.device and tensor.dtype == ref_tensor.dtype:
+        return tensor
+    return tensor.to(device=ref_tensor.device, dtype=ref_tensor.dtype)
 
 
 @contextmanager
