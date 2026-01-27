@@ -493,6 +493,45 @@ def _is_resnet_block(module: nn.Module) -> bool:
     return isinstance(conv1, nn.Conv2d) and isinstance(conv2, nn.Conv2d)
 
 
+def _is_residual_stage_container(module: nn.Module) -> bool:
+    """
+    Identify residual-stage containers that hold ResNet-like blocks.
+
+    Args:
+        module (nn.Module): Module to test.
+
+    Returns:
+        bool: True if the module looks like a residual stage container.
+    """
+    if not isinstance(module, nn.Sequential):
+        return False
+    return any(_is_resnet_block(child) for child in module.modules())
+
+
+def _resolve_residual_stage_units(*, backbone: nn.Module) -> list[tuple[str, nn.Module]]:
+    """
+    Resolve residual-stage units from common ResNet-like backbone layouts.
+
+    Args:
+        backbone (nn.Module): Backbone/encoder module to inspect.
+
+    Returns:
+        list[tuple[str, nn.Module]]: List of (unit_key, unit_module) pairs.
+    """
+    layer_names = ('layer1', 'layer2', 'layer3', 'layer4')
+    layers = [getattr(backbone, name, None) for name in layer_names]
+    if all(isinstance(layer, nn.Module) for layer in layers):
+        return [(name, layer) for name, layer in zip(layer_names, layers)]
+
+    features = getattr(backbone, 'features', None)
+    units: list[tuple[str, nn.Module]] = []
+    if isinstance(features, nn.Sequential):
+        for i, child in enumerate(features):
+            if _is_residual_stage_container(child):
+                units.append((f'features_{i}', child))
+    return units
+
+
 def resolve_backbone_or_raise(*, model: nn.Module) -> nn.Module:
     """
     Resolve a backbone/encoder module from `model`.
@@ -518,53 +557,54 @@ def resolve_backbone_or_raise(*, model: nn.Module) -> nn.Module:
     raise ValueError('Gain controllers require the model to expose a `.backbone` (or `.encoder`) module.')
 
 
-def resolve_stage_units(*, backbone: nn.Module, max_units: int) -> list[tuple[str, nn.Module]]:
+def resolve_stage_units(*, backbone: nn.Module, max_units: int | None) -> list[tuple[str, nn.Module]]:
     """
     Resolve coarse stage-like units under a backbone.
 
-    This is intentionally low-capacity: it selects a small number of Conv-like blocks
-    (e.g., conv stem + large Sequential containers that include Conv2d).
+    This is intentionally low-capacity: it prefers residual stages when available,
+    otherwise falls back to Conv-like containers.
 
     Args:
         backbone (nn.Module): Backbone/encoder module to inspect.
-        max_units (int): Maximum number of units to include.
+        max_units (int | None): Maximum number of units to include. None means all.
 
     Returns:
         list[tuple[str, nn.Module]]: List of (unit_key, unit_module) pairs.
     """
-    units: list[tuple[str, nn.Module]] = []
+    units = _resolve_residual_stage_units(backbone=backbone)
 
-    features = getattr(backbone, 'features', None)
-    # Handle backbones that expose a Sequential `features` stack.
-    if isinstance(features, nn.Sequential):
-        # Prefer explicit feature stacks with Conv2d content.
-        for i, child in enumerate(features):
-            key = f'features_{i}'
-            # Accept Conv2d stems as stage-like units.
-            if isinstance(child, nn.Conv2d):
-                units.append((key, child))
-                continue
-            # Accept Sequential containers that include Conv2d modules.
-            if isinstance(child, nn.Sequential) and any(isinstance(m, nn.Conv2d) for m in child.modules()):
-                units.append((key, child))
-                continue
-    else:
-        # Fall back to direct children when no `features` attribute is present.
-        for name, child in backbone.named_children():
-            # Treat Conv2d children as stage-like units.
-            if isinstance(child, nn.Conv2d):
-                units.append((name, child))
-                continue
-            # Include Sequential containers that hold Conv2d modules.
-            if isinstance(child, nn.Sequential) and any(isinstance(m, nn.Conv2d) for m in child.modules()):
-                units.append((name, child))
-                continue
-            # Include other modules that embed Conv2d blocks.
-            if any(isinstance(m, nn.Conv2d) for m in child.modules()):
-                units.append((name, child))
+    if not units:
+        features = getattr(backbone, 'features', None)
+        # Handle backbones that expose a Sequential `features` stack.
+        if isinstance(features, nn.Sequential):
+            # Prefer explicit feature stacks with Conv2d content.
+            for i, child in enumerate(features):
+                key = f'features_{i}'
+                # Accept Conv2d stems as stage-like units.
+                if isinstance(child, nn.Conv2d):
+                    units.append((key, child))
+                    continue
+                # Accept Sequential containers that include Conv2d modules.
+                if isinstance(child, nn.Sequential) and any(isinstance(m, nn.Conv2d) for m in child.modules()):
+                    units.append((key, child))
+                    continue
+        else:
+            # Fall back to direct children when no `features` attribute is present.
+            for name, child in backbone.named_children():
+                # Treat Conv2d children as stage-like units.
+                if isinstance(child, nn.Conv2d):
+                    units.append((name, child))
+                    continue
+                # Include Sequential containers that hold Conv2d modules.
+                if isinstance(child, nn.Sequential) and any(isinstance(m, nn.Conv2d) for m in child.modules()):
+                    units.append((name, child))
+                    continue
+                # Include other modules that embed Conv2d blocks.
+                if any(isinstance(m, nn.Conv2d) for m in child.modules()):
+                    units.append((name, child))
 
     # Enforce the maximum unit budget when requested.
-    if max_units > 0 and len(units) > max_units:
+    if max_units is not None and max_units > 0 and len(units) > max_units:
         units = units[:max_units]
 
     if not units:
@@ -574,7 +614,7 @@ def resolve_stage_units(*, backbone: nn.Module, max_units: int) -> list[tuple[st
     return units
 
 
-def resolve_block_units(*, backbone: nn.Module, max_units: int) -> list[tuple[str, nn.Module]]:
+def resolve_block_units(*, backbone: nn.Module, max_units: int | None) -> list[tuple[str, nn.Module]]:
     """
     Resolve finer block-like units under a backbone.
 
@@ -584,22 +624,34 @@ def resolve_block_units(*, backbone: nn.Module, max_units: int) -> list[tuple[st
 
     Args:
         backbone (nn.Module): Backbone/encoder module to inspect.
-        max_units (int): Maximum number of units to include.
+        max_units (int | None): Maximum number of units to include. None means all.
 
     Returns:
         list[tuple[str, nn.Module]]: List of (unit_key, unit_module) pairs.
     """
     units: list[tuple[str, nn.Module]] = []
 
-    # Case 1: torchvision-style ResNet backbone with layer1..layer4 attributes.
-    for lname in ('layer1', 'layer2', 'layer3', 'layer4'):
-        layer = getattr(backbone, lname, None)
-        # Only iterate blocks for Sequential layers.
-        if isinstance(layer, nn.Sequential):
-            for bi, block in enumerate(layer):
-                # Keep blocks that match ResNet-like structure.
+    stage_units = _resolve_residual_stage_units(backbone=backbone)
+    if stage_units:
+        # Flatten blocks within residual-stage containers.
+        for stage_key, stage in stage_units:
+            if not isinstance(stage, nn.Sequential):
+                continue
+            for bi, block in enumerate(stage):
                 if _is_resnet_block(block):
-                    units.append((f'{lname}.{bi}', block))
+                    units.append((f'{stage_key}_{bi}', block))
+
+    # Fall back to layer/feature scanning when no blocks are found.
+    if not units:
+        # Case 1: torchvision-style ResNet backbone with layer1..layer4 attributes.
+        for lname in ('layer1', 'layer2', 'layer3', 'layer4'):
+            layer = getattr(backbone, lname, None)
+            # Only iterate blocks for Sequential layers.
+            if isinstance(layer, nn.Sequential):
+                for bi, block in enumerate(layer):
+                    # Keep blocks that match ResNet-like structure.
+                    if _is_resnet_block(block):
+                        units.append((f'{lname}_{bi}', block))
 
     # Case 2: wrapper backbones exposing `features` (e.g., ResNet18Backbone.features).
     # Fall back to feature-stack discovery when no blocks are found.
@@ -618,7 +670,7 @@ def resolve_block_units(*, backbone: nn.Module, max_units: int) -> list[tuple[st
                         units.append((f'features_{i}_{j}', maybe_block))
 
     # Respect max_units when provided.
-    if max_units > 0 and len(units) > max_units:
+    if max_units is not None and max_units > 0 and len(units) > max_units:
         units = units[:max_units]
 
     # Fallback: if we can't find blocks, fall back to stage units.
@@ -642,7 +694,7 @@ class BaseUnitGainController(RepairController, ABC):
         momentum (float): SGD momentum.
         weight_decay (float): SGD weight decay.
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
-        max_units (int): Maximum number of units (blocks/stages) to include.
+        max_units (int | None): Maximum number of units (blocks/stages) to include. None means all.
         device (str | None): Device used for controller parameters and fitting.
         seed (int): Random seed for dataloader shuffling.
         lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
@@ -659,7 +711,7 @@ class BaseUnitGainController(RepairController, ABC):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
-        max_units: int,
+        max_units: int | None,
         device: str | None = None,
         seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
@@ -672,7 +724,7 @@ class BaseUnitGainController(RepairController, ABC):
         self.momentum = float(momentum)
         self.weight_decay = float(weight_decay)
         self.l2_reg = float(l2_reg)
-        self.max_units = int(max_units)
+        self.max_units = max_units
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.seed = int(seed)
         self.lr_milestones = tuple(int(m) for m in lr_milestones) if lr_milestones is not None else None
@@ -685,6 +737,28 @@ class BaseUnitGainController(RepairController, ABC):
 
         # Move controller parameters to the configured device.
         self.to(self.device)
+
+    def initialize_parameters(self, *, model: nn.Module, sample_inputs: Any | None = None) -> None:
+        """
+        Initialize unit lists and gain parameters for the current model.
+
+        Args:
+            model (nn.Module): Model used to discover units.
+            sample_inputs (Any | None): Representative input batch for probing.
+
+        Returns:
+            None.
+        """
+        if sample_inputs is None:
+            return
+        if not torch.is_tensor(sample_inputs):
+            sample_inputs = torch.as_tensor(sample_inputs)
+
+        model_device = module_device(model, self.device)
+        self.to(model_device)
+        inputs_on_device = sample_inputs.to(model_device)
+        with preserve_model_mode_after_eval(model):
+            self._ensure_initialized(model=model, device=model_device, sample_inputs=inputs_on_device)
 
     def fit_on_repair_data(
         self,
@@ -806,17 +880,17 @@ class BaseUnitGainController(RepairController, ABC):
         """
         # Resolve the unit list and record module identities for change detection.
         backbone = resolve_backbone_or_raise(model=model)
-        units = self._resolve_units(backbone=backbone, max_units=int(self.max_units))
+        units = self._resolve_units(backbone=backbone, max_units=self.max_units)
         unit_ids = {k: int(id(m)) for k, m in units}
         return units, unit_ids
 
-    def _resolve_units(self, *, backbone: nn.Module, max_units: int) -> list[tuple[str, nn.Module]]:
+    def _resolve_units(self, *, backbone: nn.Module, max_units: int | None) -> list[tuple[str, nn.Module]]:
         """
         Resolve the hookable unit list (block-level or stage-level).
 
         Args:
             backbone (nn.Module): Backbone/encoder module.
-            max_units (int): Maximum number of units to include.
+            max_units (int | None): Maximum number of units to include. None means all.
 
         Returns:
             list[tuple[str, nn.Module]]: List of (unit_key, unit_module) pairs.

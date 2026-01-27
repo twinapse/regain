@@ -21,6 +21,7 @@ from regain.models.controllers.repair.common import resolve_backbone_or_raise
 from regain.models.controllers.repair.common import resolve_block_units
 from regain.models.controllers.repair.common import resolve_stage_units
 from regain.models.controllers.repair.common import run_model_with_hooks
+from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval
 
 __all__ = [
@@ -177,7 +178,7 @@ class _InputConditionedUnitGainController(RepairController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
-        max_units: int,
+        max_units: int | None,
         max_units_name: str,
         unit_resolver: Callable[..., list[tuple[str, nn.Module]]],
         hidden_dim: int = 128,
@@ -196,7 +197,7 @@ class _InputConditionedUnitGainController(RepairController):
             momentum (float): SGD momentum.
             weight_decay (float): SGD weight decay.
             l2_reg (float): Strength of gain regularization toward 1.0 (applied to predicted gains).
-            max_units (int): Maximum number of units to include.
+            max_units (int | None): Maximum number of units to include. None means all.
             max_units_name (str): Public-facing name for `max_units` in error messages.
             unit_resolver (Callable[..., list[tuple[str, nn.Module]]]): Unit resolver for the controller.
             hidden_dim (int): Hidden width of the gating MLP.
@@ -216,9 +217,9 @@ class _InputConditionedUnitGainController(RepairController):
         # Require a positive learning rate.
         if float(lr) <= 0.0:
             raise ValueError('lr must be > 0.')
-        # Require a positive unit budget.
-        if int(max_units) <= 0:
-            raise ValueError(f'{max_units_name} must be > 0.')
+        # Require a non-negative unit budget.
+        if max_units is not None and max_units < 0:
+            raise ValueError(f'{max_units_name} must be >= 0.')
         # Require a positive hidden dimension.
         if int(hidden_dim) <= 0:
             raise ValueError('hidden_dim must be > 0.')
@@ -234,7 +235,7 @@ class _InputConditionedUnitGainController(RepairController):
         self.momentum = float(momentum)
         self.weight_decay = float(weight_decay)
         self.l2_reg = float(l2_reg)
-        self.max_units = int(max_units)
+        self.max_units = max_units
         self._unit_resolver = unit_resolver
         self.hidden_dim = int(hidden_dim)
         self.num_hidden_layers = int(num_hidden_layers)
@@ -252,6 +253,28 @@ class _InputConditionedUnitGainController(RepairController):
 
         # Move parameters to the configured device.
         self.to(self.device)
+
+    def initialize_parameters(self, *, model: nn.Module, sample_inputs: Any | None = None) -> None:
+        """
+        Initialize unit lists and gating parameters for the current model.
+
+        Args:
+            model (nn.Module): Model used to discover units and probe features.
+            sample_inputs (Any | None): Representative input batch for probing.
+
+        Returns:
+            None.
+        """
+        if sample_inputs is None:
+            return
+        if not torch.is_tensor(sample_inputs):
+            sample_inputs = torch.as_tensor(sample_inputs)
+
+        model_device = module_device(model, self.device)
+        self.to(model_device)
+        inputs_on_device = sample_inputs.to(model_device)
+        with preserve_model_mode_after_eval(model):
+            self._ensure_initialized(model=model, device=model_device, sample_inputs=inputs_on_device)
 
     def fit_on_repair_data(
         self,
@@ -392,7 +415,7 @@ class _InputConditionedUnitGainController(RepairController):
         """
         backbone = resolve_backbone_or_raise(model=model)
         # Discover hookable units and cache their identities.
-        units = self._unit_resolver(backbone=backbone, max_units=int(self.max_units))
+        units = self._unit_resolver(backbone=backbone, max_units=self.max_units)
         unit_ids = {k: int(id(m)) for k, m in units}
 
         self._units = units
@@ -522,7 +545,7 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
-        max_stages: int = 8,
+        max_stages: int | None = None,
         hidden_dim: int = 128,
         num_hidden_layers: int = 1,
         gain_max: float = 2.0,
@@ -539,7 +562,7 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
             momentum (float): SGD momentum.
             weight_decay (float): SGD weight decay.
             l2_reg (float): Strength of gain regularization toward 1.0 (applied to predicted gains).
-            max_stages (int): Maximum number of stages to include.
+            max_stages (int | None): Maximum number of stages to include. None means all stages.
             hidden_dim (int): Hidden width of the gating MLP.
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
             gain_max (float): Maximum gain value (gains in (0, gain_max)).
@@ -556,7 +579,7 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
-            max_units=int(max_stages),
+            max_units=max_stages,
             max_units_name='max_stages',
             unit_resolver=resolve_stage_units,
             hidden_dim=hidden_dim,
@@ -567,7 +590,7 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
             lr_milestones=lr_milestones,
             lr_gamma=lr_gamma,
         )
-        self.max_stages = int(self.max_units)
+        self.max_stages = max_stages
 
 
 class InputConditionedBlockGainController(_InputConditionedUnitGainController):
@@ -585,7 +608,7 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
-        max_blocks: int = 64,
+        max_blocks: int | None = None,
         hidden_dim: int = 128,
         num_hidden_layers: int = 1,
         gain_max: float = 2.0,
@@ -602,7 +625,7 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
             momentum (float): SGD momentum.
             weight_decay (float): SGD weight decay.
             l2_reg (float): Strength of gain regularization toward 1.0 (applied to predicted gains).
-            max_blocks (int): Maximum number of blocks to include.
+            max_blocks (int | None): Maximum number of blocks to include. None means all blocks.
             hidden_dim (int): Hidden width of the gating MLP.
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
             gain_max (float): Maximum gain value (gains in (0, gain_max)).
@@ -619,7 +642,7 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
-            max_units=int(max_blocks),
+            max_units=max_blocks,
             max_units_name='max_blocks',
             unit_resolver=resolve_block_units,
             hidden_dim=hidden_dim,
@@ -630,4 +653,4 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
             lr_milestones=lr_milestones,
             lr_gamma=lr_gamma,
         )
-        self.max_blocks = int(self.max_units)
+        self.max_blocks = max_blocks
