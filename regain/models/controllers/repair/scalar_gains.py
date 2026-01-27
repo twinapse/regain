@@ -14,10 +14,13 @@ from torch import nn
 
 from regain.models.controllers.repair.common import BaseUnitGainController
 from regain.models.controllers.repair.common import build_unit_gain_hooks
+from regain.models.controllers.repair.common import effective_gains_from_raw
+from regain.models.controllers.repair.common import log_gain_max
 from regain.models.controllers.repair.common import mean_l2_distance_to_one
 from regain.models.controllers.repair.common import resolve_block_units
 from regain.models.controllers.repair.common import resolve_stage_units
 from regain.models.controllers.repair.common import run_model_with_hooks
+from regain.utils import cast_tensor
 
 __all__ = [
     'ScalarBlockGainController',
@@ -41,12 +44,14 @@ class _ScalarUnitGainController(BaseUnitGainController):
         self,
         *,
         unit_resolver: Callable[..., list[tuple[str, nn.Module]]],
+        gain_max: float = 2.0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         # Initialize gain parameters and resolver.
-        self._gains = nn.ParameterDict()
+        self._raw_gains = nn.ParameterDict()
         self._unit_resolver = unit_resolver
+        self._log_gain_max = log_gain_max(gain_max=gain_max)
 
     def _ensure_initialized(self, *, model: nn.Module, device: torch.device, sample_inputs: torch.Tensor) -> None:
         """
@@ -66,10 +71,10 @@ class _ScalarUnitGainController(BaseUnitGainController):
         active_keys = {k for k, _ in units}
 
         # Purge stale entries from previous unit sets.
-        for k in list(self._gains.keys()):
+        for k in list(self._raw_gains.keys()):
             # Remove gains for units that no longer exist.
             if k not in active_keys:
-                del self._gains[k]
+                del self._raw_gains[k]
 
         # Cache the latest units and module identity map.
         self._units = units
@@ -77,9 +82,9 @@ class _ScalarUnitGainController(BaseUnitGainController):
 
         for key, _module in units:
             # Initialize gains for newly discovered units.
-            if key not in self._gains:
-                # Initialize missing scalar gains to ones.
-                self._gains[key] = nn.Parameter(torch.ones((), device=device))
+            if key not in self._raw_gains:
+                # Initialize missing scalar raw gains to zeros (gain == 1.0).
+                self._raw_gains[key] = nn.Parameter(torch.zeros((), device=device))
 
     def _forward_with_gains(self, *, model: nn.Module, inputs: torch.Tensor, device: torch.device) -> torch.Tensor:
         """
@@ -96,19 +101,25 @@ class _ScalarUnitGainController(BaseUnitGainController):
         Raises:
             ValueError: If model forward does not return tensor logits.
         """
+        effective_gains = effective_gains_from_raw(
+            raw_gains=self._raw_gains,
+            log_gain_max_value=self._log_gain_max,
+        )
+
         def _make_hook(gain: torch.Tensor):
             def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
                 # Skip non-tensor outputs.
                 if not torch.is_tensor(out):
                     return out
                 # Apply the scalar gain to any tensor output.
-                return out * gain
+                gain_cast = cast_tensor(tensor=gain, ref_tensor=out)
+                return out * gain_cast
             return _hook
 
         # Build hook list for each unit gain parameter.
         hooks = build_unit_gain_hooks(
             units=self._units,
-            gains=self._gains,
+            gains=effective_gains,
             device=device,
             hook_factory=_make_hook,
         )
@@ -133,7 +144,11 @@ class _ScalarUnitGainController(BaseUnitGainController):
         Returns:
             torch.Tensor: Scalar regularization term.
         """
-        return mean_l2_distance_to_one(gains=self._gains, device=device)
+        effective_gains = effective_gains_from_raw(
+            raw_gains=self._raw_gains,
+            log_gain_max_value=self._log_gain_max,
+        )
+        return mean_l2_distance_to_one(gains=effective_gains, device=device)
 
 
 class ScalarStageGainController(_ScalarUnitGainController):
@@ -145,6 +160,7 @@ class ScalarStageGainController(_ScalarUnitGainController):
         momentum (float): SGD momentum.
         weight_decay (float): SGD weight decay.
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
+        gain_max (float): Maximum gain value; gains are in [1 / gain_max, gain_max].
         max_stages (int | None): Maximum number of stages to include. None means all stages.
         device (str | None): Device used for controller parameters and fitting.
         seed (int): Random seed for dataloader shuffling.
@@ -156,6 +172,7 @@ class ScalarStageGainController(_ScalarUnitGainController):
 
     Raises:
         ValueError: If required hyperparameters are invalid.
+        ValueError: If `gain_max` <= 1.0.
     """
 
     def __init__(
@@ -165,6 +182,7 @@ class ScalarStageGainController(_ScalarUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
+        gain_max: float = 2.0,
         max_stages: int | None = None,
         device: str | None = None,
         seed: int = 1,
@@ -176,6 +194,7 @@ class ScalarStageGainController(_ScalarUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
+            gain_max=gain_max,
             max_units=max_stages,
             unit_resolver=resolve_stage_units,
             device=device,
@@ -194,6 +213,7 @@ class ScalarBlockGainController(_ScalarUnitGainController):
         momentum (float): SGD momentum.
         weight_decay (float): SGD weight decay.
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
+        gain_max (float): Maximum gain value; gains are in [1 / gain_max, gain_max].
         max_blocks (int | None): Maximum number of blocks to include. None means all blocks.
         device (str | None): Device used for controller parameters and fitting.
         seed (int): Random seed for dataloader shuffling.
@@ -205,6 +225,7 @@ class ScalarBlockGainController(_ScalarUnitGainController):
 
     Raises:
         ValueError: If required hyperparameters are invalid.
+        ValueError: If `gain_max` <= 1.0.
     """
 
     def __init__(
@@ -214,6 +235,7 @@ class ScalarBlockGainController(_ScalarUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
+        gain_max: float = 2.0,
         max_blocks: int | None = None,
         device: str | None = None,
         seed: int = 1,
@@ -225,6 +247,7 @@ class ScalarBlockGainController(_ScalarUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
+            gain_max=gain_max,
             max_units=max_blocks,
             unit_resolver=resolve_block_units,
             device=device,
