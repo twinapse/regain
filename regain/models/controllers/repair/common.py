@@ -25,6 +25,7 @@ from regain.utils import preserve_model_mode_after_eval
 
 __all__ = [
     'BaseUnitGainController',
+    'bounded_positive_gain',
     'build_repair_dataloader',
     'build_unit_gain_hooks',
     'build_sgd_optimizer_and_scheduler',
@@ -192,6 +193,20 @@ def build_unit_gain_hooks(
             gain = gain.to(device=device)
         hooks.append((module, hook_factory(gain)))
     return hooks
+
+
+def bounded_positive_gain(*, raw: torch.Tensor, log_gain_max: float) -> torch.Tensor:
+    """
+    Map unconstrained raw gains to a positive bounded range around 1.0.
+
+    Args:
+        raw (torch.Tensor): Unconstrained raw parameters.
+        log_gain_max (float): Natural log of the maximum gain (> 0).
+
+    Returns:
+        torch.Tensor: Gains in [1 / gain_max, gain_max].
+    """
+    return torch.exp(float(log_gain_max) * torch.tanh(raw))
 
 
 def mean_l2_distance_to_one(*, gains: Mapping[str, torch.Tensor], device: torch.device) -> torch.Tensor:

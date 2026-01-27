@@ -8,12 +8,14 @@ The implementation includes probing/caching to keep channel counts aligned with 
 avoid stale or mismatched parameters when unit structure changes.
 """
 
+import math
 from typing import Any, Callable
 
 import torch
 from torch import nn
 
 from regain.models.controllers.repair.common import BaseUnitGainController
+from regain.models.controllers.repair.common import bounded_positive_gain
 from regain.models.controllers.repair.common import build_unit_gain_hooks
 from regain.models.controllers.repair.common import mean_l2_distance_to_one
 from regain.models.controllers.repair.common import resolve_block_units
@@ -48,16 +50,20 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         *,
         group_size: int = 32,
         unit_resolver: Callable[..., list[tuple[str, nn.Module]]],
+        gain_max: float = 2.0,
         **kwargs,
     ) -> None:
         # Validate group size before initializing.
         if int(group_size) <= 0:
             raise ValueError(f'{type(self).__name__} requires group_size > 0.')
+        if float(gain_max) <= 1.0:
+            raise ValueError(f'{type(self).__name__} requires gain_max > 1.0.')
         super().__init__(**kwargs)
 
         self.group_size = int(group_size)
         self._unit_resolver = unit_resolver
-        self._gains = nn.ParameterDict()
+        self._raw_gains = nn.ParameterDict()
+        self._log_gain_max = float(math.log(float(gain_max)))
         self._channels: dict[str, int] = {}
 
     def _ensure_initialized(self, *, model: nn.Module, device: torch.device, sample_inputs: torch.Tensor) -> None:
@@ -86,10 +92,10 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
             # Drop cached channel counts for removed units.
             if k not in active_keys:
                 self._channels.pop(k, None)
-        for k in list(self._gains.keys()):
+        for k in list(self._raw_gains.keys()):
             # Drop gain parameters for removed units.
             if k not in active_keys:
-                del self._gains[k]
+                del self._raw_gains[k]
 
         needs_probe = False
         # Re-probe when unit membership or module identities change.
@@ -124,9 +130,9 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
             for key, _module in units:
                 c = int(probed.get(key, 0))
                 self._channels[key] = c
-                if c <= 0 and key in self._gains:
+                if c <= 0 and key in self._raw_gains:
                     # Drop stale params if the unit didn't produce a probeable output.
-                    del self._gains[key]
+                    del self._raw_gains[key]
 
         # Ensure parameters exist and have correct group length.
         for key, _module in units:
@@ -139,20 +145,20 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
             num_groups = (c + self.group_size - 1) // self.group_size
 
             # Create parameters for units that are newly added.
-            if key not in self._gains:
-                # Initialize missing group gains to ones.
-                self._gains[key] = nn.Parameter(torch.ones(int(num_groups), device=device))
+            if key not in self._raw_gains:
+                # Initialize missing raw group gains to zeros (gain == 1.0).
+                self._raw_gains[key] = nn.Parameter(torch.zeros(int(num_groups), device=device))
                 continue
 
-            cur = self._gains[key]
+            cur = self._raw_gains[key]
             # Resize when the group count changes.
             if int(cur.numel()) != int(num_groups):
                 # Resize while preserving the overlapping group gains.
-                new_p = torch.ones(int(num_groups), device=device, dtype=cur.dtype)
+                new_p = torch.zeros(int(num_groups), device=device, dtype=cur.dtype)
                 with torch.no_grad():
                     copy_n = min(int(cur.numel()), int(num_groups))
                     new_p[:copy_n].copy_(cur.detach()[:copy_n])
-                self._gains[key] = nn.Parameter(new_p)
+                self._raw_gains[key] = nn.Parameter(new_p)
 
     @staticmethod
     def _probe_unit_channels(
@@ -218,6 +224,11 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         Raises:
             ValueError: If model forward does not return tensor logits.
         """
+        effective_gains = {
+            k: bounded_positive_gain(raw=p, log_gain_max=self._log_gain_max)
+            for k, p in self._raw_gains.items()
+        }
+
         def _make_hook(gain_groups: torch.Tensor):
             def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
                 # Skip non-tensor outputs or unsupported shapes.
@@ -230,7 +241,10 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
                     return out
 
                 needed_groups = (c + self.group_size - 1) // self.group_size
-                g = gain_groups
+                if gain_groups.device != out.device or gain_groups.dtype != out.dtype:
+                    g = gain_groups.to(device=out.device, dtype=out.dtype)
+                else:
+                    g = gain_groups
 
                 # Pad/truncate to match the current number of channel groups.
                 if int(g.numel()) < int(needed_groups):
@@ -252,7 +266,7 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         # Build hook list matching unit keys to grouped gains.
         hooks = build_unit_gain_hooks(
             units=self._units,
-            gains=self._gains,
+            gains=effective_gains,
             device=device,
             hook_factory=_make_hook,
         )
@@ -277,7 +291,11 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         Returns:
             torch.Tensor: Scalar regularization term.
         """
-        return mean_l2_distance_to_one(gains=self._gains, device=device)
+        effective_gains = {
+            k: bounded_positive_gain(raw=p, log_gain_max=self._log_gain_max)
+            for k, p in self._raw_gains.items()
+        }
+        return mean_l2_distance_to_one(gains=effective_gains, device=device)
 
 
 class ChannelStageGainController(_GroupedChannelUnitGainController):
@@ -290,6 +308,7 @@ class ChannelStageGainController(_GroupedChannelUnitGainController):
         momentum (float): SGD momentum.
         weight_decay (float): SGD weight_decay.
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
+        gain_max (float): Maximum gain value; gains are in [1 / gain_max, gain_max].
         max_stages (int | None): Maximum number of stages to include. None means all stages.
         device (str | None): Device used for controller parameters and fitting.
         seed (int): Random seed for dataloader shuffling.
@@ -301,6 +320,7 @@ class ChannelStageGainController(_GroupedChannelUnitGainController):
 
     Raises:
         ValueError: If `group_size` is non-positive.
+        ValueError: If `gain_max` <= 1.0.
     """
 
     def __init__(
@@ -311,6 +331,7 @@ class ChannelStageGainController(_GroupedChannelUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
+        gain_max: float = 2.0,
         max_stages: int | None = None,
         device: str | None = None,
         seed: int = 1,
@@ -323,6 +344,7 @@ class ChannelStageGainController(_GroupedChannelUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
+            gain_max=gain_max,
             max_units=max_stages,
             unit_resolver=resolve_stage_units,
             device=device,
@@ -342,6 +364,7 @@ class ChannelBlockGainController(_GroupedChannelUnitGainController):
         momentum (float): SGD momentum.
         weight_decay (float): SGD weight_decay.
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
+        gain_max (float): Maximum gain value; gains are in [1 / gain_max, gain_max].
         max_blocks (int | None): Maximum number of blocks to include. None means all blocks.
         device (str | None): Device used for controller parameters and fitting.
         seed (int): Random seed for dataloader shuffling.
@@ -353,6 +376,7 @@ class ChannelBlockGainController(_GroupedChannelUnitGainController):
 
     Raises:
         ValueError: If `group_size` is non-positive.
+        ValueError: If `gain_max` <= 1.0.
     """
 
     def __init__(
@@ -363,6 +387,7 @@ class ChannelBlockGainController(_GroupedChannelUnitGainController):
         momentum: float = 0.9,
         weight_decay: float = 0.0,
         l2_reg: float = 0.0,
+        gain_max: float = 2.0,
         max_blocks: int | None = None,
         device: str | None = None,
         seed: int = 1,
@@ -375,6 +400,7 @@ class ChannelBlockGainController(_GroupedChannelUnitGainController):
             momentum=momentum,
             weight_decay=weight_decay,
             l2_reg=l2_reg,
+            gain_max=gain_max,
             max_units=max_blocks,
             unit_resolver=resolve_block_units,
             device=device,

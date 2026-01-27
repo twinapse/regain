@@ -5,6 +5,7 @@ These controllers use a small gating MLP to predict per-unit gains from the curr
 then apply the predicted gains through temporary forward hooks during a gain-conditioned forward pass.
 """
 
+import math
 from typing import Any, Callable
 
 import torch
@@ -13,6 +14,7 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import Dataset
 
 from regain.models.controllers.base import RepairController
+from regain.models.controllers.repair.common import bounded_positive_gain
 from regain.models.controllers.repair.common import build_sgd_optimizer_and_scheduler
 from regain.models.controllers.repair.common import fit_repair_controller
 from regain.models.controllers.repair.common import maybe_correct_outputs
@@ -35,8 +37,8 @@ class _GainGatingMLP(nn.Module):
     Tiny MLP that maps backbone features to per-unit scalar gains.
 
     The gain parameterization is bounded and centered at 1.0:
-        gains = gain_max * sigmoid(raw)
-    so when raw == 0, gains == gain_max / 2. With gain_max=2.0, this yields gains=1.0.
+        gains = exp(log(gain_max) * tanh(raw))
+    so when raw == 0, gains == 1.0.
     """
 
     def __init__(
@@ -56,7 +58,7 @@ class _GainGatingMLP(nn.Module):
             hidden_dim (int): Hidden layer width.
             num_hidden_layers (int): Number of hidden layers (>= 0).
             unit_keys (list[str]): Ordered unit keys; output dimension is len(unit_keys).
-            gain_max (float): Upper bound for gains (gains are in (0, gain_max)).
+            gain_max (float): Upper bound for gains (gains are in [1 / gain_max, gain_max]).
 
         Raises:
             ValueError: If `in_dim`, `hidden_dim`, `num_hidden_layers` or `gain_max` are invalid.
@@ -73,14 +75,15 @@ class _GainGatingMLP(nn.Module):
         # Require a non-negative number of hidden layers.
         if int(num_hidden_layers) < 0:
             raise ValueError('num_hidden_layers must be >= 0.')
-        # Require a positive gain upper bound.
-        if float(gain_max) <= 0.0:
-            raise ValueError('gain_max must be > 0.')
+        # Require a gain upper bound above 1.0.
+        if float(gain_max) <= 1.0:
+            raise ValueError('gain_max must be > 1.0.')
 
         self.in_dim = int(in_dim)
         self.hidden_dim = int(hidden_dim)
         self.num_hidden_layers = int(num_hidden_layers)
         self.gain_max = float(gain_max)
+        self._log_gain_max = float(math.log(float(gain_max)))
 
         self.unit_keys: list[str] = list(unit_keys)
 
@@ -101,7 +104,7 @@ class _GainGatingMLP(nn.Module):
 
         self.out = nn.Linear(int(feat_out_dim), len(self.unit_keys))
 
-        # Initialize to produce raw == 0 => gains == 1 when gain_max == 2.
+        # Initialize to produce raw == 0 => gains == 1.
         with torch.no_grad():
             self.out.weight.zero_()
             self.out.bias.zero_()
@@ -158,10 +161,10 @@ class _GainGatingMLP(nn.Module):
         Returns:
             torch.Tensor: Gains shaped `(batch, num_units)`.
         """
-        # Predict bounded gains with a sigmoid projection.
+        # Predict bounded gains centered at 1.0.
         h = self.feature(feats)
         raw = self.out(h)
-        return self.gain_max * torch.sigmoid(raw)
+        return bounded_positive_gain(raw=raw, log_gain_max=self._log_gain_max)
 
 
 class _InputConditionedUnitGainController(RepairController):
@@ -202,7 +205,7 @@ class _InputConditionedUnitGainController(RepairController):
             unit_resolver (Callable[..., list[tuple[str, nn.Module]]]): Unit resolver for the controller.
             hidden_dim (int): Hidden width of the gating MLP.
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
-            gain_max (float): Maximum gain value (gains in (0, gain_max)).
+            gain_max (float): Maximum gain value (gains in [1 / gain_max, gain_max]).
             device (str | None): Device used for controller parameters and fitting.
             seed (int): Random seed.
             lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
@@ -226,9 +229,9 @@ class _InputConditionedUnitGainController(RepairController):
         # Require a non-negative hidden layer count.
         if int(num_hidden_layers) < 0:
             raise ValueError('num_hidden_layers must be >= 0.')
-        # Require a positive gain upper bound.
-        if float(gain_max) <= 0.0:
-            raise ValueError('gain_max must be > 0.')
+        # Require a gain upper bound above 1.0.
+        if float(gain_max) <= 1.0:
+            raise ValueError('gain_max must be > 1.0.')
 
         # Store hyperparameters and configure the controller device.
         self.lr = float(lr)
@@ -565,7 +568,7 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
             max_stages (int | None): Maximum number of stages to include. None means all stages.
             hidden_dim (int): Hidden width of the gating MLP.
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
-            gain_max (float): Maximum gain value (gains in (0, gain_max)).
+            gain_max (float): Maximum gain value (gains in [1 / gain_max, gain_max]).
             device (str | None): Device used for controller parameters and fitting.
             seed (int): Random seed.
             lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
@@ -628,7 +631,7 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
             max_blocks (int | None): Maximum number of blocks to include. None means all blocks.
             hidden_dim (int): Hidden width of the gating MLP.
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
-            gain_max (float): Maximum gain value (gains in (0, gain_max)).
+            gain_max (float): Maximum gain value (gains in [1 / gain_max, gain_max]).
             device (str | None): Device used for controller parameters and fitting.
             seed (int): Random seed.
             lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
