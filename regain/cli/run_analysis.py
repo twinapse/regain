@@ -4,9 +4,9 @@ CLI entrypoint for running analysis.
 It consumes metrics logged by `regain/cli/run_experiment.py`.
 
 Examples:
-  python -m regain.cli.run_analysis all --experiment REGAIN --out ./analysis_out
-  python -m regain.cli.run_analysis curves --experiment REGAIN --out ./analysis_out
-  python -m regain.cli.run_analysis frontier --experiment REGAIN --out ./analysis_out --perf-key rho_mean_avg
+  python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results
+  python -m regain.cli.run_analysis curves --experiment experiment_1 --output-dir ./analysis_results
+  python -m regain.cli.run_analysis frontier --experiment experiment_1 --output-dir ./analysis_results --perf-key rho_mean_avg
 """
 
 import argparse
@@ -16,6 +16,7 @@ from typing import Any
 
 from regain.analysis.collectors import collect_experiment_tables
 from regain.analysis.curves import write_recoverability_curves
+from regain.analysis.exports import export_analysis_json
 from regain.analysis.frontier import write_efficiency_frontiers
 from regain.analysis.plotting import plot_analysis_outputs
 from regain.utils import get_logger
@@ -33,7 +34,7 @@ def _parse_list(value: str | None) -> list[str] | None:
         value (str | None): Input string.
 
     Returns:
-        list | None: Parsed list or None.
+        list[str] | None: Parsed list or None.
     """
     if value is None:
         return None
@@ -51,7 +52,7 @@ def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
         path (Path): Path to CSV file.
 
     Returns:
-        list: List of rows as dicts.
+        list[dict[str, Any]]: List of rows as dicts.
     """
     if not path.exists():
         return []
@@ -85,17 +86,23 @@ def main() -> None:
     Run analysis subcommands for collected experiment metrics.
 
     Returns:
-        None: Does not return a value.
+        None
     """
     logger = get_logger()
 
     p = argparse.ArgumentParser(prog='regain-analysis-tool')
     p.add_argument('--experiment', type=str, required=True, help='MLflow experiment name or id.')
-    p.add_argument('--out', type=str, required=True, help='Output directory.')
-    p.add_argument('--tracking-uri', type=str, default=None, help='Optional MLflow tracking URI.')
+    p.add_argument(
+        '--output-dir',
+        type=str,
+        required=True,
+        help='Root output directory (experiment subdirectory will be created under this path).',
+    )
+    p.add_argument('--export-dir', type=str, default=None, help='Path to the directory for exportable analysis outputs.')
+    p.add_argument('--tracking-uri', type=str, default=None, help='MLflow tracking URI.')
     p.add_argument('--include-controllers', type=str, default=None, help='Comma-separated allowlist for controller_name.')
     p.add_argument('--exclude-controllers', type=str, default=None, help='Comma-separated denylist for controller_name.')
-    p.add_argument('--max-runs', type=int, default=None, help='Optional max number of parent runs.')
+    p.add_argument('--max-runs', type=int, default=None, help='Max number of parent runs.')
     p.add_argument('--default-num-classes', type=int, default=None, help='Fallback num classes when not logged.')
     p.add_argument('--show-plots', action='store_true', help='Show plots.')
     p.add_argument('--save-plots', action='store_true', help='Save plots.')
@@ -109,15 +116,29 @@ def main() -> None:
 
     args = p.parse_args()
 
-    out_dir = Path(args.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    output_root = Path(args.output_dir)
+    experiment_dir = output_root / str(args.experiment)
+    experiment_dir.mkdir(parents=True, exist_ok=True)
 
     include_controllers = _parse_list(args.include_controllers)
     exclude_controllers = _parse_list(args.exclude_controllers)
 
+    export_path: Path | None = None
+    if args.export_dir is not None:
+        export_path = Path(args.export_dir) / str(args.experiment) / 'analysis.json'
+        if export_path.exists():
+            logger.error(
+                'Export already exists at %s. Remove it or choose a different --export-dir.',
+                export_path,
+            )
+            raise SystemExit(1)
+
+    runs_table: list[dict[str, Any]] = []
+    experiences_table: list[dict[str, Any]] = []
+
     # Collect (always required for downstream steps).
     if args.cmd in ['collect', 'all', 'curves', 'frontier']:
-        tables_dir = out_dir / 'tables'
+        tables_dir = experiment_dir / 'tables'
         runs_table, experiences_table = collect_experiment_tables(
             experiment=str(args.experiment),
             out_dir=tables_dir,
@@ -128,44 +149,69 @@ def main() -> None:
             require_finished=True,
             default_num_classes=args.default_num_classes,
         )
-        logger.warning(f'Collected tables under: {out_dir / "tables"}')
+        logger.info(f'Collected tables under: {experiment_dir / "tables"}')
 
     # Recoverability curves.
     if args.cmd in ['curves', 'all']:
-        curves_dir = out_dir / 'curves'
+        curves_dir = experiment_dir / 'curves'
         curve_path, task_path = write_recoverability_curves(
             runs_table=runs_table,
             experiences_table=experiences_table,
             out_dir=curves_dir,
         )
-        logger.warning(f'Curves written: {curve_path}, {task_path}')
+        logger.info(f'Curves written: {curve_path}, {task_path}')
 
     # Efficiency frontier.
     if args.cmd in ['frontier', 'all']:
         # Frontier is computed from aggregated curve points.
-        curves_dir = out_dir / 'curves'
+        curves_dir = experiment_dir / 'curves'
         curve_csv = curves_dir / 'recoverability_curve.csv'
         curve_rows = _read_csv_rows(curve_csv)
 
-        frontier_dir = out_dir / 'frontier'
+        frontier_dir = experiment_dir / 'frontier'
         points_path, pareto_path = write_efficiency_frontiers(
             curve_rows=curve_rows,
             out_dir=frontier_dir,
             perf_key=str(getattr(args, 'perf_key', 'rho_mean_avg')),
         )
-        logger.warning(f'Frontier written: {points_path}, {pareto_path}')
+        logger.info(f'Frontier written: {points_path}, {pareto_path}')
 
     # Optional visualization / plot export.
     mode = _plot_mode(show=bool(args.show_plots), save=bool(args.save_plots))
     if mode != 'none' and args.cmd in ['curves', 'frontier', 'all']:
         plot_perf_key = str(getattr(args, 'perf_key', 'rho_mean_avg'))
         saved = plot_analysis_outputs(
-            analysis_out=out_dir,
+            analysis_out=experiment_dir,
             perf_key=plot_perf_key,
             mode=mode,
         )
         if saved:
-            logger.warning(f'Plots written under: {out_dir / "plots"}')
+            logger.info(f'Plots written under: {experiment_dir / "plots"}')
+
+    if args.export_dir is not None:
+        if export_path is None:
+            export_path = Path(args.export_dir) / str(args.experiment) / 'analysis.json'
+        try:
+            export_analysis_json(
+                experiment=str(args.experiment),
+                experiment_dir=experiment_dir,
+                export_path=export_path,
+                tracking_uri=args.tracking_uri,
+                runs_table=runs_table,
+                experiences_table=experiences_table,
+                include_controllers=include_controllers,
+                exclude_controllers=exclude_controllers,
+                max_runs=args.max_runs,
+                default_num_classes=args.default_num_classes,
+                require_finished=True,
+            )
+            print(f'Analysis export written to: {export_path}')
+        except FileExistsError:
+            logger.error(
+                'Export already exists at %s. Remove it or choose a different --export-dir.',
+                export_path,
+            )
+            raise SystemExit(1)
 
 
 if __name__ == '__main__':

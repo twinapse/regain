@@ -61,6 +61,14 @@ python -m regain.cli.run_experiment --config_file ./config/experiment.yaml
 
 This produces MLflow runs under your configured tracking URI (or the default local MLflow store).
 
+To export all MLflow runs in the experiment to CSVs (one row per run, written to 
+`./<export_dir>/<experiment>/run_metadata.csv`, `./<export_dir>/<experiment>/run_params.csv`, and 
+`./<export_dir>/<experiment>/run_metrics.csv`, fails if they already exist):
+
+```bash
+python -m regain.cli.run_experiment --config_file ./config/experiment.yaml --export-dir ./exports
+```
+
 ### 2) Analyze logged runs (write artifacts, optionally plot)
 
 `run_analysis` has subcommands:
@@ -72,41 +80,45 @@ This produces MLflow runs under your configured tracking URI (or the default loc
 
 Common flags:
 
-* `--experiment`: MLflow experiment name or id (e.g. `REGAIN`)
-* `--out`: output directory (analysis artifacts are written here)
-* `--tracking-uri`: optional MLflow tracking URI
+* `--experiment`: MLflow experiment name or id (e.g. `experiment_1`)
+* `--output-dir`: output directory root (experiment subdirectory is created under this path)
+* `--export-dir`: export directory root (writes `<export-dir>/<experiment>/analysis.json`, fails if it already exists)
+* `--tracking-uri`: MLflow tracking URI
 * `--show-plots`: display plots interactively
-* `--save-plots`: save plots to `<out>/plots`
+* `--save-plots`: save plots to `<output-dir>/<experiment>/plots`
 * `--perf-key`: metric key to maximize for the frontier and plot in curves
 
 Examples:
 
 ```bash
 # Step-by-step
-python -m regain.cli.run_analysis collect  --experiment REGAIN --out ./analysis_out
-python -m regain.cli.run_analysis curves   --experiment REGAIN --out ./analysis_out --show-plots
-python -m regain.cli.run_analysis frontier --experiment REGAIN --out ./analysis_out --perf-key rho_mean_avg --save-plots
+python -m regain.cli.run_analysis collect  --experiment experiment_1 --output-dir ./analysis_results
+python -m regain.cli.run_analysis curves   --experiment experiment_1 --output-dir ./analysis_results --show-plots
+python -m regain.cli.run_analysis frontier --experiment experiment_1 --output-dir ./analysis_results --perf-key rho_mean_avg --save-plots
 
 # One-shot (recommended for most use)
-python -m regain.cli.run_analysis all --experiment REGAIN --out ./analysis_out --show-plots --save-plots
+python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results --show-plots --save-plots
+
+# Export a self-contained JSON bundle
+python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results --export-dir ./exports
 ```
 
 Outputs are organized under:
 
-* `./analysis_out/tables/` (from `collect`)
-* `./analysis_out/curves/` (from `curves`)
-* `./analysis_out/frontier/` (from `frontier`)
-* `./analysis_out/plots/` (when `--save-plots` is used)
+* `./analysis_results/<experiment>/tables/` (from `collect`)
+* `./analysis_results/<experiment>/curves/` (from `curves`)
+* `./analysis_results/<experiment>/frontier/` (from `frontier`)
+* `./analysis_results/<experiment>/plots/` (when `--save-plots` is used)
 
 ### Plot later (if you didn’t plot during analysis)
 
 If you ran analysis without `--show-plots` / `--save-plots`, you can render plots afterwards from the saved CSVs:
 
 ```bash
-python -m regain.cli.generate_plots --analysis-out ./analysis_out --show
-python -m regain.cli.generate_plots --analysis-out ./analysis_out --save
-python -m regain.cli.generate_plots --analysis-out ./analysis_out --save --perf-key a_ctrl_mean_avg
-python -m regain.cli.generate_plots --analysis-out ./analysis_out --show --save --save-dir ./plots
+python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --show
+python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save
+python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save --perf-key a_ctrl_mean_avg
+python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --show --save --save-dir ./plots
 ```
 
 ## Code style and formatting

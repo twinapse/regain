@@ -5,8 +5,8 @@ The analysis pipeline is intentionally table-first (CSV/JSON artifacts).
 This module provides optional visualization of those artifacts using `matplotlib`.
 
 Typical usage:
-  - `python -m regain.cli.run_analysis all --experiment REGAIN --out ./analysis_out --show-plots`
-  - `python -m regain.cli.generate_plots --analysis-out ./analysis_out --save`
+  - `python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results --show-plots`
+  - `python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save`
 """
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -52,7 +52,7 @@ def plot_analysis_outputs(
         perf_key (str): Performance key to plot for the recoverability curve.
         mode (str): One of: `none`, `show`, `save`, `both`.
         save_dir (str | Path, optional): Directory to save PNG files.
-                                         Defaults to `<analysis_out>/plots` when `analysis_out` is provided.
+                                         Defaults to `<analysis_dir>/plots` when an analysis directory is provided.
 
     Returns:
         list: List of saved plot paths (empty if not saving).

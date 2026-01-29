@@ -4,6 +4,8 @@ CLI entrypoint for running experiments from YAML configuration and logging metri
 
 import argparse
 import inspect
+from pathlib import Path
+import sys
 
 # WARNING: Don't import non-standard modules at the top-level to ensure prerequisites first.
 
@@ -89,10 +91,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     Build the CLI argument parser for standalone execution.
 
     Returns:
-        Configured ArgumentParser.
+        argparse.ArgumentParser: Configured ArgumentParser.
     """
     parser = argparse.ArgumentParser(description='Run a REGAIN experiment')
     parser.add_argument('--config_file', required=True, help='Path to experiment config YAML')
+    parser.add_argument('--export-dir', type=str, default=None, help='Path to the directory for exportable run outputs.')
     return parser
 
 
@@ -105,6 +108,7 @@ def main() -> None:
 
     # Import `regain` modules after prerequisites are ensured
     from regain.experiments.core import run_experiment
+    from regain.experiments.exports import export_runs_csv
     from regain.experiments.utils import load_experiment_config
 
     # Parse CLI arguments
@@ -114,8 +118,53 @@ def main() -> None:
     # Load the experiment config
     experiment_config = load_experiment_config(args.config_file)
 
+    # Prepare export paths if requested
+    metadata_path: Path | None = None
+    params_path: Path | None = None
+    metrics_path: Path | None = None
+    if args.export_dir is not None:
+        export_root = Path(args.export_dir) / experiment_config.experiment_name
+        metadata_path = export_root / 'run_metadata.csv'
+        params_path = export_root / 'run_params.csv'
+        metrics_path = export_root / 'run_metrics.csv'
+        existing_paths = [
+            path for path in (metadata_path, params_path, metrics_path) if path.exists()
+        ]
+        if existing_paths:
+            existing_list = ', '.join(str(path) for path in existing_paths)
+            message = (
+                f'Export already exists at {existing_list}. '
+                'Remove it or choose a different --export-dir.'
+            )
+            print(message, file=sys.stderr)
+            sys.exit(1)
+
     # Run the experiment
     run_experiment(experiment_config=experiment_config)
+
+    # Export runs to CSV if requested
+    if args.export_dir is not None:
+        if metadata_path is None or params_path is None or metrics_path is None:
+            export_root = Path(args.export_dir) / experiment_config.experiment_name
+            metadata_path = export_root / 'run_metadata.csv'
+            params_path = export_root / 'run_params.csv'
+            metrics_path = export_root / 'run_metrics.csv'
+        try:
+            export_runs_csv(
+                experiment=experiment_config.experiment_name,
+                metadata_path=metadata_path,
+                params_path=params_path,
+                metrics_path=metrics_path,
+                tracking_uri=experiment_config.mlflow_tracking_uri,
+            )
+            print(
+                'Run exports written to: '
+                f'{metadata_path}, {params_path}, {metrics_path}'
+            )
+        except FileExistsError as exc:
+            message = f'{exc}. Remove it or choose a different --export-dir.'
+            print(message, file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == '__main__':
