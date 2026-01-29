@@ -39,6 +39,11 @@ See [docs/methods.md](docs/methods.md) for implementation notes on specific meth
 See [docs/experimental-framework.md](docs/experimental-framework.md) for details on the benchmarks and metrics used in 
 the experiments.
 
+## Debugging
+
+See [docs/debugging.md](docs/debugging.md) for details on the repair-controller debug instrumentation, MLflow metrics,
+and health score diagnostics.
+
 ## CLI usage
 
 The typical workflow is:

@@ -134,6 +134,7 @@ class ExperimentConfig:
         device: Device identifier for training.
         mlflow_tracking_uri: Optional MLflow tracking URI.
         dataset_path: Optional dataset root to pass to the scenario builder.
+        debug: Whether to enable debug instrumentation for repair controllers.
     """
 
     experiment_name: str
@@ -150,6 +151,7 @@ class ExperimentConfig:
     eval_every: int = -1
     seed: int = 1
     deterministic: bool = False
+    debug: bool = False
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     mlflow_tracking_uri: str | None = None
     dataset_path: str | Path | None = None
@@ -302,6 +304,7 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
         eval_every=payload.get('eval_every', 0),
         seed=payload.get('seed', 1),
         deterministic=payload.get('deterministic', False),
+        debug=payload.get('debug', False),
         device=_resolve_device(payload.get('device')),
         mlflow_tracking_uri=payload.get('mlflow_tracking_uri'),
         dataset_path=dataset_path,

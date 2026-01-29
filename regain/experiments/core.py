@@ -35,6 +35,7 @@ from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.avalanche_utils.plugins import SeenClassesMaskPlugin
 from regain.avalanche_utils.scenarios import get_scenario_builder
 from regain.avalanche_utils.scenarios import ScenarioBuilder
+from regain.debug.avalanche_utils import DebugRepairControllerPlugin
 from regain.experiments.utils import ControllerConfig
 from regain.experiments.utils import count_trainable_parameters
 from regain.experiments.utils import enable_determinism
@@ -275,6 +276,10 @@ def _build_controller_plugin(
     fit_after_experience: bool | None = None,
     repair_epochs: int | None = None,
     repair_batch_size: int | None = None,
+    debug: bool = False,
+    debug_epochs: int | None = None,
+    debug_experiences: int | None = None,
+    debug_seed: int | None = None,
 ) -> ControllerPlugin:
     """
     Build a controller plugin.
@@ -284,6 +289,10 @@ def _build_controller_plugin(
         fit_after_experience (bool | None): Whether to fit after each experience (only for repair controllers).
         repair_epochs (int | None): Number of repair epochs (only for repair controllers).
         repair_batch_size (int | None): Repair batch size (only for repair controllers).
+        debug (bool): Whether to use the debug repair controller plugin.
+        debug_epochs (int | None): Epochs per experience used only to compute debug metric step values.
+        debug_experiences (int | None): Total number of experiences used only to compute debug metric step values.
+        debug_seed (int | None): Seed used for debug dataloader ordering (debug-only).
 
     Returns:
         ControllerPlugin: Controller plugin instance.
@@ -298,12 +307,25 @@ def _build_controller_plugin(
                 'and `repair_batch_size` to be specified.'
             )
         # Build the repair controller plugin
-        controller_plugin = RepairControllerPlugin(
-            controller=controller,
-            fit_after_experience=fit_after_experience,
-            repair_epochs=repair_epochs,
-            repair_batch_size=repair_batch_size,
-        )
+        if debug:
+            if debug_epochs is None or debug_experiences is None or debug_seed is None:
+                raise ValueError('Debug controller plugin requires debug_epochs, debug_experiences, debug_seed.')
+            controller_plugin = DebugRepairControllerPlugin(
+                controller=controller,
+                fit_after_experience=fit_after_experience,
+                repair_epochs=repair_epochs,
+                repair_batch_size=repair_batch_size,
+                debug_epochs=debug_epochs,
+                debug_experiences=debug_experiences,
+                debug_seed=debug_seed,
+            )
+        else:
+            controller_plugin = RepairControllerPlugin(
+                controller=controller,
+                fit_after_experience=fit_after_experience,
+                repair_epochs=repair_epochs,
+                repair_batch_size=repair_batch_size,
+            )
     else:
         controller_plugin = None
     return controller_plugin
@@ -317,6 +339,7 @@ def _log_run_params(
     optimizer_params: dict[str, object],
     controller_model_param_count: int | None = None,
     num_classes: int | None = None,
+    debug_skip_reason: str | None = None,
 ) -> None:
     """
     Log common parameters to MLflow for a run.
@@ -328,6 +351,7 @@ def _log_run_params(
         optimizer_params: Effective optimizer parameters.
         controller_model_param_count: Number of trainable parameters in the controller model (if any).
         num_classes: Total number of benchmark classes (optional).
+        debug_skip_reason: Optional debug skip reason (debug-only).
     """
     # Basic run params
     run_params = {
@@ -347,6 +371,7 @@ def _log_run_params(
         'optimizer_params': json.dumps(optimizer_params, default=str),
         'seed': experiment_config.seed,
         'deterministic': experiment_config.deterministic,
+        'debug': experiment_config.debug,
         'device': experiment_config.device,
     }
 
@@ -369,6 +394,10 @@ def _log_run_params(
     # Benchmark metadata
     if num_classes is not None:
         run_params['num_classes'] = int(num_classes)
+
+    # Debug metadata
+    if debug_skip_reason is not None:
+        run_params['debug_skip_reason'] = debug_skip_reason
 
     # Controller config
     if run_config.controller is not None:
@@ -431,6 +460,11 @@ def _train_and_evaluate_strategy(
                 replay_memory_size=experiment_config.replay_memory_size,
             )
 
+            # Check debug mode (supported only for repair controllers)
+            debug_skip_reason: str | None = None
+            if experiment_config.debug and not isinstance(controller, RepairController):
+                debug_skip_reason = 'no_repair_controller'
+
             # Validate strategy-controller compatibility
             if isinstance(controller, PreventionController):
                 # Check if the controller requires a replay-based strategy
@@ -486,6 +520,10 @@ def _train_and_evaluate_strategy(
                     fit_after_experience=experiment_config.repair_after_experience,
                     repair_epochs=controller_config.repair_epochs or experiment_config.num_epochs,
                     repair_batch_size=controller_config.repair_batch_size or experiment_config.train_batch_size,
+                    debug=experiment_config.debug,
+                    debug_epochs=experiment_config.num_epochs,
+                    debug_experiences=experiment_config.num_experiences,
+                    debug_seed=experiment_config.seed,
                 )
             else:
                 controller_plugin: ControllerPlugin | None = None
@@ -548,6 +586,7 @@ def _train_and_evaluate_strategy(
                 optimizer_params=optimizer_params,
                 controller_model_param_count=controller_model_param_count,
                 num_classes=benchmark.n_classes,
+                debug_skip_reason=debug_skip_reason,
             )
 
             # Train and evaluate the strategy

@@ -83,6 +83,9 @@ We record accuracies under two different “label space” regimes:
 - Normalization: **BatchNorm** (standard ResNet-18 by default)
 - Classifier head: linear layer to **100** logits (single head)
 
+> ℹ️ **Class label invariant:** in this single-head setup, logit index `c` corresponds to global class ID `c` (class IDs
+> are contiguous from 0), and downstream analyses/controllers are expected to preserve this ordering.
+
 ### Pretraining
 - Backbone initialization: **random initialization (no pretraining)**
 
