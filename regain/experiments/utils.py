@@ -10,6 +10,7 @@ import torch
 from torch import nn
 import yaml
 
+from regain.mlflow_utils import set_sqlite_tracking_uri
 from regain.registry import get_controller_path
 from regain.registry import get_scenario_builder_path
 
@@ -132,7 +133,7 @@ class ExperimentConfig:
         seed: Random seed.
         deterministic: Whether to enforce deterministic PyTorch behavior.
         device: Device identifier for training.
-        mlflow_tracking_uri: Optional MLflow tracking URI.
+        mlflow_tracking_uri: Optional MLflow tracking URI or filesystem path (SQLite only).
         dataset_path: Optional dataset root to pass to the scenario builder.
         debug: Whether to enable debug instrumentation for repair controllers.
     """
@@ -169,13 +170,12 @@ def init_mlflow(
     Args:
         experiment_name: Name of the MLflow experiment.
         run_name: Optional run name.
-        tracking_uri: Optional tracking URI (e.g., local folder, remote server).
+        tracking_uri: Optional tracking URI or filesystem path (SQLite only).
 
     Yields:
         Active MLflow run object.
     """
-    if tracking_uri is not None:
-        mlflow.set_tracking_uri(tracking_uri)
+    set_sqlite_tracking_uri(tracking_uri=tracking_uri)
     mlflow.set_experiment(experiment_name)
     with mlflow.start_run(run_name=run_name) as run:
         yield run

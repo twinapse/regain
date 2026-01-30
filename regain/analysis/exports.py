@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from regain.mlflow_utils import resolve_sqlite_tracking_uri
+
 __all__ = [
     'export_analysis_json',
 ]
@@ -101,7 +103,7 @@ def export_analysis_json(
         experiment (str): MLflow experiment name or id.
         experiment_dir (Path): Analysis output directory for a single experiment.
         export_path (Path): Output JSON path.
-        tracking_uri (str | None): Optional MLflow tracking URI.
+        tracking_uri (str | None): Optional MLflow tracking URI or filesystem path (SQLite only).
         runs_table (list[dict[str, Any]]): Table rows for runs.
         experiences_table (list[dict[str, Any]]): Table rows for experiences.
         include_controllers (list[str] | None): Parsed controller allowlist.
@@ -116,7 +118,7 @@ def export_analysis_json(
     Raises:
         FileExistsError: If the export path already exists.
         OSError: If writing the export file fails.
-        ValueError: If the export payload cannot be serialized.
+        ValueError: If the tracking URI is not SQLite or the export payload cannot be serialized.
     """
     curves_dir = experiment_dir / 'curves'
     frontier_dir = experiment_dir / 'frontier'
@@ -126,6 +128,7 @@ def export_analysis_json(
     frontier_pareto_path = frontier_dir / 'frontier_pareto.csv'
 
     missing_sections: list[str] = []
+    resolved_tracking_uri = resolve_sqlite_tracking_uri(tracking_uri=tracking_uri)
 
     def _read_section(path: Path, name: str) -> list[dict[str, Any]]:
         if path.exists():
@@ -141,7 +144,7 @@ def export_analysis_json(
         'generated_at_utc': datetime.now(timezone.utc).isoformat(),
         'mlflow': {
             'experiment': str(experiment),
-            'tracking_uri': tracking_uri,
+            'tracking_uri': resolved_tracking_uri,
             'include_controllers': include_controllers,
             'exclude_controllers': exclude_controllers,
             'max_runs': max_runs,

@@ -59,7 +59,9 @@ Provide a YAML config and run:
 python -m regain.cli.run_experiment --config_file ./config/experiment.yaml
 ```
 
-This produces MLflow runs under your configured tracking URI (or the default local MLflow store).
+This produces MLflow runs under your configured SQLite tracking URI (or the default `./mlflow.db` SQLite store).
+If you set `mlflow_tracking_uri` in the YAML, it must be a SQLite URI (e.g., `sqlite:///path/to/mlflow.db`) or a
+filesystem path to a `.db` file.
 
 To export all MLflow runs in the experiment to CSVs (one row per run, written to 
 `./<export_dir>/<experiment>/run_metadata.csv`, `./<export_dir>/<experiment>/run_params.csv`, and 
@@ -83,7 +85,7 @@ Common flags:
 * `--experiment`: MLflow experiment name or id (e.g. `experiment_1`)
 * `--output-dir`: output directory root (experiment subdirectory is created under this path)
 * `--export-dir`: export directory root (writes `<export-dir>/<experiment>/analysis.json`, fails if it already exists)
-* `--tracking-uri`: MLflow tracking URI
+* `--tracking-uri`: MLflow tracking URI or filesystem path (SQLite only)
 * `--show-plots`: display plots interactively
 * `--save-plots`: save plots to `<output-dir>/<experiment>/plots`
 * `--perf-key`: metric key to maximize for the frontier and plot in curves

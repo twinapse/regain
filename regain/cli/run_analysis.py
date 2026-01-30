@@ -99,7 +99,12 @@ def main() -> None:
         help='Root output directory (experiment subdirectory will be created under this path).',
     )
     p.add_argument('--export-dir', type=str, default=None, help='Path to the directory for exportable analysis outputs.')
-    p.add_argument('--tracking-uri', type=str, default=None, help='MLflow tracking URI.')
+    p.add_argument(
+        '--tracking-uri',
+        type=str,
+        default=None,
+        help='MLflow tracking URI or filesystem path (SQLite only).',
+    )
     p.add_argument('--include-controllers', type=str, default=None, help='Comma-separated allowlist for controller_name.')
     p.add_argument('--exclude-controllers', type=str, default=None, help='Comma-separated denylist for controller_name.')
     p.add_argument('--max-runs', type=int, default=None, help='Max number of parent runs.')
