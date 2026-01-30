@@ -2,8 +2,8 @@
 Avalanche-facing debug utilities for repair controllers.
 """
 
-import copy
 from collections.abc import Mapping
+import copy
 from typing import Any
 
 from avalanche.training.templates import BaseTemplate
