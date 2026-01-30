@@ -131,12 +131,6 @@ def main() -> None:
     export_path: Path | None = None
     if args.export_dir is not None:
         export_path = Path(args.export_dir) / str(args.experiment) / 'analysis.json'
-        if export_path.exists():
-            logger.error(
-                'Export already exists at %s. Remove it or choose a different --export-dir.',
-                export_path,
-            )
-            raise SystemExit(1)
 
     runs_table: list[dict[str, Any]] = []
     experiences_table: list[dict[str, Any]] = []
@@ -196,27 +190,20 @@ def main() -> None:
     if args.export_dir is not None:
         if export_path is None:
             export_path = Path(args.export_dir) / str(args.experiment) / 'analysis.json'
-        try:
-            export_analysis_json(
-                experiment=str(args.experiment),
-                experiment_dir=experiment_dir,
-                export_path=export_path,
-                tracking_uri=args.tracking_uri,
-                runs_table=runs_table,
-                experiences_table=experiences_table,
-                include_controllers=include_controllers,
-                exclude_controllers=exclude_controllers,
-                max_runs=args.max_runs,
-                default_num_classes=args.default_num_classes,
-                require_finished=True,
-            )
-            print(f'Analysis export written to: {export_path}')
-        except FileExistsError:
-            logger.error(
-                'Export already exists at %s. Remove it or choose a different --export-dir.',
-                export_path,
-            )
-            raise SystemExit(1)
+        export_analysis_json(
+            experiment=str(args.experiment),
+            experiment_dir=experiment_dir,
+            export_path=export_path,
+            tracking_uri=args.tracking_uri,
+            runs_table=runs_table,
+            experiences_table=experiences_table,
+            include_controllers=include_controllers,
+            exclude_controllers=exclude_controllers,
+            max_runs=args.max_runs,
+            default_num_classes=args.default_num_classes,
+            require_finished=True,
+        )
+        print(f'Analysis export written to: {export_path}')
 
 
 if __name__ == '__main__':

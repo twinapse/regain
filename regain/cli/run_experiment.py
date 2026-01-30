@@ -127,17 +127,6 @@ def main() -> None:
         metadata_path = export_root / 'run_metadata.csv'
         params_path = export_root / 'run_params.csv'
         metrics_path = export_root / 'run_metrics.csv'
-        existing_paths = [
-            path for path in (metadata_path, params_path, metrics_path) if path.exists()
-        ]
-        if existing_paths:
-            existing_list = ', '.join(str(path) for path in existing_paths)
-            message = (
-                f'Export already exists at {existing_list}. '
-                'Remove it or choose a different --export-dir.'
-            )
-            print(message, file=sys.stderr)
-            sys.exit(1)
 
     # Run the experiment
     run_experiment(experiment_config=experiment_config)

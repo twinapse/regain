@@ -109,7 +109,7 @@ def _write_experiment_meta(*, experiment: Experiment, output_dir: Path) -> None:
     """
     experiment_dict = dict(experiment)
     experiment_dict['experiment_id'] = str(experiment.experiment_id)
-    write_yaml(str(output_dir), 'meta.yaml', experiment_dict)
+    write_yaml(str(output_dir), 'meta.yaml', experiment_dict, overwrite=True)
 
 
 def export_runs_csv(
@@ -123,6 +123,8 @@ def export_runs_csv(
     """
     Export all MLflow runs for an experiment into CSV files and write meta.yaml.
 
+    If export files already exist, they are overwritten to capture the latest snapshot/state.
+
     Args:
         experiment (str): MLflow experiment name or id.
         metadata_path (Path): Output CSV path for metadata.
@@ -134,7 +136,6 @@ def export_runs_csv(
         None
 
     Raises:
-        FileExistsError: If an export path already exists.
         OSError: If writing a CSV fails.
         ValueError: If the tracking URI is not SQLite or the experiment cannot be resolved.
     """
@@ -162,7 +163,8 @@ def export_runs_csv(
     parent_metric_keys: set[str] = set()
 
     for run in all_runs:
-        rows.append(_build_run_columns(run=run))
+        row = _build_run_columns(run=run)
+        rows.append(row)
         parent_param_keys.update(run.data.params.keys())
         parent_metric_keys.update(run.data.metrics.keys())
 
@@ -170,14 +172,6 @@ def export_runs_csv(
     reserved_keys = {'run_id', 'run_name', 'parent_run_id', 'status', 'start_time', 'end_time'}
     param_columns = sorted(key for key in parent_param_keys if key not in reserved_keys)
     metric_columns = sorted(key for key in parent_metric_keys if key not in reserved_keys)
-
-    meta_path = metadata_path.parent / 'meta.yaml'
-    existing_paths = [
-        path for path in (metadata_path, params_path, metrics_path, meta_path) if path.exists()
-    ]
-    if existing_paths:
-        existing_list = ', '.join(str(path) for path in existing_paths)
-        raise FileExistsError(f'Export artifacts already exist: {existing_list}')
 
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     params_path.parent.mkdir(parents=True, exist_ok=True)

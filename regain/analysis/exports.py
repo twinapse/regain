@@ -99,6 +99,8 @@ def export_analysis_json(
     """
     Write a self-contained JSON bundle of analysis outputs and inputs.
 
+    If the export path already exists, it is overwritten to capture the latest snapshot/state.
+
     Args:
         experiment (str): MLflow experiment name or id.
         experiment_dir (Path): Analysis output directory for a single experiment.
@@ -116,7 +118,6 @@ def export_analysis_json(
         None
 
     Raises:
-        FileExistsError: If the export path already exists.
         OSError: If writing the export file fails.
         ValueError: If the tracking URI is not SQLite or the export payload cannot be serialized.
     """
@@ -173,9 +174,6 @@ def export_analysis_json(
 
     if missing_sections:
         export_payload['missing_sections'] = missing_sections
-
-    if export_path.exists():
-        raise FileExistsError(f'Export JSON already exists: {export_path}')
 
     export_path.parent.mkdir(parents=True, exist_ok=True)
     with export_path.open('w', encoding='utf-8') as f:

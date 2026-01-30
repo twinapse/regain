@@ -65,7 +65,7 @@ filesystem path to a `.db` file.
 
 To export all MLflow runs in the experiment to CSVs (one row per run, written to 
 `./<export_dir>/<experiment>/run_metadata.csv`, `./<export_dir>/<experiment>/run_params.csv`, and 
-`./<export_dir>/<experiment>/run_metrics.csv`, fails if they already exist):
+`./<export_dir>/<experiment>/run_metrics.csv`, overwrites existing exports to capture the latest snapshot/state):
 
 ```bash
 python -m regain.cli.run_experiment --config_file ./config/experiment.yaml --export-dir ./exports
@@ -84,7 +84,7 @@ Common flags:
 
 * `--experiment`: MLflow experiment name or id (e.g. `experiment_1`)
 * `--output-dir`: output directory root (experiment subdirectory is created under this path)
-* `--export-dir`: export directory root (writes `<export-dir>/<experiment>/analysis.json`, fails if it already exists)
+* `--export-dir`: export directory root (writes `<export-dir>/<experiment>/analysis.json`, overwrites to capture the latest snapshot/state)
 * `--tracking-uri`: MLflow tracking URI or filesystem path (SQLite only)
 * `--show-plots`: display plots interactively
 * `--save-plots`: save plots to `<output-dir>/<experiment>/plots`
