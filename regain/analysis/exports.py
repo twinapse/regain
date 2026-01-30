@@ -9,7 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from regain.mlflow_utils import resolve_sqlite_tracking_uri
+from regain.mlflow_utils import resolve_artifact_uri
+from regain.mlflow_utils import resolve_tracking_uri
 
 __all__ = [
     'export_analysis_json',
@@ -88,6 +89,7 @@ def export_analysis_json(
     experiment_dir: Path,
     export_path: Path,
     tracking_uri: str | None,
+    artifact_uri: str | None,
     runs_table: list[dict[str, Any]],
     experiences_table: list[dict[str, Any]],
     include_controllers: list[str] | None,
@@ -106,6 +108,7 @@ def export_analysis_json(
         experiment_dir (Path): Analysis output directory for a single experiment.
         export_path (Path): Output JSON path.
         tracking_uri (str | None): Optional MLflow tracking URI or filesystem path (SQLite only).
+        artifact_uri (str | None): Optional MLflow artifact URI or filesystem path.
         runs_table (list[dict[str, Any]]): Table rows for runs.
         experiences_table (list[dict[str, Any]]): Table rows for experiences.
         include_controllers (list[str] | None): Parsed controller allowlist.
@@ -129,7 +132,8 @@ def export_analysis_json(
     frontier_pareto_path = frontier_dir / 'frontier_pareto.csv'
 
     missing_sections: list[str] = []
-    resolved_tracking_uri = resolve_sqlite_tracking_uri(tracking_uri=tracking_uri)
+    resolved_tracking_uri = resolve_tracking_uri(tracking_uri=tracking_uri)
+    resolved_artifact_uri = resolve_artifact_uri(artifact_uri=artifact_uri)
 
     def _read_section(path: Path, name: str) -> list[dict[str, Any]]:
         if path.exists():
@@ -146,6 +150,7 @@ def export_analysis_json(
         'mlflow': {
             'experiment': str(experiment),
             'tracking_uri': resolved_tracking_uri,
+            'artifact_uri': resolved_artifact_uri,
             'include_controllers': include_controllers,
             'exclude_controllers': exclude_controllers,
             'max_runs': max_runs,

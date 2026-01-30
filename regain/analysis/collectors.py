@@ -18,9 +18,10 @@ from mlflow.tracking import MlflowClient
 from regain.analysis.utils import mean
 from regain.analysis.utils import to_float
 from regain.analysis.utils import to_int
+from regain.mlflow_utils import resolve_artifact_uri
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import search_runs_paginated
-from regain.mlflow_utils import set_sqlite_tracking_uri
+from regain.mlflow_utils import set_tracking_uri
 from regain.utils import get_logger
 
 __all__ = [
@@ -200,6 +201,7 @@ def collect_experiment_tables(
     experiment: str,
     out_dir: str | Path | None = None,
     tracking_uri: str | None = None,
+    artifact_uri: str | None = None,
     include_controllers: list[str] | None = None,
     exclude_controllers: list[str] | None = None,
     max_runs: int | None = None,
@@ -217,6 +219,7 @@ def collect_experiment_tables(
         experiment: MLflow experiment name or id.
         out_dir: Optional directory to also write 'runs_table.jsonl' and 'experiences_table.jsonl'.
         tracking_uri: Optional MLflow tracking URI or filesystem path (SQLite only).
+        artifact_uri: Optional MLflow artifact URI or filesystem path.
         include_controllers: Optional allowlist of controller_name values.
         exclude_controllers: Optional denylist of controller_name values.
         max_runs: Optional limit on number of parent runs to load.
@@ -231,7 +234,8 @@ def collect_experiment_tables(
     """
     logger = get_logger()
 
-    set_sqlite_tracking_uri(tracking_uri=tracking_uri)
+    set_tracking_uri(tracking_uri=tracking_uri)
+    resolve_artifact_uri(artifact_uri=artifact_uri)
 
     client = MlflowClient()
     experiment_id = resolve_experiment_id(

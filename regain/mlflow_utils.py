@@ -13,8 +13,10 @@ from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
 
 __all__ = [
-    'resolve_sqlite_tracking_uri',
-    'set_sqlite_tracking_uri',
+    'resolve_tracking_uri',
+    'resolve_artifact_uri',
+    'set_tracking_uri',
+    'ensure_experiment',
     'resolve_experiment_id',
     'search_runs_paginated',
 ]
@@ -55,7 +57,46 @@ def _path_to_sqlite_uri(path: Path) -> str:
     return f'sqlite:///{resolved.as_posix()}'
 
 
-def resolve_sqlite_tracking_uri(
+def _normalize_artifact_uri(raw_uri: str) -> str:
+    """
+    Normalize an artifact URI to a stable representation.
+
+    Args:
+        raw_uri (str): Artifact URI or filesystem path.
+
+    Returns:
+        str: Normalized artifact URI.
+    """
+    parsed = urlparse(raw_uri)
+    if parsed.scheme:
+        if parsed.scheme == 'file':
+            resolved = Path(parsed.path).expanduser().resolve()
+            return f'file:///{resolved.as_posix().lstrip("/")}'
+        if len(parsed.scheme) == 1 and raw_uri[1:3] in {':\\', ':/'}:
+            resolved = Path(raw_uri).expanduser().resolve()
+            return f'file:///{resolved.as_posix().lstrip("/")}'
+        return raw_uri
+    resolved = Path(raw_uri).expanduser().resolve()
+    return f'file:///{resolved.as_posix().lstrip("/")}'
+
+
+def resolve_artifact_uri(*, artifact_uri: str | None) -> str | None:
+    """
+    Normalize an optional artifact URI.
+
+    Args:
+        artifact_uri (str | None): Artifact URI or filesystem path supplied by the user.
+
+    Returns:
+        str | None: Normalized artifact URI or None when unset.
+    """
+    raw_uri = str(artifact_uri).strip() if artifact_uri is not None else ''
+    if not raw_uri:
+        return None
+    return _normalize_artifact_uri(raw_uri)
+
+
+def resolve_tracking_uri(
     *,
     tracking_uri: str | None,
     default_dir: Path | None = None,
@@ -95,7 +136,7 @@ def resolve_sqlite_tracking_uri(
     return _path_to_sqlite_uri(Path(raw_uri))
 
 
-def set_sqlite_tracking_uri(
+def set_tracking_uri(
     *,
     tracking_uri: str | None,
     default_dir: Path | None = None,
@@ -110,9 +151,47 @@ def set_sqlite_tracking_uri(
     Returns:
         str: Normalized SQLite tracking URI.
     """
-    resolved = resolve_sqlite_tracking_uri(tracking_uri=tracking_uri, default_dir=default_dir)
+    resolved = resolve_tracking_uri(tracking_uri=tracking_uri, default_dir=default_dir)
     mlflow.set_tracking_uri(resolved)
     return resolved
+
+
+def ensure_experiment(
+    *,
+    experiment_name: str,
+    artifact_uri: str | None,
+) -> str:
+    """
+    Ensure an MLflow experiment exists, optionally enforcing artifact location.
+
+    Args:
+        experiment_name (str): Experiment name.
+        artifact_uri (str | None): Optional artifact URI or filesystem path.
+
+    Returns:
+        str: Experiment id.
+
+    Raises:
+        ValueError: If the experiment exists with a different artifact location.
+    """
+    client = MlflowClient()
+    existing = client.get_experiment_by_name(experiment_name)
+    normalized_artifact_uri = resolve_artifact_uri(artifact_uri=artifact_uri)
+    if existing is None:
+        if normalized_artifact_uri is not None:
+            return client.create_experiment(name=experiment_name, artifact_location=normalized_artifact_uri)
+        return client.create_experiment(name=experiment_name)
+
+    if normalized_artifact_uri is not None:
+        existing_location = resolve_artifact_uri(artifact_uri=existing.artifact_location)
+        if existing_location is not None and existing_location != normalized_artifact_uri:
+            raise ValueError(
+                'MLflow experiment already exists with a different artifact location. '
+                f'Experiment={experiment_name}, existing={existing_location}, requested={normalized_artifact_uri}. '
+                'Use a new experiment name or delete the existing experiment to change artifact storage.'
+            )
+
+    return str(existing.experiment_id)
 
 
 def resolve_experiment_id(

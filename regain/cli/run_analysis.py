@@ -105,6 +105,12 @@ def main() -> None:
         default=None,
         help='MLflow tracking URI or filesystem path (SQLite only).',
     )
+    p.add_argument(
+        '--artifact-uri',
+        type=str,
+        default=None,
+        help='MLflow artifact URI or filesystem path.',
+    )
     p.add_argument('--include-controllers', type=str, default=None, help='Comma-separated allowlist for controller_name.')
     p.add_argument('--exclude-controllers', type=str, default=None, help='Comma-separated denylist for controller_name.')
     p.add_argument('--max-runs', type=int, default=None, help='Max number of parent runs.')
@@ -142,6 +148,7 @@ def main() -> None:
             experiment=str(args.experiment),
             out_dir=tables_dir,
             tracking_uri=args.tracking_uri,
+            artifact_uri=args.artifact_uri,
             include_controllers=include_controllers,
             exclude_controllers=exclude_controllers,
             max_runs=args.max_runs,
@@ -195,6 +202,7 @@ def main() -> None:
             experiment_dir=experiment_dir,
             export_path=export_path,
             tracking_uri=args.tracking_uri,
+            artifact_uri=args.artifact_uri,
             runs_table=runs_table,
             experiences_table=experiences_table,
             include_controllers=include_controllers,

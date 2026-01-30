@@ -446,6 +446,7 @@ def _train_and_evaluate_strategy(
         experiment_name=experiment_config.experiment_name,
         run_name=run_config.run_name,
         tracking_uri=experiment_config.mlflow_tracking_uri,
+        artifact_uri=experiment_config.mlflow_artifact_uri,
     ):
         with tempfile.TemporaryDirectory() as artifacts_dir:
             # Instantiate and validate the scenario builder
@@ -612,9 +613,11 @@ def _train_and_evaluate_strategy(
             with config_path.open('w', encoding='utf-8') as f:
                 dumped_config = asdict(experiment_config)
 
-                # Note: We exclude `dataset_path` and `mlflow_tracking_uri` because they are environment-specific
+                # Note: We exclude `dataset_path`, `mlflow_tracking_uri`, and `mlflow_artifact_uri`
+                #       because they are environment-specific
                 dumped_config.pop('dataset_path')
                 dumped_config.pop('mlflow_tracking_uri')
+                dumped_config.pop('mlflow_artifact_uri')
                 dumped_config.pop('runs_config')
 
                 dumped_config['run'] = asdict(run_config)
