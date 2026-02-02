@@ -5,9 +5,7 @@ MLflow utilities.
 import contextlib
 import os
 from pathlib import Path
-from typing import Final
-from typing import Iterator
-from typing import Sequence
+from typing import Final, Iterator, Sequence
 from urllib.parse import urlparse
 
 import mlflow
