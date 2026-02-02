@@ -148,7 +148,6 @@ def main() -> None:
             experiment=str(args.experiment),
             out_dir=tables_dir,
             tracking_uri=args.tracking_uri,
-            artifact_uri=args.artifact_uri,
             include_controllers=include_controllers,
             exclude_controllers=exclude_controllers,
             max_runs=args.max_runs,

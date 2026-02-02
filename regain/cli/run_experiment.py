@@ -145,7 +145,6 @@ def main() -> None:
                 params_path=params_path,
                 metrics_path=metrics_path,
                 tracking_uri=experiment_config.mlflow_tracking_uri,
-                artifact_uri=experiment_config.mlflow_artifact_uri,
             )
             print(
                 'Run exports written to: '

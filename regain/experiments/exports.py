@@ -13,7 +13,6 @@ from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
 from mlflow.utils.yaml_utils import write_yaml
 
-from regain.mlflow_utils import resolve_artifact_uri
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import search_runs_paginated
 from regain.mlflow_utils import set_tracking_uri
@@ -120,7 +119,6 @@ def export_runs_csv(
     params_path: Path,
     metrics_path: Path,
     tracking_uri: str | None,
-    artifact_uri: str | None = None,
 ) -> None:
     """
     Export all MLflow runs for an experiment into CSV files and write meta.yaml.
@@ -133,7 +131,6 @@ def export_runs_csv(
         params_path (Path): Output CSV path for params.
         metrics_path (Path): Output CSV path for metrics.
         tracking_uri (str | None): Optional MLflow tracking URI or filesystem path (SQLite only).
-        artifact_uri (str | None): Optional MLflow artifact URI or filesystem path.
 
     Returns:
         None
@@ -143,14 +140,11 @@ def export_runs_csv(
         ValueError: If the tracking URI is not SQLite or the experiment cannot be resolved.
     """
     set_tracking_uri(tracking_uri=tracking_uri)
-    resolve_artifact_uri(artifact_uri=artifact_uri)
 
     client = MlflowClient()
     experiment_id = resolve_experiment_id(
         client=client,
         experiment=experiment,
-        prefer_name=False,
-        raise_on_missing=True,
     )
 
     experiment_meta = client.get_experiment(experiment_id)

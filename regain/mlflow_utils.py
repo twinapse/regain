@@ -2,7 +2,6 @@
 MLflow utilities.
 """
 
-import os
 from pathlib import Path
 from typing import Final
 from typing import Sequence
@@ -23,20 +22,6 @@ __all__ = [
 
 
 _DEFAULT_SQLITE_DB_NAME: Final[str] = 'mlflow.db'
-
-
-def _default_sqlite_path(default_dir: Path | None) -> Path:
-    """
-    Resolve the default SQLite database path.
-
-    Args:
-        default_dir (Path | None): Optional base directory for the SQLite DB file.
-
-    Returns:
-        Path: Path to the default SQLite database file.
-    """
-    base_dir = Path.cwd() if default_dir is None else Path(default_dir)
-    return base_dir / _DEFAULT_SQLITE_DB_NAME
 
 
 def _path_to_sqlite_uri(path: Path) -> str:
@@ -99,16 +84,14 @@ def resolve_artifact_uri(*, artifact_uri: str | None) -> str | None:
 def resolve_tracking_uri(
     *,
     tracking_uri: str | None,
-    default_dir: Path | None = None,
 ) -> str:
     """
     Normalize a tracking URI to a SQLite backend.
 
-    Falls back to `MLFLOW_TRACKING_URI` (if set) or `./mlflow.db` when no URI is provided.
+    Falls back to `./mlflow.db` when no URI is provided.
 
     Args:
         tracking_uri (str | None): Tracking URI or filesystem path supplied by the user.
-        default_dir (Path | None): Optional base directory for the default SQLite DB.
 
     Returns:
         str: SQLite tracking URI.
@@ -118,10 +101,7 @@ def resolve_tracking_uri(
     """
     raw_uri = str(tracking_uri).strip() if tracking_uri is not None else ''
     if not raw_uri:
-        env_uri = os.environ.get('MLFLOW_TRACKING_URI', '').strip()
-        raw_uri = env_uri
-    if not raw_uri:
-        return _path_to_sqlite_uri(_default_sqlite_path(default_dir=default_dir))
+        return _path_to_sqlite_uri(Path.cwd() / _DEFAULT_SQLITE_DB_NAME)
     parsed = urlparse(raw_uri)
     if parsed.scheme:
         if parsed.scheme != 'sqlite':
@@ -139,19 +119,17 @@ def resolve_tracking_uri(
 def set_tracking_uri(
     *,
     tracking_uri: str | None,
-    default_dir: Path | None = None,
 ) -> str:
     """
     Resolve and set the MLflow tracking URI, forcing SQLite as the backend.
 
     Args:
         tracking_uri (str | None): Tracking URI or filesystem path supplied by the user.
-        default_dir (Path | None): Optional base directory for the default SQLite DB.
 
     Returns:
         str: Normalized SQLite tracking URI.
     """
-    resolved = resolve_tracking_uri(tracking_uri=tracking_uri, default_dir=default_dir)
+    resolved = resolve_tracking_uri(tracking_uri=tracking_uri)
     mlflow.set_tracking_uri(resolved)
     return resolved
 
@@ -198,23 +176,19 @@ def resolve_experiment_id(
     *,
     client: MlflowClient,
     experiment: str,
-    prefer_name: bool = True,
-    raise_on_missing: bool = True,
-) -> str | None:
+) -> str:
     """
     Resolve an MLflow experiment id from a name or id.
 
     Args:
         client (MlflowClient): MLflow client instance.
         experiment (str): Experiment name or id.
-        prefer_name (bool): Prefer resolving by name before id when possible.
-        raise_on_missing (bool): Whether to raise if the experiment cannot be resolved.
 
     Returns:
-        str | None: Experiment id if found.
+        str: Experiment id.
 
     Raises:
-        ValueError: If the experiment cannot be resolved and raise_on_missing is True.
+        ValueError: If the experiment cannot be resolved.
     """
     def _try_name() -> str | None:
         exp = client.get_experiment_by_name(experiment)
@@ -232,15 +206,12 @@ def resolve_experiment_id(
         return None
 
     experiment_id: str | None = None
-    if prefer_name:
-        experiment_id = _try_name() or _try_id()
+    if str(experiment).isdigit():
+        experiment_id = _try_id() or _try_name()
     else:
-        if str(experiment).isdigit():
-            experiment_id = _try_id() or _try_name()
-        else:
-            experiment_id = _try_name()
+        experiment_id = _try_name() or _try_id()
 
-    if experiment_id is None and raise_on_missing:
+    if experiment_id is None:
         raise ValueError(f'No MLflow experiment found for: {experiment}')
     return experiment_id
 
