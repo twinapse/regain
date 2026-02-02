@@ -16,7 +16,7 @@ from typing import Any
 
 from regain.analysis.collectors import collect_experiment_tables
 from regain.analysis.curves import write_recoverability_curves
-from regain.analysis.exports import export_analysis_json
+from regain.analysis.exports import export_analysis_to_json
 from regain.analysis.frontier import write_efficiency_frontiers
 from regain.analysis.plotting import plot_analysis_outputs
 from regain.utils import get_logger
@@ -196,7 +196,7 @@ def main() -> None:
     if args.export_dir is not None:
         if export_path is None:
             export_path = Path(args.export_dir) / str(args.experiment) / 'analysis.json'
-        export_analysis_json(
+        export_analysis_to_json(
             experiment=str(args.experiment),
             experiment_dir=experiment_dir,
             export_path=export_path,

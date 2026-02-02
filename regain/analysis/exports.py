@@ -13,7 +13,7 @@ from regain.mlflow_utils import resolve_artifact_uri
 from regain.mlflow_utils import resolve_tracking_uri
 
 __all__ = [
-    'export_analysis_json',
+    'export_analysis_to_json',
 ]
 
 
@@ -83,7 +83,7 @@ def _coerce_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return coerced_rows
 
 
-def export_analysis_json(
+def export_analysis_to_json(
     *,
     experiment: str,
     experiment_dir: Path,
