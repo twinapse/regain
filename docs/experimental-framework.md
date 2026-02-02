@@ -270,6 +270,9 @@ where $\epsilon = 10^{-4}$.
 
 This section describes **how metrics are organized in MLflow** and **what we report**.
 
+> ℹ️ **SQLite backend required:** REGAIN forces MLflow to use a SQLite backend. Provide a tracking URI like
+> `sqlite:///path/to/mlflow.db` (or a filesystem path such as `./mlflow.db`). Non-SQLite tracking URIs are rejected.
+
 ### 7.1 MLflow run structure (parent + nested evaluation runs)
 Each experiment run creates:
 

@@ -18,6 +18,9 @@ from mlflow.tracking import MlflowClient
 from regain.analysis.utils import mean
 from regain.analysis.utils import to_float
 from regain.analysis.utils import to_int
+from regain.mlflow_utils import resolve_experiment_id
+from regain.mlflow_utils import search_runs_paginated
+from regain.mlflow_utils import set_tracking_uri
 from regain.utils import get_logger
 
 __all__ = [
@@ -29,35 +32,6 @@ _A_REF_RE = re.compile(r'^analysis-a_ref-exp(?P<idx>\d+)$')
 _A_POST_RE = re.compile(r'^analysis-a_post-exp(?P<idx>\d+)$')
 _A_CTRL_RE = re.compile(r'^analysis-a_ctrl-exp(?P<idx>\d+)$')
 _RHO_RE = re.compile(r'^analysis-rho-exp(?P<idx>\d+)$')
-
-
-def _resolve_experiment_id(client: MlflowClient, experiment: str) -> str:
-    """
-    Resolve an MLflow experiment identifier from a name or id.
-
-    Args:
-        client: MLflow client.
-        experiment: Experiment name or id.
-
-    Returns:
-        Experiment id.
-
-    Raises:
-        ValueError: If the experiment cannot be resolved.
-    """
-    exp = client.get_experiment_by_name(experiment)
-    if exp is not None:
-        return str(exp.experiment_id)
-
-    # Fallback: treat as experiment id
-    try:
-        exp2 = client.get_experiment(experiment_id=str(experiment))
-        if exp2 is not None:
-            return str(exp2.experiment_id)
-    except Exception:
-        pass
-
-    raise ValueError(f'Could not resolve MLflow experiment: {experiment}')
 
 
 def _is_parent_run(run_tags: dict[str, str]) -> bool:
@@ -242,7 +216,7 @@ def collect_experiment_tables(
     Args:
         experiment: MLflow experiment name or id.
         out_dir: Optional directory to also write 'runs_table.jsonl' and 'experiences_table.jsonl'.
-        tracking_uri: Optional MLflow tracking URI.
+        tracking_uri: Optional MLflow tracking URI or filesystem path (SQLite only).
         include_controllers: Optional allowlist of controller_name values.
         exclude_controllers: Optional denylist of controller_name values.
         max_runs: Optional limit on number of parent runs to load.
@@ -257,35 +231,23 @@ def collect_experiment_tables(
     """
     logger = get_logger()
 
-    if tracking_uri is not None:
-        mlflow.set_tracking_uri(tracking_uri)
+    set_tracking_uri(tracking_uri=tracking_uri)
 
     client = MlflowClient()
-    experiment_id = _resolve_experiment_id(client, experiment)
-
-    parent_runs: list[Any] = []
-    page_token: str | None = None
+    experiment_id = resolve_experiment_id(
+        client=client,
+        experiment=experiment,
+    )
 
     # Fetch runs with pagination (avoid brittle filter-string dependency on tags presence).
-    while True:
-        batch = client.search_runs(
-            experiment_ids=[experiment_id],
-            filter_string='',
-            run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
-            max_results=1000,
-            order_by=['attributes.start_time DESC'],
-            page_token=page_token,
-        )
-        if not batch:
-            break
-        parent_runs.extend(batch)
-        if max_runs is not None and len(parent_runs) >= int(max_runs):
-            parent_runs = parent_runs[:int(max_runs)]
-            break
-        # Newer MLflow returns a PagedList with token; older versions differ.
-        page_token = getattr(batch, 'token', None) or getattr(batch, 'next_page_token', None)
-        if not page_token:
-            break
+    parent_runs = search_runs_paginated(
+        client=client,
+        experiment_ids=[experiment_id],
+        filter_string='',
+        run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
+        order_by=['attributes.start_time DESC'],
+        max_runs=max_runs,
+    )
 
     runs_table: list[dict[str, Any]] = []
     experiences_table: list[dict[str, Any]] = []

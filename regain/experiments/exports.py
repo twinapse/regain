@@ -8,9 +8,14 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any
 
-import mlflow
+from mlflow.entities import Experiment
 from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
+from mlflow.utils.yaml_utils import write_yaml
+
+from regain.mlflow_utils import resolve_experiment_id
+from regain.mlflow_utils import search_runs_paginated
+from regain.mlflow_utils import set_tracking_uri
 
 __all__ = [
     'export_runs_csv',
@@ -48,63 +53,6 @@ def _resolve_run_name(run: Run) -> str:
     if tag_name:
         return str(tag_name)
     return ''
-
-
-def _search_runs_paginated(
-    client: MlflowClient,
-    experiment_id: str,
-    filter_string: str,
-) -> list[Run]:
-    """
-    Search MLflow runs with pagination.
-
-    Args:
-        client (MlflowClient): MLflow client instance.
-        experiment_id (str): Experiment ID.
-        filter_string (str): MLflow filter string.
-
-    Returns:
-        list[Run]: Runs matching the query.
-    """
-    all_runs: list[Run] = []
-    page_token: str | None = None
-    while True:
-        runs = client.search_runs(
-            experiment_ids=[experiment_id],
-            filter_string=filter_string,
-            max_results=1000,
-            page_token=page_token,
-        )
-        all_runs.extend(list(runs))
-        page_token = getattr(runs, 'token', None)
-        if not page_token:
-            break
-    return all_runs
-
-
-def _resolve_experiment_id(
-    *,
-    client: MlflowClient,
-    experiment: str,
-) -> str | None:
-    """
-    Resolve an MLflow experiment id from a name or id.
-
-    Args:
-        client (MlflowClient): MLflow client instance.
-        experiment (str): MLflow experiment name or id.
-
-    Returns:
-        str | None: Experiment id if found.
-    """
-    if experiment.isdigit():
-        exp = client.get_experiment(experiment_id=experiment)
-        if exp is not None:
-            return exp.experiment_id
-    exp = client.get_experiment_by_name(experiment)
-    if exp is not None:
-        return exp.experiment_id
-    return None
 
 
 def _build_run_columns(
@@ -148,6 +96,22 @@ def _build_run_columns(
     return columns
 
 
+def _write_experiment_meta(*, experiment: Experiment, output_dir: Path) -> None:
+    """
+    Write experiment metadata to a meta.yaml file.
+
+    Args:
+        experiment (Experiment): MLflow experiment metadata.
+        output_dir (Path): Directory where meta.yaml should be written.
+
+    Returns:
+        None
+    """
+    experiment_dict = dict(experiment)
+    experiment_dict['experiment_id'] = str(experiment.experiment_id)
+    write_yaml(str(output_dir), 'meta.yaml', experiment_dict, overwrite=True)
+
+
 def export_runs_csv(
     *,
     experiment: str,
@@ -157,34 +121,39 @@ def export_runs_csv(
     tracking_uri: str | None,
 ) -> None:
     """
-    Export all MLflow runs for an experiment into CSV files.
+    Export all MLflow runs for an experiment into CSV files and write meta.yaml.
+
+    If export files already exist, they are overwritten to capture the latest snapshot/state.
 
     Args:
         experiment (str): MLflow experiment name or id.
         metadata_path (Path): Output CSV path for metadata.
         params_path (Path): Output CSV path for params.
         metrics_path (Path): Output CSV path for metrics.
-        tracking_uri (str | None): Optional MLflow tracking URI.
+        tracking_uri (str | None): Optional MLflow tracking URI or filesystem path (SQLite only).
 
     Returns:
         None
 
     Raises:
-        FileExistsError: If an export path already exists.
         OSError: If writing a CSV fails.
-        ValueError: If the experiment cannot be resolved.
+        ValueError: If the tracking URI is not SQLite or the experiment cannot be resolved.
     """
-    if tracking_uri is not None:
-        mlflow.set_tracking_uri(tracking_uri)
+    set_tracking_uri(tracking_uri=tracking_uri)
 
     client = MlflowClient()
-    experiment_id = _resolve_experiment_id(client=client, experiment=experiment)
-    if experiment_id is None:
+    experiment_id = resolve_experiment_id(
+        client=client,
+        experiment=experiment,
+    )
+
+    experiment_meta = client.get_experiment(experiment_id)
+    if experiment_meta is None:
         raise ValueError(f'No MLflow experiment found for: {experiment}')
 
-    all_runs = _search_runs_paginated(
+    all_runs = search_runs_paginated(
         client=client,
-        experiment_id=experiment_id,
+        experiment_ids=[experiment_id],
         filter_string='',
     )
     rows: list[dict[str, Any]] = []
@@ -192,7 +161,8 @@ def export_runs_csv(
     parent_metric_keys: set[str] = set()
 
     for run in all_runs:
-        rows.append(_build_run_columns(run=run))
+        row = _build_run_columns(run=run)
+        rows.append(row)
         parent_param_keys.update(run.data.params.keys())
         parent_metric_keys.update(run.data.metrics.keys())
 
@@ -201,16 +171,10 @@ def export_runs_csv(
     param_columns = sorted(key for key in parent_param_keys if key not in reserved_keys)
     metric_columns = sorted(key for key in parent_metric_keys if key not in reserved_keys)
 
-    existing_paths = [
-        path for path in (metadata_path, params_path, metrics_path) if path.exists()
-    ]
-    if existing_paths:
-        existing_list = ', '.join(str(path) for path in existing_paths)
-        raise FileExistsError(f'Export CSV already exists: {existing_list}')
-
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     params_path.parent.mkdir(parents=True, exist_ok=True)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_experiment_meta(experiment=experiment_meta, output_dir=metadata_path.parent)
 
     metadata_fieldnames = parent_metadata
     params_fieldnames = ['run_id', 'run_name', 'parent_run_id'] + param_columns

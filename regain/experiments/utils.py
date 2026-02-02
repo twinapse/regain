@@ -1,11 +1,9 @@
 from collections.abc import Mapping
-import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 
-import mlflow
 import torch
 from torch import nn
 import yaml
@@ -14,7 +12,6 @@ from regain.registry import get_controller_path
 from regain.registry import get_scenario_builder_path
 
 __all__ = [
-    'init_mlflow',
     'EvalMode',
     'ControllerConfig',
     'StrategyConfig',
@@ -132,7 +129,8 @@ class ExperimentConfig:
         seed: Random seed.
         deterministic: Whether to enforce deterministic PyTorch behavior.
         device: Device identifier for training.
-        mlflow_tracking_uri: Optional MLflow tracking URI.
+        mlflow_tracking_uri: Optional MLflow tracking URI or filesystem path (SQLite only).
+        mlflow_artifact_uri: Optional MLflow artifact URI or filesystem path.
         dataset_path: Optional dataset root to pass to the scenario builder.
         debug: Whether to enable debug instrumentation for repair controllers.
     """
@@ -154,31 +152,8 @@ class ExperimentConfig:
     debug: bool = False
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     mlflow_tracking_uri: str | None = None
+    mlflow_artifact_uri: str | None = None
     dataset_path: str | Path | None = None
-
-
-@contextlib.contextmanager
-def init_mlflow(
-    experiment_name: str = 'regain_experiments',
-    run_name: str | None = None,
-    tracking_uri: str | None = None,
-) -> Iterator[mlflow.ActiveRun]:
-    """
-    Initialize an MLflow experiment and yield an active run context.
-
-    Args:
-        experiment_name: Name of the MLflow experiment.
-        run_name: Optional run name.
-        tracking_uri: Optional tracking URI (e.g., local folder, remote server).
-
-    Yields:
-        Active MLflow run object.
-    """
-    if tracking_uri is not None:
-        mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment(experiment_name)
-    with mlflow.start_run(run_name=run_name) as run:
-        yield run
 
 
 def _resolve_device(device: str | None) -> str:
@@ -307,6 +282,7 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
         debug=payload.get('debug', False),
         device=_resolve_device(payload.get('device')),
         mlflow_tracking_uri=payload.get('mlflow_tracking_uri'),
+        mlflow_artifact_uri=payload.get('mlflow_artifact_uri'),
         dataset_path=dataset_path,
     )
 
