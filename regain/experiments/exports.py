@@ -18,7 +18,7 @@ from regain.mlflow_utils import search_runs_paginated
 from regain.mlflow_utils import set_tracking_uri
 
 __all__ = [
-    'export_runs_csv',
+    'export_runs_to_csvs',
 ]
 
 
@@ -112,7 +112,7 @@ def _write_experiment_meta(*, experiment: Experiment, output_dir: Path) -> None:
     write_yaml(str(output_dir), 'meta.yaml', experiment_dict, overwrite=True)
 
 
-def export_runs_csv(
+def export_runs_to_csvs(
     *,
     experiment: str,
     metadata_path: Path,
@@ -121,7 +121,7 @@ def export_runs_csv(
     tracking_uri: str | None,
 ) -> None:
     """
-    Export all MLflow runs for an experiment into CSV files and write meta.yaml.
+    Export all MLflow runs for an experiment into CSV files and write experiment metadata (`meta.yaml`).
 
     If export files already exist, they are overwritten to capture the latest snapshot/state.
 

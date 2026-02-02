@@ -108,7 +108,7 @@ def main() -> None:
 
     # Import `regain` modules after prerequisites are ensured
     from regain.experiments.core import run_experiment
-    from regain.experiments.exports import export_runs_csv
+    from regain.experiments.exports import export_runs_to_csvs
     from regain.experiments.utils import load_experiment_config
 
     # Parse CLI arguments
@@ -139,7 +139,7 @@ def main() -> None:
             params_path = export_root / 'run_params.csv'
             metrics_path = export_root / 'run_metrics.csv'
         try:
-            export_runs_csv(
+            export_runs_to_csvs(
                 experiment=experiment_config.experiment_name,
                 metadata_path=metadata_path,
                 params_path=params_path,
