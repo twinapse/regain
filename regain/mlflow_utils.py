@@ -2,8 +2,10 @@
 MLflow utilities.
 """
 
+import contextlib
 from pathlib import Path
 from typing import Final
+from typing import Iterator
 from typing import Sequence
 from urllib.parse import urlparse
 
@@ -16,6 +18,7 @@ __all__ = [
     'resolve_artifact_uri',
     'set_tracking_uri',
     'ensure_experiment',
+    'init_mlflow',
     'resolve_experiment_id',
     'search_runs_paginated',
 ]
@@ -170,6 +173,35 @@ def ensure_experiment(
             )
 
     return str(existing.experiment_id)
+
+
+@contextlib.contextmanager
+def init_mlflow(
+    experiment_name: str = 'regain_experiments',
+    run_name: str | None = None,
+    tracking_uri: str | None = None,
+    artifact_uri: str | None = None,
+) -> Iterator[mlflow.ActiveRun]:
+    """
+    Initialize an MLflow experiment and yield an active run context.
+
+    Args:
+        experiment_name: Name of the MLflow experiment.
+        run_name: Optional run name.
+        tracking_uri: Optional tracking URI or filesystem path (SQLite only).
+        artifact_uri: Optional artifact URI or filesystem path.
+
+    Yields:
+        Active MLflow run object.
+    """
+    set_tracking_uri(tracking_uri=tracking_uri)
+    if artifact_uri is not None:
+        experiment_id = ensure_experiment(experiment_name=experiment_name, artifact_uri=artifact_uri)
+        mlflow.set_experiment(experiment_id=experiment_id)
+    else:
+        mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(run_name=run_name) as run:
+        yield run
 
 
 def resolve_experiment_id(

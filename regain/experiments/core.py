@@ -41,7 +41,7 @@ from regain.experiments.utils import count_trainable_parameters
 from regain.experiments.utils import enable_determinism
 from regain.experiments.utils import ExperimentConfig
 from regain.experiments.utils import guard_experiment_config_overrides
-from regain.experiments.utils import init_mlflow
+from regain.mlflow_utils import init_mlflow
 from regain.experiments.utils import OptimizerConfig
 from regain.experiments.utils import RunConfig
 from regain.experiments.utils import StrategyConfig

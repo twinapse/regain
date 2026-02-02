@@ -1,22 +1,17 @@
 from collections.abc import Mapping
-import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 
-import mlflow
 import torch
 from torch import nn
 import yaml
 
-from regain.mlflow_utils import ensure_experiment
-from regain.mlflow_utils import set_tracking_uri
 from regain.registry import get_controller_path
 from regain.registry import get_scenario_builder_path
 
 __all__ = [
-    'init_mlflow',
     'EvalMode',
     'ControllerConfig',
     'StrategyConfig',
@@ -159,35 +154,6 @@ class ExperimentConfig:
     mlflow_tracking_uri: str | None = None
     mlflow_artifact_uri: str | None = None
     dataset_path: str | Path | None = None
-
-
-@contextlib.contextmanager
-def init_mlflow(
-    experiment_name: str = 'regain_experiments',
-    run_name: str | None = None,
-    tracking_uri: str | None = None,
-    artifact_uri: str | None = None,
-) -> Iterator[mlflow.ActiveRun]:
-    """
-    Initialize an MLflow experiment and yield an active run context.
-
-    Args:
-        experiment_name: Name of the MLflow experiment.
-        run_name: Optional run name.
-        tracking_uri: Optional tracking URI or filesystem path (SQLite only).
-        artifact_uri: Optional artifact URI or filesystem path.
-
-    Yields:
-        Active MLflow run object.
-    """
-    set_tracking_uri(tracking_uri=tracking_uri)
-    if artifact_uri is not None:
-        experiment_id = ensure_experiment(experiment_name=experiment_name, artifact_uri=artifact_uri)
-        mlflow.set_experiment(experiment_id=experiment_id)
-    else:
-        mlflow.set_experiment(experiment_name)
-    with mlflow.start_run(run_name=run_name) as run:
-        yield run
 
 
 def _resolve_device(device: str | None) -> str:
