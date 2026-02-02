@@ -3,6 +3,7 @@ MLflow utilities.
 """
 
 import contextlib
+import os
 from pathlib import Path
 from typing import Final
 from typing import Iterator
@@ -91,7 +92,7 @@ def resolve_tracking_uri(
     """
     Normalize a tracking URI to a SQLite backend.
 
-    Falls back to `./mlflow.db` when no URI is provided.
+    Falls back to `MLFLOW_TRACKING_URI` (if set) or `./mlflow.db` when no URI is provided.
 
     Args:
         tracking_uri (str | None): Tracking URI or filesystem path supplied by the user.
@@ -103,6 +104,9 @@ def resolve_tracking_uri(
         ValueError: If the tracking URI uses a non-SQLite scheme.
     """
     raw_uri = str(tracking_uri).strip() if tracking_uri is not None else ''
+    if not raw_uri:
+        env_uri = os.environ.get('MLFLOW_TRACKING_URI', '').strip()
+        raw_uri = env_uri
     if not raw_uri:
         return _path_to_sqlite_uri(Path.cwd() / _DEFAULT_SQLITE_DB_NAME)
     parsed = urlparse(raw_uri)
