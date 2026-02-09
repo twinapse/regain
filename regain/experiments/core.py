@@ -37,7 +37,7 @@ from regain.avalanche_utils.scenarios import get_scenario_builder
 from regain.avalanche_utils.scenarios import ScenarioBuilder
 from regain.debug.avalanche_utils import DebugRepairControllerPlugin
 from regain.experiments.utils import ControllerConfig
-from regain.experiments.utils import count_trainable_parameters
+from regain.experiments.utils import count_parameters
 from regain.experiments.utils import enable_determinism
 from regain.experiments.utils import ExperimentConfig
 from regain.experiments.utils import guard_experiment_config_overrides
@@ -349,7 +349,7 @@ def _log_run_params(
         run_config: Run configuration.
         deterministic_algorithms_enabled: Whether deterministic algorithms were enabled.
         optimizer_params: Effective optimizer parameters.
-        controller_model_param_count: Number of trainable parameters in the controller model (if any).
+        controller_model_param_count: Number of parameters in the controller model.
         num_classes: Total number of benchmark classes (optional).
         debug_skip_reason: Optional debug skip reason (debug-only).
     """
@@ -559,9 +559,6 @@ def _train_and_evaluate_strategy(
                     probe_dataset = None
                 controller_plugin.initialize_parameters(model=model, dataset=probe_dataset)
 
-            # Count controller model parameters
-            controller_model_param_count = count_trainable_parameters(controller)
-
             # Build the optimizer and criterion
             optimizer, optimizer_params = _build_optimizer(model=model, optimizer_config=run_config.optimizer)
             criterion = CrossEntropyLoss()
@@ -585,7 +582,6 @@ def _train_and_evaluate_strategy(
                 run_config=run_config,
                 deterministic_algorithms_enabled=deterministic_algorithms_enabled,
                 optimizer_params=optimizer_params,
-                controller_model_param_count=controller_model_param_count,
                 num_classes=benchmark.n_classes,
                 debug_skip_reason=debug_skip_reason,
             )
@@ -596,11 +592,16 @@ def _train_and_evaluate_strategy(
                 eval_streams=[benchmark.test_stream],
             )
 
+            # Count and log controller model parameters
+            controller_model_param_count = count_parameters(controller)
+            if controller_model_param_count is not None:
+                mlflow.log_param('controller_model_param_count', int(controller_model_param_count))
+
+            # Log the final evaluation metrics to MLflow
             eval_scalar_results = regain_evaluation_plugin.last_posthoc_scalar_results
             if eval_scalar_results is None:
                 raise RuntimeError('Posthoc evaluation results missing from evaluation plugin.')
 
-            # Log the final evaluation metrics to MLflow
             final_step = int(experiment_config.num_experiences * experiment_config.num_epochs)
             if mlflow.active_run() is not None:
                 for metric_name, value in (eval_scalar_results or {}).items():
