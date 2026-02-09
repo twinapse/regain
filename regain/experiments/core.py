@@ -603,10 +603,9 @@ def _train_and_evaluate_strategy(
                 raise RuntimeError('Posthoc evaluation results missing from evaluation plugin.')
 
             final_step = int(experiment_config.num_experiences * experiment_config.num_epochs)
-            if mlflow.active_run() is not None:
-                for metric_name, value in (eval_scalar_results or {}).items():
-                    safe_name = normalize_metric_name(metric_name)
-                    mlflow.log_metric(f'summary{METRIC_NAMESPACE_SEPARATOR}{safe_name}', float(value), step=final_step)
+            for metric_name, value in (eval_scalar_results or {}).items():
+                safe_name = normalize_metric_name(metric_name)
+                mlflow.log_metric(f'summary{METRIC_NAMESPACE_SEPARATOR}{safe_name}', float(value), step=final_step)
 
             # Log the configuration used for the run to MLflow
             config_path = Path(artifacts_dir) / 'config.yaml'

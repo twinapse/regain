@@ -918,13 +918,12 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         if exp_idx not in acc_map:
             raise ValueError(f'Missing reference accuracy for experience {exp_idx}.')
         self.a_ref.append(acc_map[exp_idx])
-        if mlflow.active_run() is not None:
-            self._log_analysis_metric(
-                key='a_ref',
-                value=float(self.a_ref[-1]),
-                step=int((exp_idx + 1) * self.num_epochs_per_experience),
-                experience=exp_idx,
-            )
+        self._log_analysis_metric(
+            key='a_ref',
+            value=float(self.a_ref[-1]),
+            step=int((exp_idx + 1) * self.num_epochs_per_experience),
+            experience=exp_idx,
+        )
         self._run_posthoc_eval_after_experience(strategy=strategy, exp_idx=exp_idx)
 
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
@@ -957,9 +956,8 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 'eps': self.eps,
                 'a_ref': [float(value) for value in self.a_ref],
             }
-            if mlflow.active_run() is not None:
-                self._log_analysis_metric(key='incomplete_a_ref', value=1.0, step=final_step)
-                mlflow.log_dict(self.artifacts, 'analysis_artifacts.json')
+            self._log_analysis_metric(key='incomplete_a_ref', value=1.0, step=final_step)
+            mlflow.log_dict(self.artifacts, 'analysis_artifacts.json')
             return
 
         a_post_results = self.last_base_eval_results
@@ -998,52 +996,51 @@ class RegainEvaluationPlugin(SupervisedPlugin):
 
         self.artifacts = artifacts
         log_ctrl_metrics = isinstance(self.controller_plugin, RepairControllerPlugin)
-        if mlflow.active_run() is not None:
-            final_step = int(self._num_experiences * self.num_epochs_per_experience)
-            for i, value in enumerate(a_post):
+        final_step = int(self._num_experiences * self.num_epochs_per_experience)
+        for i, value in enumerate(a_post):
+            self._log_analysis_metric(
+                key='a_post',
+                value=float(value),
+                step=final_step,
+                experience=i,
+            )
+        if log_ctrl_metrics:
+            for i, value in enumerate(a_ctrl):
                 self._log_analysis_metric(
-                    key='a_post',
+                    key='a_ctrl',
                     value=float(value),
                     step=final_step,
                     experience=i,
                 )
-            if log_ctrl_metrics:
-                for i, value in enumerate(a_ctrl):
-                    self._log_analysis_metric(
-                        key='a_ctrl',
-                        value=float(value),
-                        step=final_step,
-                        experience=i,
-                    )
-                for i, value in enumerate(artifacts['rho']):
-                    if value is None:
-                        continue
-                    self._log_analysis_metric(
-                        key='rho',
-                        value=float(value),
-                        step=final_step,
-                        experience=i,
-                    )
+            for i, value in enumerate(artifacts['rho']):
+                if value is None:
+                    continue
+                self._log_analysis_metric(
+                    key='rho',
+                    value=float(value),
+                    step=final_step,
+                    experience=i,
+                )
 
-            rho_mean = artifacts.get('rho_mean', None)
-            if rho_mean is not None and log_ctrl_metrics:
-                self._log_analysis_metric(key='rho_mean', value=float(rho_mean), step=final_step)
-                self._log_summary_metric(key='final_rho_mean', value=float(rho_mean), step=final_step)
+        rho_mean = artifacts.get('rho_mean', None)
+        if rho_mean is not None and log_ctrl_metrics:
+            self._log_analysis_metric(key='rho_mean', value=float(rho_mean), step=final_step)
+            self._log_summary_metric(key='final_rho_mean', value=float(rho_mean), step=final_step)
 
-            def _mean(values: list[float]) -> float:
-                return float(sum(values) / max(1, len(values)))
+        def _mean(values: list[float]) -> float:
+            return float(sum(values) / max(1, len(values)))
 
+        self._log_summary_metric(
+            key='final_a_post_mean',
+            value=_mean([float(value) for value in a_post]),
+            step=final_step,
+        )
+        if log_ctrl_metrics:
             self._log_summary_metric(
-                key='final_a_post_mean',
-                value=_mean([float(value) for value in a_post]),
+                key='final_a_ctrl_mean',
+                value=_mean([float(value) for value in a_ctrl]),
                 step=final_step,
             )
-            if log_ctrl_metrics:
-                self._log_summary_metric(
-                    key='final_a_ctrl_mean',
-                    value=_mean([float(value) for value in a_ctrl]),
-                    step=final_step,
-                )
 
 
 def make_evaluation_plugin(
