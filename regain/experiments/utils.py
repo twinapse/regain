@@ -23,6 +23,7 @@ __all__ = [
     'enable_determinism',
     'to_scalar',
     'extract_scalar_metrics',
+    'count_parameters',
 ]
 
 _CONFIG_PARAM_OVERRIDE_MAP: list[tuple[str, list[str]]] = [
@@ -428,16 +429,21 @@ def extract_scalar_metrics(metrics: dict[str, Any] | None) -> dict[str, float]:
     return scalar_results
 
 
-def count_trainable_parameters(module: nn.Module) -> int:
+def count_parameters(module: nn.Module | None, *, trainable_only: bool = False) -> int:
     """
-    Count trainable parameters in a module.
+    Count parameters in a module.
 
     Args:
-        module (nn.Module): Module to inspect.
+        module (nn.Module | None): Module to inspect.
+        trainable_only (bool): If True, count only parameters with `requires_grad=True`.
 
     Returns:
-        int: Number of trainable parameters (0 if module is None).
+        int: Number of parameters (0 if `module` is None).
     """
     if module is None:
         return 0
-    return int(sum(p.numel() for p in module.parameters() if getattr(p, 'requires_grad', False)))
+
+    if trainable_only:
+        return int(sum(p.numel() for p in module.parameters() if getattr(p, 'requires_grad', False)))
+
+    return int(sum(p.numel() for p in module.parameters()))

@@ -484,8 +484,6 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         self._log_health_score_summary()
 
     def _log_health_score_summary(self) -> None:
-        if mlflow.active_run() is None:
-            return
         if not self._health_scores:
             step = self._compute_step(None)
             log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=None)

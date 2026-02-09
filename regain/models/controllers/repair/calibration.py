@@ -62,6 +62,33 @@ class LogitBiasController(RepairController):
         self.bias = nn.Parameter(torch.zeros(0))  # Lazily expanded as new classes appear
         self.to(self.device)
 
+    def initialize_parameters(self, *, model: nn.Module, sample_inputs: Any | None = None) -> None:
+        """
+        Initialize the bias vector size from the model's output width.
+
+        Args:
+            model (nn.Module): Model used to infer logits width.
+            sample_inputs (Any | None): Representative input batch for probing.
+
+        Returns:
+            None.
+        """
+        if sample_inputs is None:
+            return
+        if not torch.is_tensor(sample_inputs):
+            sample_inputs = torch.as_tensor(sample_inputs)
+
+        model_device = module_device(model, self.device)
+        self.to(model_device)
+        x = sample_inputs.to(model_device)
+
+        with preserve_model_mode_after_eval(model):
+            with torch.inference_mode():
+                logits = model(x)
+
+        if torch.is_tensor(logits) and logits.ndim == 2:
+            self._ensure_num_classes(int(logits.shape[1]))
+
     def _ensure_num_classes(self, num_classes: int) -> None:
         """
         Ensure the bias vector has at least `num_classes` elements.
@@ -243,6 +270,24 @@ class BiCController(RepairController):
         self.bias_layer: BiasLayer | None = None  # Single bias layer (overwritten after each experience)
         self._exp_idx: int = 0
         self._rng = np.random.default_rng(self.seed)
+
+    def initialize_parameters(self, *, model: nn.Module, sample_inputs: Any | None = None) -> None:
+        """
+        Instantiate a neutral bias layer for later fitting.
+
+        Args:
+            model (nn.Module): Model used for device placement.
+            sample_inputs (Any | None): Unused.
+
+        Returns:
+            None.
+        """
+        del sample_inputs
+        if self.bias_layer is not None:
+            return
+
+        model_device = module_device(model, self.device)
+        self.bias_layer = BiasLayer([]).to(model_device)
 
     @classmethod
     def requires_per_experience_fitting(cls) -> bool:
