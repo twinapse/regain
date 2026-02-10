@@ -13,6 +13,11 @@ from typing import Any, Iterable, Optional
 
 from regain.analysis.utils import to_float
 from regain.analysis.utils import to_int
+from regain.constants import COLUMN_B
+from regain.constants import COLUMN_CONTROLLER_NAME
+from regain.constants import COLUMN_PERFORMANCE
+from regain.constants import COLUMN_TOTAL_COST
+from regain.constants import METRIC_RHO_MEAN_AVG
 
 
 def _sorted_unique(values: Iterable[Any]) -> list[Any]:
@@ -31,7 +36,7 @@ def plot_analysis_outputs(
     curve_rows: list[dict[str, Any]] | None = None,
     frontier_rows: list[dict[str, Any]] | None = None,
     analysis_out: str | Path | None = None,
-    perf_key: str = 'rho_mean_avg',
+    perf_key: str = METRIC_RHO_MEAN_AVG,
     mode: str = 'show',
     save_dir: str | Path | None = None,
 ) -> list[Path]:
@@ -115,12 +120,12 @@ def plot_analysis_outputs(
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1)
 
-        controllers = _sorted_unique([r.get('controller_name') for r in curve_rows])
+        controllers = _sorted_unique([r.get(COLUMN_CONTROLLER_NAME) for r in curve_rows])
         for c in controllers:
-            rows_c = [r for r in curve_rows if r.get('controller_name') == c]
-            rows_c = sorted(rows_c, key=lambda r: (to_float(r.get('b')) or float('inf')))
+            rows_c = [r for r in curve_rows if r.get(COLUMN_CONTROLLER_NAME) == c]
+            rows_c = sorted(rows_c, key=lambda r: (to_float(r.get(COLUMN_B)) or float('inf')))
 
-            xs = [to_float(r.get('b')) for r in rows_c]
+            xs = [to_float(r.get(COLUMN_B)) for r in rows_c]
             ys = [to_float(r.get(perf_key)) for r in rows_c]
             yerr = [to_float(r.get(std_key_for(perf_key))) for r in rows_c]
 
@@ -154,16 +159,16 @@ def plot_analysis_outputs(
 
         # Decide x-axis: use total_cost when present for at least one point.
         any_total_cost = any(
-            to_int(r.get('total_cost'), coerce_float=True) is not None for r in frontier_rows
+            to_int(r.get(COLUMN_TOTAL_COST), coerce_float=True) is not None for r in frontier_rows
         )
-        x_key = 'total_cost' if any_total_cost else 'b'
+        x_key = COLUMN_TOTAL_COST if any_total_cost else COLUMN_B
 
         # Group by controller for readability.
-        controllers = _sorted_unique([r.get('controller_name') for r in frontier_rows])
+        controllers = _sorted_unique([r.get(COLUMN_CONTROLLER_NAME) for r in frontier_rows])
         for c in controllers:
-            rows_c = [r for r in frontier_rows if r.get('controller_name') == c]
+            rows_c = [r for r in frontier_rows if r.get(COLUMN_CONTROLLER_NAME) == c]
             xs = [to_float(r.get(x_key)) for r in rows_c]
-            ys = [to_float(r.get('performance')) for r in rows_c]
+            ys = [to_float(r.get(COLUMN_PERFORMANCE)) for r in rows_c]
 
             pts = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
             if not pts:
@@ -172,7 +177,7 @@ def plot_analysis_outputs(
             ax.scatter(xs2, ys2, label=str(c))
 
         ax.set_xlabel(x_key)
-        ax.set_ylabel('performance')
+        ax.set_ylabel(COLUMN_PERFORMANCE)
         ax.set_title('Efficiency frontier (points)')
         ax.legend()
 

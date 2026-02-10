@@ -213,9 +213,6 @@ class RepairController(nn.Module, ABC):
         - `on_eval_experience_begin(...)`: Called before evaluating a single experience.
         - `on_eval_experience_end(...)`: Called after evaluating a single experience.
 
-    Evaluation-time gating: `enable()`, `disable()`, and `is_enabled()` control whether evaluation-time output
-    correction is active.
-
     Output correction: `correct_outputs(...)` is called to adjust model predictions during evaluation.
 
     Repair data (optional): Controllers that require dedicated repair data should implement a repair-data interface
@@ -223,10 +220,6 @@ class RepairController(nn.Module, ABC):
 
     Default hook implementations are no-ops; subclasses should override only the methods they need.
     """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._enabled: bool = False
 
     def initialize_parameters(self, *, model: nn.Module, sample_inputs: Any | None = None) -> None:
         """
@@ -241,33 +234,6 @@ class RepairController(nn.Module, ABC):
         """
         del model, sample_inputs
         return
-
-    def enable(self) -> None:
-        """
-        Enable controller application during evaluation.
-
-        Returns:
-            None.
-        """
-        self._enabled = True
-
-    def disable(self) -> None:
-        """
-        Disable controller application during evaluation.
-
-        Returns:
-            None.
-        """
-        self._enabled = False
-
-    def is_enabled(self) -> bool:
-        """
-        Check if the controller is enabled for evaluation.
-
-        Returns:
-            bool: True if enabled, False otherwise.
-        """
-        return self._enabled
 
     @classmethod
     def requires_per_experience_fitting(cls) -> bool:

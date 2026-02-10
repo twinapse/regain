@@ -4,15 +4,16 @@ from typing import Any
 from avalanche.logging import BaseLogger
 import mlflow
 
-from regain.analysis.metrics import METRIC_NAMESPACE_SEPARATOR
 from regain.analysis.metrics import MetricContext
 from regain.analysis.metrics import MetricPhase
+from regain.constants import NS_SEP
 
 __all__ = ['MLflowLogger', 'normalize_metric_name']
 
-_NON_ALNUM_SEP = re.compile(r'[^a-zA-Z0-9_-]+')
+_NS_SEP_ESCAPED = re.escape(NS_SEP)
+_NON_ALNUM_SEP = re.compile(rf'[^a-zA-Z0-9_{_NS_SEP_ESCAPED}]+')
 _MULTI_UNDERSCORE = re.compile(r'_+')
-_MULTI_HYPHEN = re.compile(r'-+')
+_MULTI_NAMESPACE_SEP = re.compile(rf'{_NS_SEP_ESCAPED}+')
 
 
 def normalize_metric_name(raw: str) -> str:
@@ -20,11 +21,10 @@ def normalize_metric_name(raw: str) -> str:
     Normalize a raw Avalanche metric name into a stable MLflow-safe token.
     """
     raw = '' if raw is None else str(raw)
-    norm = raw.replace('/', METRIC_NAMESPACE_SEPARATOR)  # Avalanche uses '/' in metric names
-    # TODO: If `METRIC_NAMESPACE_SEPARATOR` is not "-" or "_", the line below would replace it too
+    norm = raw.replace('/', NS_SEP)  # Avalanche uses '/' in metric names
     norm = _NON_ALNUM_SEP.sub('_', norm)
     norm = _MULTI_UNDERSCORE.sub('_', norm).strip('_')
-    norm = _MULTI_HYPHEN.sub('-', norm).strip('-')
+    norm = _MULTI_NAMESPACE_SEP.sub(NS_SEP, norm).strip(NS_SEP)
     return norm.lower() or 'unnamed_metric'
 
 
@@ -70,7 +70,11 @@ class MLflowLogger(BaseLogger):
             return
 
         normalized = normalize_metric_name(name)
-        metric_key = f'{self.context.log_namespace}{METRIC_NAMESPACE_SEPARATOR}{normalized}'
+        log_namespace = str(self.context.log_namespace or '').strip()
+        if log_namespace:
+            metric_key = f'{log_namespace}{NS_SEP}{normalized}'
+        else:
+            metric_key = normalized
 
         try:
             step = self._compute_step()

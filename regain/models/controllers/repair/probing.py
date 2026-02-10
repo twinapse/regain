@@ -18,7 +18,7 @@ from regain.models.controllers.repair.common import build_repair_dataloader
 from regain.models.controllers.repair.common import build_sgd_optimizer_and_scheduler
 from regain.models.controllers.repair.common import extract_probe_inputs
 from regain.models.controllers.repair.common import fit_repair_controller
-from regain.models.controllers.repair.common import resolve_backbone_or_raise
+from regain.models.controllers.utils import resolve_backbone_or_raise
 from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval
 
@@ -150,7 +150,7 @@ class LinearProbeController(RepairController):
 
     def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
         """
-        Replace logits with probe logits during evaluation when enabled.
+        Replace logits with probe logits during evaluation.
 
         Args:
             outputs (Any): Raw model outputs (ignored if probe is available).
@@ -160,7 +160,7 @@ class LinearProbeController(RepairController):
         Returns:
             Any: Logits from the probe when available; otherwise `outputs`.
         """
-        if not self.is_enabled() or not self._fitted or self._probe is None:
+        if not self._fitted or self._probe is None:
             return outputs
         if model is None or inputs is None:
             return outputs

@@ -13,6 +13,31 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 
 from regain.avalanche_utils.plugins import RepairControllerPlugin
+from regain.constants import EXPERIENCE_KEY_PREFIX
+from regain.constants import METRIC_DIAG_CE
+from regain.constants import METRIC_DIAG_ENTROPY
+from regain.constants import METRIC_DIAG_LOGIT_L2
+from regain.constants import METRIC_DIAG_N_SAMPLES
+from regain.constants import METRIC_DIAG_NUM_CLASSES
+from regain.constants import METRIC_DIAG_PRED_ENTROPY
+from regain.constants import METRIC_DIAG_PRED_HIST
+from regain.constants import METRIC_DIAG_PRED_MAX_FRAC
+from regain.constants import METRIC_DIAG_PRED_UNIQUE
+from regain.constants import METRIC_DIAG_TOP1
+from regain.constants import METRIC_HEALTH
+from regain.constants import METRIC_HEALTH_D_ACC
+from regain.constants import METRIC_HEALTH_D_ENT
+from regain.constants import METRIC_HEALTH_D_MAXFRAC
+from regain.constants import METRIC_HEALTH_D_PREDENT
+from regain.constants import METRIC_HEALTH_D_UNIQUE
+from regain.constants import METRIC_HEALTH_DELTA
+from regain.constants import METRIC_HEALTH_NEUTRAL
+from regain.constants import METRIC_HEALTH_R_CE
+from regain.constants import METRIC_HEALTH_R_NORM
+from regain.constants import METRIC_HEALTH_S1_PERF
+from regain.constants import METRIC_HEALTH_S2_CONF
+from regain.constants import METRIC_HEALTH_S3_DIV
+from regain.constants import NS_SEP
 from regain.debug.metrics import compute_repair_diagnostics
 from regain.debug.metrics import compute_repair_health_score
 from regain.models.controllers import RepairController
@@ -24,6 +49,53 @@ __all__ = [
     'log_debug_metric',
     'log_debug_metrics',
 ]
+
+_DEBUG_PRED_HIST_EXP_FILENAME_TEMPLATE = 'debug_pred_hist_{tag}_exp{exp_idx:03d}.json'
+_DEBUG_PRED_HIST_FILENAME_TEMPLATE = 'debug_pred_hist_{tag}.json'
+_METRIC_DEBUG_REPAIR_DELTA_TEMPLATE = 'repair_{metric}_{mode}_delta'
+_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED = 'repair_diagnostics_skipped'
+_METRIC_DEBUG_REPAIR_HEALTH = 'repair_health'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_D_ACC = 'repair_health_d_acc'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_D_ENT = 'repair_health_d_ent'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_D_MAXFRAC = 'repair_health_d_maxfrac'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_R_CE = 'repair_health_r_ce'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_R_NORM = 'repair_health_r_norm'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_S1_PERF = 'repair_health_s1_perf'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_S2_CONF = 'repair_health_s2_conf'
+_METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_S3_DIV = 'repair_health_s3_div'
+_METRIC_DEBUG_REPAIR_HEALTH_DELTA = 'repair_health_delta'
+_METRIC_DEBUG_REPAIR_HEALTH_D_PREDENT = 'repair_health_d_predent'
+_METRIC_DEBUG_REPAIR_HEALTH_D_UNIQUE = 'repair_health_d_unique'
+_METRIC_DEBUG_REPAIR_HEALTH_FINAL = 'repair_health_final'
+_METRIC_DEBUG_REPAIR_HEALTH_MEAN = 'repair_health_mean'
+_METRIC_DEBUG_REPAIR_HEALTH_MIN = 'repair_health_min'
+_METRIC_DEBUG_REPAIR_HEALTH_NEUTRAL = 'repair_health_neutral'
+_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED = 'repair_health_skipped'
+_METRIC_DEBUG_REPAIR_N_SAMPLES_TEMPLATE = 'repair_n_samples_{mode}_{stage}'
+_METRIC_DEBUG_REPAIR_TEMPLATE = 'repair_{metric}_{mode}_{stage}'
+_NAMESPACE_DEBUG = 'debug'
+
+
+_REPAIR_DIAG_METRIC_KEYS = (
+    METRIC_DIAG_CE,
+    METRIC_DIAG_TOP1,
+    METRIC_DIAG_LOGIT_L2,
+    METRIC_DIAG_ENTROPY,
+    METRIC_DIAG_PRED_UNIQUE,
+    METRIC_DIAG_PRED_MAX_FRAC,
+    METRIC_DIAG_PRED_ENTROPY,
+)
+
+_HEALTH_COMPONENT_KEY_MAP = {
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_S1_PERF: METRIC_HEALTH_S1_PERF,
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_S2_CONF: METRIC_HEALTH_S2_CONF,
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_S3_DIV: METRIC_HEALTH_S3_DIV,
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_R_CE: METRIC_HEALTH_R_CE,
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_D_ACC: METRIC_HEALTH_D_ACC,
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_R_NORM: METRIC_HEALTH_R_NORM,
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_D_ENT: METRIC_HEALTH_D_ENT,
+    _METRIC_DEBUG_REPAIR_HEALTH_COMPONENT_D_MAXFRAC: METRIC_HEALTH_D_MAXFRAC,
+}
 
 
 def format_debug_metric_name(name: str, exp_idx: int | None) -> str:
@@ -37,9 +109,9 @@ def format_debug_metric_name(name: str, exp_idx: int | None) -> str:
     Returns:
         str: Formatted debug metric name.
     """
-    key = f'debug-{name}'
+    key = f'{_NAMESPACE_DEBUG}{NS_SEP}{name}'
     if exp_idx is not None:
-        key = f'{key}-exp{int(exp_idx):03d}'
+        key = f'{key}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}'
     return key
 
 
@@ -157,9 +229,9 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             'total_samples': int(n_samples),
         }
         if exp_idx is None:
-            filename = f'debug_pred_hist_{tag}.json'
+            filename = _DEBUG_PRED_HIST_FILENAME_TEMPLATE.format(tag=tag)
         else:
-            filename = f'debug_pred_hist_{tag}_exp{int(exp_idx):03d}.json'
+            filename = _DEBUG_PRED_HIST_EXP_FILENAME_TEMPLATE.format(tag=tag, exp_idx=int(exp_idx))
         mlflow.log_dict(payload, filename)
 
     def _log_metrics_block(
@@ -171,27 +243,19 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         exp_idx: int | None,
         step: int,
     ) -> None:
-        prefix = f'repair_{{metric}}_{mode}_{stage}'
+        prefix = _METRIC_DEBUG_REPAIR_TEMPLATE
         mapped: dict[str, float] = {}
-        for metric in (
-            'ce',
-            'top1',
-            'logit_l2',
-            'entropy',
-            'pred_unique',
-            'pred_max_frac',
-            'pred_entropy',
-        ):
+        for metric in _REPAIR_DIAG_METRIC_KEYS:
             value = metrics.get(metric)
             if value is None:
                 continue
-            mapped[prefix.format(metric=metric)] = float(value)
+            mapped[prefix.format(metric=metric, mode=mode, stage=stage)] = float(value)
         log_debug_metrics(metrics=mapped, step=step, exp_idx=exp_idx)
 
-        n_samples = metrics.get('n_samples')
+        n_samples = metrics.get(METRIC_DIAG_N_SAMPLES)
         if n_samples is not None:
             log_debug_metric(
-                name=f'repair_n_samples_{mode}_{stage}',
+                name=_METRIC_DEBUG_REPAIR_N_SAMPLES_TEMPLATE.format(mode=mode, stage=stage),
                 value=float(n_samples),
                 step=step,
                 exp_idx=exp_idx,
@@ -207,70 +271,58 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         step: int,
     ) -> None:
         deltas: dict[str, float] = {}
-        for metric in (
-            'ce',
-            'top1',
-            'logit_l2',
-            'entropy',
-            'pred_unique',
-            'pred_max_frac',
-            'pred_entropy',
-        ):
+        for metric in _REPAIR_DIAG_METRIC_KEYS:
             pre_value = pre_metrics.get(metric)
             post_value = post_metrics.get(metric)
             if pre_value is None or post_value is None:
                 continue
-            deltas[f'repair_{metric}_{mode}_delta'] = float(post_value) - float(pre_value)
+            deltas[_METRIC_DEBUG_REPAIR_DELTA_TEMPLATE.format(metric=metric, mode=mode)] = (
+                float(post_value) - float(pre_value)
+            )
         log_debug_metrics(metrics=deltas, step=step, exp_idx=exp_idx)
 
     def _record_health_score(self, *, health_payload: Mapping[str, float], exp_idx: int | None, step: int) -> None:
         log_debug_metric(
-            name='repair_health',
-            value=health_payload['health'],
+            name=_METRIC_DEBUG_REPAIR_HEALTH,
+            value=health_payload[METRIC_HEALTH],
             step=step,
             exp_idx=exp_idx,
         )
         log_debug_metric(
-            name='repair_health_delta',
-            value=health_payload['health_delta'],
+            name=_METRIC_DEBUG_REPAIR_HEALTH_DELTA,
+            value=health_payload[METRIC_HEALTH_DELTA],
             step=step,
             exp_idx=exp_idx,
         )
         log_debug_metric(
-            name='repair_health_neutral',
-            value=health_payload['health_neutral'],
+            name=_METRIC_DEBUG_REPAIR_HEALTH_NEUTRAL,
+            value=health_payload[METRIC_HEALTH_NEUTRAL],
             step=step,
             exp_idx=exp_idx,
         )
         log_debug_metrics(
             metrics={
-                'repair_health_s1_perf': float(health_payload['s1_perf']),
-                'repair_health_s2_conf': float(health_payload['s2_conf']),
-                'repair_health_s3_div': float(health_payload['s3_div']),
-                'repair_health_r_ce': float(health_payload['r_ce']),
-                'repair_health_d_acc': float(health_payload['d_acc']),
-                'repair_health_r_norm': float(health_payload['r_norm']),
-                'repair_health_d_ent': float(health_payload['d_ent']),
-                'repair_health_d_maxfrac': float(health_payload['d_maxfrac']),
+                debug_key: float(health_payload[payload_key])
+                for debug_key, payload_key in _HEALTH_COMPONENT_KEY_MAP.items()
             },
             step=step,
             exp_idx=exp_idx,
         )
-        if 'd_unique' in health_payload:
+        if METRIC_HEALTH_D_UNIQUE in health_payload:
             log_debug_metric(
-                name='repair_health_d_unique',
-                value=float(health_payload['d_unique']),
+                name=_METRIC_DEBUG_REPAIR_HEALTH_D_UNIQUE,
+                value=float(health_payload[METRIC_HEALTH_D_UNIQUE]),
                 step=step,
                 exp_idx=exp_idx,
             )
-        if 'd_predent' in health_payload:
+        if METRIC_HEALTH_D_PREDENT in health_payload:
             log_debug_metric(
-                name='repair_health_d_predent',
-                value=float(health_payload['d_predent']),
+                name=_METRIC_DEBUG_REPAIR_HEALTH_D_PREDENT,
+                value=float(health_payload[METRIC_HEALTH_D_PREDENT]),
                 step=step,
                 exp_idx=exp_idx,
             )
-        self._health_scores.append(float(health_payload['health']))
+        self._health_scores.append(float(health_payload[METRIC_HEALTH]))
 
     def _run_debug_fit(
         self,
@@ -295,8 +347,8 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         )
 
         if not ctrl_pre_raw:
-            log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=exp_idx)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         # Snapshot controller object pre-fit.
@@ -329,17 +381,17 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         )
 
         if not ctrl_post_raw:
-            log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=exp_idx)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         # Shared label space for comparable pre/post metrics.
-        pre_classes = int(ctrl_pre_raw.get('num_classes') or 0)
-        post_classes = int(ctrl_post_raw.get('num_classes') or 0)
+        pre_classes = int(ctrl_pre_raw.get(METRIC_DIAG_NUM_CLASSES) or 0)
+        post_classes = int(ctrl_post_raw.get(METRIC_DIAG_NUM_CLASSES) or 0)
         shared_classes = min(pre_classes, post_classes)
         if shared_classes <= 0:
-            log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=exp_idx)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         # Recompute post-fit diagnostics in the shared label space.
@@ -354,14 +406,14 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             max_samples=self._debug_max_samples,
         )
         if not ctrl_post:
-            log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=exp_idx)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         # Recompute pre-fit diagnostics in the shared label space using the snapshot.
         if pre_controller is None:
-            log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=exp_idx)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         ctrl_pre = compute_repair_diagnostics(
@@ -386,33 +438,33 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         )
 
         if not ctrl_pre:
-            log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=exp_idx)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         self._log_metrics_block(metrics=ctrl_pre, mode='ctrl', stage='pre', exp_idx=exp_idx, step=step)
         if base_pre:
             self._log_metrics_block(metrics=base_pre, mode='base', stage='pre', exp_idx=exp_idx, step=step)
 
-        if ctrl_pre.get('pred_hist'):
+        if ctrl_pre.get(METRIC_DIAG_PRED_HIST):
             self._log_pred_histogram(
-                pred_hist=list(ctrl_pre['pred_hist']),
-                n_samples=int(ctrl_pre.get('n_samples', 0)),
+                pred_hist=list(ctrl_pre[METRIC_DIAG_PRED_HIST]),
+                n_samples=int(ctrl_pre.get(METRIC_DIAG_N_SAMPLES, 0)),
                 exp_idx=exp_idx,
                 tag='pre',
             )
 
         self._log_metrics_block(metrics=ctrl_post, mode='ctrl', stage='post', exp_idx=exp_idx, step=step)
         if (
-            ctrl_pre.get('num_classes') == ctrl_post.get('num_classes')
-            and ctrl_pre.get('n_samples') == ctrl_post.get('n_samples')
+            ctrl_pre.get(METRIC_DIAG_NUM_CLASSES) == ctrl_post.get(METRIC_DIAG_NUM_CLASSES)
+            and ctrl_pre.get(METRIC_DIAG_N_SAMPLES) == ctrl_post.get(METRIC_DIAG_N_SAMPLES)
         ):
             self._log_deltas(pre_metrics=ctrl_pre, post_metrics=ctrl_post, mode='ctrl', exp_idx=exp_idx, step=step)
 
-        if ctrl_post.get('pred_hist'):
+        if ctrl_post.get(METRIC_DIAG_PRED_HIST):
             self._log_pred_histogram(
-                pred_hist=list(ctrl_post['pred_hist']),
-                n_samples=int(ctrl_post.get('n_samples', 0)),
+                pred_hist=list(ctrl_post[METRIC_DIAG_PRED_HIST]),
+                n_samples=int(ctrl_post.get(METRIC_DIAG_N_SAMPLES, 0)),
                 exp_idx=exp_idx,
                 tag='post',
             )
@@ -421,7 +473,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             health_payload = compute_repair_health_score(pre_metrics=ctrl_pre, post_metrics=ctrl_post)
         except Exception:
             get_logger().warning('Failed to compute repair health score', exc_info=True)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         self._record_health_score(health_payload=health_payload, exp_idx=exp_idx, step=step)
@@ -448,8 +500,8 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         if combined_dataset is None:
             exp_idx = int(getattr(experience, 'current_experience', 0))
             step = self._compute_step(exp_idx)
-            log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=exp_idx)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return
 
         exp_idx = int(getattr(experience, 'current_experience', 0))
@@ -471,8 +523,8 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             combined_dataset = self._combined_repair_dataset()
             if combined_dataset is None:
                 step = self._compute_step(None)
-                log_debug_metric(name='repair_diagnostics_skipped', value=1.0, step=step, exp_idx=None)
-                log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=None)
+                log_debug_metric(name=_METRIC_DEBUG_REPAIR_DIAGNOSTICS_SKIPPED, value=1.0, step=step, exp_idx=None)
+                log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=None)
                 return
             self._run_debug_fit(
                 model=model,
@@ -486,7 +538,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
     def _log_health_score_summary(self) -> None:
         if not self._health_scores:
             step = self._compute_step(None)
-            log_debug_metric(name='repair_health_skipped', value=1.0, step=step, exp_idx=None)
+            log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=None)
             return
 
         final_step = self._compute_step(None)
@@ -494,6 +546,6 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         min_score = float(min(self._health_scores))
         final_score = float(self._health_scores[-1])
 
-        log_debug_metric(name='repair_health_mean', value=mean_score, step=final_step, exp_idx=None)
-        log_debug_metric(name='repair_health_min', value=min_score, step=final_step, exp_idx=None)
-        log_debug_metric(name='repair_health_final', value=final_score, step=final_step, exp_idx=None)
+        log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_MEAN, value=mean_score, step=final_step, exp_idx=None)
+        log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_MIN, value=min_score, step=final_step, exp_idx=None)
+        log_debug_metric(name=_METRIC_DEBUG_REPAIR_HEALTH_FINAL, value=final_score, step=final_step, exp_idx=None)

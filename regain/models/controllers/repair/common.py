@@ -19,7 +19,9 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
+from regain.constants import PARAM_BACKBONE
 from regain.models.controllers.base import RepairController
+from regain.models.controllers.utils import resolve_backbone_or_raise
 from regain.utils import get_logger
 from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval
@@ -506,10 +508,7 @@ def maybe_correct_outputs(
     Returns:
         Any: Corrected outputs when possible; otherwise `outputs`.
     """
-    # Fast-path exits when we cannot or should not recompute outputs.
-    # Skip recomputation when the controller is disabled.
-    if not controller.is_enabled():
-        return outputs
+    # Fast-path exits when we cannot recompute outputs.
     # Require both model and inputs to recompute outputs.
     if model is None or inputs is None:
         return outputs
@@ -590,31 +589,6 @@ def _resolve_residual_stage_units(*, backbone: nn.Module) -> list[tuple[str, nn.
     return units
 
 
-def resolve_backbone_or_raise(*, model: nn.Module) -> nn.Module:
-    """
-    Resolve a backbone/encoder module from `model`.
-
-    Args:
-        model (nn.Module): Model expected to expose `.backbone` or `.encoder`.
-
-    Returns:
-        nn.Module: Backbone/encoder module.
-
-    Raises:
-        ValueError: If neither `.backbone` nor `.encoder` is present.
-    """
-    # Prefer an explicit backbone, then fall back to an encoder attribute.
-    backbone = getattr(model, 'backbone', None)
-    # Return the backbone when present.
-    if isinstance(backbone, nn.Module):
-        return backbone
-    encoder = getattr(model, 'encoder', None)
-    # Return the encoder when present.
-    if isinstance(encoder, nn.Module):
-        return encoder
-    raise ValueError('Gain controllers require the model to expose a `.backbone` (or `.encoder`) module.')
-
-
 def resolve_stage_units(*, backbone: nn.Module, max_units: int | None) -> list[tuple[str, nn.Module]]:
     """
     Resolve coarse stage-like units under a backbone.
@@ -667,7 +641,7 @@ def resolve_stage_units(*, backbone: nn.Module, max_units: int | None) -> list[t
 
     if not units:
         # Last resort: treat the entire backbone as a single unit.
-        units = [('backbone', backbone)]
+        units = [(PARAM_BACKBONE, backbone)]
 
     return units
 

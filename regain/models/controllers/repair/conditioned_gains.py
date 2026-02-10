@@ -19,10 +19,10 @@ from regain.models.controllers.repair.common import fit_repair_controller
 from regain.models.controllers.repair.common import log_gain_max
 from regain.models.controllers.repair.common import maybe_correct_outputs
 from regain.models.controllers.repair.common import prepare_repair_fit_context
-from regain.models.controllers.repair.common import resolve_backbone_or_raise
 from regain.models.controllers.repair.common import resolve_block_units
 from regain.models.controllers.repair.common import resolve_stage_units
 from regain.models.controllers.repair.common import run_model_with_hooks
+from regain.models.controllers.utils import resolve_backbone_or_raise
 from regain.utils import cast_tensor
 from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval

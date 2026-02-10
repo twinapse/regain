@@ -3,27 +3,54 @@ MLflow utilities.
 """
 
 import contextlib
+from datetime import datetime
+from datetime import timezone
+import json
 import os
 from pathlib import Path
+import tempfile
 from typing import Final, Iterator, Sequence
 from urllib.parse import urlparse
 
 import mlflow
+from mlflow.entities import Experiment
 from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
+from mlflow.utils.yaml_utils import write_yaml
+
+from regain.constants import COLUMN_END_TIME
+from regain.constants import COLUMN_EXPERIMENT_ID
+from regain.constants import COLUMN_PARENT_RUN_ID
+from regain.constants import COLUMN_RUN_ID
+from regain.constants import COLUMN_RUN_NAME
+from regain.constants import COLUMN_START_TIME
+from regain.constants import COLUMN_STATUS
+from regain.constants import PARAM_RUN_NAME
 
 __all__ = [
-    'resolve_tracking_uri',
-    'resolve_artifact_uri',
-    'set_tracking_uri',
+    'build_mlflow_run_columns',
+    'download_json_artifact',
     'ensure_experiment',
+    'format_timestamp_ms',
     'init_mlflow',
+    'is_parent_mlflow_run',
+    'resolve_artifact_uri',
     'resolve_experiment_id',
+    'resolve_mlflow_parent_run_id',
+    'resolve_mlflow_run_name',
+    'resolve_tracking_uri',
     'search_runs_paginated',
+    'set_tracking_uri',
+    'write_experiment_meta_yaml',
 ]
 
 
 _DEFAULT_SQLITE_DB_NAME: Final[str] = 'mlflow.db'
+
+
+##########################
+# URI/path normalization #
+##########################
 
 
 def _path_to_sqlite_uri(path: Path) -> str:
@@ -139,6 +166,11 @@ def set_tracking_uri(
     return resolved
 
 
+####################################
+# Experiment/run lifecycle helpers #
+####################################
+
+
 def ensure_experiment(
     *,
     experiment_name: str,
@@ -204,6 +236,11 @@ def init_mlflow(
         mlflow.set_experiment(experiment_name)
     with mlflow.start_run(run_name=run_name) as run:
         yield run
+
+
+################################
+# Experiment search/query APIs #
+################################
 
 
 def resolve_experiment_id(
@@ -296,3 +333,200 @@ def search_runs_paginated(
         if not page_token:
             break
     return all_runs
+
+
+######################
+# Run info resolvers #
+######################
+
+
+def is_parent_mlflow_run(*, run: Run) -> bool:
+    """
+    Check whether an MLflow run is a parent run.
+
+    Args:
+        run (Run): MLflow run.
+
+    Returns:
+        bool: True when the run is not nested.
+    """
+    tags = dict(run.data.tags or {})
+    return 'mlflow.parentRunId' not in tags
+
+
+def resolve_mlflow_run_name(*, run: Run) -> str:
+    """
+    Resolve a stable run name from MLflow run data.
+
+    Args:
+        run (Run): MLflow run.
+
+    Returns:
+        str: Resolved run name (empty string when missing).
+    """
+    param_run_name = run.data.params.get(PARAM_RUN_NAME)
+    if param_run_name:
+        return str(param_run_name)
+
+    info_name = getattr(run.info, PARAM_RUN_NAME, None)
+    if info_name:
+        return str(info_name)
+
+    tags = dict(run.data.tags or {})
+    tag_name = tags.get('mlflow.runName')
+    if tag_name:
+        return str(tag_name)
+    return ''
+
+
+def resolve_mlflow_parent_run_id(*, run: Run) -> str:
+    """
+    Resolve the parent run id for an MLflow run.
+
+    Args:
+        run (Run): MLflow run.
+
+    Returns:
+        str: Parent run id when nested, otherwise empty string.
+    """
+    parent_run_id = run.data.tags.get('mlflow.parentRunId')
+    if parent_run_id is None:
+        return ''
+    return str(parent_run_id)
+
+
+########################
+# Export/table helpers #
+########################
+
+
+def format_timestamp_ms(timestamp_ms: int | None) -> str:
+    """
+    Format a millisecond timestamp as an ISO-8601 UTC string.
+
+    Args:
+        timestamp_ms (int | None): Millisecond timestamp since epoch.
+
+    Returns:
+        str: ISO-8601 UTC timestamp string or empty string if unavailable.
+    """
+    if timestamp_ms is None:
+        return ''
+    return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc).isoformat()
+
+
+def build_mlflow_run_columns(
+    *,
+    run: Run,
+    include_params: bool = True,
+    include_metrics: bool = True,
+) -> dict[str, object]:
+    """
+    Build a flattened column map for a single MLflow run.
+
+    Args:
+        run (Run): MLflow run to flatten.
+        include_params (bool): Whether to include parameter columns.
+        include_metrics (bool): Whether to include metric columns.
+
+    Returns:
+        dict[str, object]: Flattened columns for the run.
+    """
+    columns: dict[str, object] = {}
+    run_name = resolve_mlflow_run_name(run=run)
+    parent_run_id = resolve_mlflow_parent_run_id(run=run)
+
+    columns[COLUMN_RUN_ID] = run.info.run_id
+    columns[COLUMN_RUN_NAME] = run_name
+    columns[COLUMN_PARENT_RUN_ID] = parent_run_id
+    columns[COLUMN_STATUS] = run.info.status
+    columns[COLUMN_START_TIME] = format_timestamp_ms(run.info.start_time)
+    columns[COLUMN_END_TIME] = format_timestamp_ms(run.info.end_time)
+
+    reserved_keys = {
+        COLUMN_RUN_ID,
+        COLUMN_RUN_NAME,
+        COLUMN_PARENT_RUN_ID,
+        COLUMN_STATUS,
+        COLUMN_START_TIME,
+        COLUMN_END_TIME,
+    }
+    if include_params:
+        for param_key, param_value in run.data.params.items():
+            if param_key in reserved_keys:
+                continue
+            columns[param_key] = param_value
+    if include_metrics:
+        for metric_key, metric_value in run.data.metrics.items():
+            if metric_key in reserved_keys:
+                continue
+            columns[metric_key] = metric_value
+    return columns
+
+
+def write_experiment_meta_yaml(*, experiment: Experiment, output_dir: Path) -> None:
+    """
+    Write experiment metadata to a meta.yaml file.
+
+    Args:
+        experiment (Experiment): MLflow experiment metadata.
+        output_dir (Path): Directory where meta.yaml should be written.
+
+    Returns:
+        None
+    """
+    experiment_dict = dict(experiment)
+    experiment_dict[COLUMN_EXPERIMENT_ID] = str(experiment.experiment_id)
+    write_yaml(str(output_dir), 'meta.yaml', experiment_dict, overwrite=True)
+
+
+####################
+# Artifact helpers #
+####################
+
+
+def download_json_artifact(
+    *,
+    client: MlflowClient,
+    run_id: str,
+    artifact_path: str,
+) -> dict[str, object] | None:
+    """
+    Download and parse a JSON artifact from an MLflow run.
+
+    Args:
+        client (MlflowClient): MLflow client.
+        run_id (str): Source run id.
+        artifact_path (str): Artifact path in the run.
+
+    Returns:
+        dict[str, object] | None: Parsed artifact payload, if available.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            downloaded_path = client.download_artifacts(
+                run_id,
+                artifact_path,
+                temp_dir,
+            )
+            local_path = Path(downloaded_path)
+            if local_path.is_dir():
+                local_path = local_path / Path(artifact_path).name
+            if not local_path.exists():
+                return None
+            return json.loads(local_path.read_text(encoding='utf-8'))
+    except Exception:
+        try:
+            local_path = Path(
+                mlflow.artifacts.download_artifacts(
+                    run_id=run_id,
+                    artifact_path=artifact_path,
+                )
+            )
+            if local_path.is_dir():
+                local_path = local_path / Path(artifact_path).name
+            if not local_path.exists():
+                return None
+            return json.loads(local_path.read_text(encoding='utf-8'))
+        except Exception:
+            return None
