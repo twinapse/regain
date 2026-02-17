@@ -14,6 +14,7 @@ import torch
 from torch.optim import SGD
 
 from regain.avalanche_utils.plugins import ControllerPlugin
+from regain.avalanche_utils.plugins import LRSchedulerPlugin
 from regain.avalanche_utils.plugins import PreventionControllerPlugin
 from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.avalanche_utils.scenarios import get_scenario_builder
@@ -34,6 +35,7 @@ from regain.models.controllers import PreventionController
 from regain.models.controllers import RepairController
 from regain.registry import get_backbone_path
 from regain.registry import get_controller_path
+from regain.registry import get_lr_scheduler_path
 from regain.registry import import_symbol
 
 __all__ = [
@@ -41,6 +43,7 @@ __all__ = [
     'build_benchmark',
     'build_controller',
     'build_controller_plugin',
+    'build_lr_scheduler_plugin',
     'build_optimizer',
     'make_strategy',
 ]
@@ -298,6 +301,39 @@ def build_optimizer(
         optimizer = SGD(model.parameters(), **optimizer_kwargs)
         return optimizer, optimizer_kwargs
     raise ValueError(f'Unsupported optimizer: {optimizer_config.name}')
+
+
+##################
+# LR Schedulers  #
+##################
+
+
+def build_lr_scheduler_plugin(
+    *,
+    name: str,
+    scheduler_kwargs: dict[str, object],
+    initial_lr: float = 0.1,
+) -> LRSchedulerPlugin:
+    """
+    Build an LR scheduler plugin from a registry name.
+
+    Args:
+        name (str): LR scheduler registry name.
+        scheduler_kwargs (dict[str, object]): Keyword arguments for the scheduler.
+        initial_lr (float): Initial learning rate to reset to each experience.
+
+    Returns:
+        LRSchedulerPlugin: Configured LR scheduler plugin.
+    """
+    scheduler_path = get_lr_scheduler_path(name)
+    scheduler_cls = import_symbol(scheduler_path)
+    if not inspect.isclass(scheduler_cls):
+        raise TypeError(f'LR scheduler symbol is not a class: {scheduler_path}')
+    return LRSchedulerPlugin(
+        scheduler_cls=scheduler_cls,
+        scheduler_kwargs=scheduler_kwargs,
+        initial_lr=initial_lr,
+    )
 
 
 ###############
