@@ -8,12 +8,26 @@ from typing import Dict, List, Sequence
 from regain.analysis.metrics import mean_ignore_invalid
 from regain.analysis.metrics import retrieval_correctable_fractions
 from regain.analysis.utils import to_float
+from regain.constants import METRIC_A_CTRL
+from regain.constants import METRIC_A_POST
+from regain.constants import METRIC_A_REF
+from regain.constants import METRIC_EPS
+from regain.constants import METRIC_RHO
+from regain.constants import METRIC_RHO_MEAN
 
 __all__ = [
     'build_analysis_artifacts',
     'extract_top1_by_experience',
     'ordered_accuracies',
 ]
+
+_METRIC_DELTA_A = 'delta_a'
+_METRIC_F_RES = 'f_res'
+_METRIC_F_TOTAL = 'f_total'
+_METRIC_TOKEN_AVALANCHE_EVAL_PHASE = 'eval_phase'
+_METRIC_TOKEN_AVALANCHE_TEST_STREAM = 'test_stream'
+_METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP = 'Top1_Acc_Exp'
+
 
 _EXP_RE = re.compile(r'(?:^|/|\b)Exp(\d+)(?:\b|/|$)')
 
@@ -52,12 +66,18 @@ def extract_top1_by_experience(
     preferred_keys = {
         key: value
         for key, value in eval_results.items()
-        if 'Top1_Acc_Exp' in key and ('eval_phase' in key) and ('test_stream' in key)
+        if _METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP in key
+        and (_METRIC_TOKEN_AVALANCHE_EVAL_PHASE in key)
+        and (_METRIC_TOKEN_AVALANCHE_TEST_STREAM in key)
     }
     if preferred_keys:
         _maybe_record(preferred_keys)
     else:
-        candidates = {key: value for key, value in eval_results.items() if 'Top1_Acc_Exp' in key}
+        candidates = {
+            key: value
+            for key, value in eval_results.items()
+            if _METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP in key
+        }
         _maybe_record(candidates)
     return acc_by_exp
 
@@ -123,13 +143,13 @@ def build_analysis_artifacts(
     rho_mean = mean_ignore_invalid(rho)
 
     return {
-        'a_ref': a_ref_list,
-        'a_post': a_post_list,
-        'a_ctrl': a_ctrl_list,
-        'f_total': f_total,
-        'f_res': f_res,
-        'delta_a': delta_a,
-        'rho': rho,
-        'rho_mean': rho_mean,
-        'eps': eps,
+        METRIC_A_REF: a_ref_list,
+        METRIC_A_POST: a_post_list,
+        METRIC_A_CTRL: a_ctrl_list,
+        _METRIC_F_TOTAL: f_total,
+        _METRIC_F_RES: f_res,
+        _METRIC_DELTA_A: delta_a,
+        METRIC_RHO: rho,
+        METRIC_RHO_MEAN: rho_mean,
+        METRIC_EPS: eps,
     }

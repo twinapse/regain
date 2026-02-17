@@ -1,112 +1,65 @@
 experiment_name: retrieval_controllers_split_cifar100
 scenario: split_cifar100
 num_experiences: 10
-num_epochs: 10
-repair_budget_per_class: 100
-replay_memory_size: 2000
-replay_batch_size: 128
-train_batch_size: 128
+backbone:
+  name: resnet18
+  training:
+    num_epochs: 10
+    strategy:
+      name: replay
+      kwargs:
+        mem_size: 2000
+        batch_size_mem: 128
+    optimizer:
+      name: sgd
+      kwargs:
+        lr: 0.1
+        momentum: 0.9
+        weight_decay: 5e-4
+    batch_size: 128
+  source_experiment: null
+repair:
+  budget_per_class: 100
+  fit_schedule: per_experience
+  num_epochs: 10
+  batch_size: 128
 eval_batch_size: 128
-eval_every: -1
+eval_schedule: final_only
+checkpoints_enabled: false
+device: auto
 seed: 1
 deterministic: false
-device: auto
 mlflow_tracking_uri: null
 mlflow_artifact_uri: null
 dataset_path: null
-runs_config:
-  - run_name: logit_bias
-    eval_mode: compare
-    strategy:
-      name: naive
-      params: {}
-    optimizer:
-      name: sgd
-      params:
-        lr: 0.1
-        momentum: 0.9
-        weight_decay: 5e-4
+runs:
+  - name: logit_bias
     controller:
       name: logit_bias
-      params:
+      kwargs:
         lr: 0.1
-  - run_name: linear_probe
-    eval_mode: compare
-    strategy:
-      name: naive
-      params: {}
-    optimizer:
-      name: sgd
-      params:
-        lr: 0.1
-        momentum: 0.9
-        weight_decay: 5e-4
+  - name: linear_probe
     controller:
       name: linear_probe
-      params:
+      kwargs:
         lr: 0.1
-  - run_name: bic
-    strategy:
-      name: naive
-      params: {}
-    optimizer:
-      name: sgd
-      params:
-        lr: 0.1
-        momentum: 0.9
-        weight_decay: 5e-4
+  - name: bic
     controller:
       name: bic
-      params: {}
-  - run_name: il2m
-    strategy:
-      name: naive
-      params: {}
-    optimizer:
-      name: sgd
-      params:
-        lr: 0.1
-        momentum: 0.9
-        weight_decay: 5e-4
+      kwargs: {}
+  - name: il2m
     controller:
       name: il2m
-      params: {}
-  - run_name: cn
-    strategy:
-      name: naive
-      params: {}
-    optimizer:
-      name: sgd
-      params:
-        lr: 0.1
-        momentum: 0.9
-        weight_decay: 5e-4
+      kwargs: {}
+  - name: cn
     controller:
       name: cn
-      params: {}
-  - run_name: tbbn
-    strategy:
-      name: replay
-      params: {}
-    optimizer:
-      name: sgd
-      params:
-        lr: 0.1
-        momentum: 0.9
-        weight_decay: 5e-4
+      kwargs: {}
+  - name: tbbn
     controller:
       name: tbbn
-      params: {}
-  - run_name: bace
-    strategy:
-      name: naive
-      params: {}
-    optimizer:
-      name: sgd
-      params:
-        lr: 0.1
-        momentum: 0.9
-        weight_decay: 5e-4
+      kwargs: {}
+  - name: bace
     controller:
       name: bace
-      params: {}
+      kwargs: {}

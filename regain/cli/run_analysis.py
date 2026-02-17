@@ -19,6 +19,7 @@ from regain.analysis.curves import write_recoverability_curves
 from regain.analysis.exports import export_analysis_to_json
 from regain.analysis.frontier import write_efficiency_frontiers
 from regain.analysis.plotting import plot_analysis_outputs
+from regain.constants import METRIC_RHO_MEAN_AVG
 from regain.utils import get_logger
 
 __all__ = [
@@ -117,7 +118,7 @@ def main() -> None:
     p.add_argument('--default-num-classes', type=int, default=None, help='Fallback num classes when not logged.')
     p.add_argument('--show-plots', action='store_true', help='Show plots.')
     p.add_argument('--save-plots', action='store_true', help='Save plots.')
-    p.add_argument('--perf-key', type=str, default='rho_mean_avg', help='Performance key to maximize.')
+    p.add_argument('--perf-key', type=str, default=METRIC_RHO_MEAN_AVG, help='Performance key to maximize.')
 
     sub = p.add_subparsers(dest='cmd', required=True)
     sub.add_parser('collect', help='Collect MLflow runs into tidy tables.')
@@ -177,14 +178,14 @@ def main() -> None:
         points_path, pareto_path = write_efficiency_frontiers(
             curve_rows=curve_rows,
             out_dir=frontier_dir,
-            perf_key=str(getattr(args, 'perf_key', 'rho_mean_avg')),
+            perf_key=str(getattr(args, 'perf_key', METRIC_RHO_MEAN_AVG)),
         )
         logger.info(f'Frontier written: {points_path}, {pareto_path}')
 
     # Optional visualization / plot export.
     mode = _plot_mode(show=bool(args.show_plots), save=bool(args.save_plots))
     if mode != 'none' and args.cmd in ['curves', 'frontier', 'all']:
-        plot_perf_key = str(getattr(args, 'perf_key', 'rho_mean_avg'))
+        plot_perf_key = str(getattr(args, 'perf_key', METRIC_RHO_MEAN_AVG))
         saved = plot_analysis_outputs(
             analysis_out=experiment_dir,
             perf_key=plot_perf_key,

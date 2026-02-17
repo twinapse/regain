@@ -2,20 +2,24 @@
 Experiment runners for Avalanche-based continual learning workflows.
 """
 
-from regain.experiments.core import run_experiment
-from regain.experiments.utils import ControllerConfig
-from regain.experiments.utils import EvalMode
-from regain.experiments.utils import ExperimentConfig
-from regain.experiments.utils import load_experiment_config
-from regain.experiments.utils import OptimizerConfig
-from regain.experiments.utils import RunConfig
-from regain.experiments.utils import StrategyConfig
+from regain.experiments.config import BackboneConfig
+from regain.experiments.config import ControllerConfig
+from regain.experiments.config import ExperimentConfig
+from regain.experiments.config import load_experiment_config
+from regain.experiments.config import OptimizerConfig
+from regain.experiments.config import RepairConfig
+from regain.experiments.config import RunConfig
+from regain.experiments.config import StrategyConfig
+from regain.experiments.config import TrainingConfig
+from regain.experiments.orchestrator import run_experiment
 
 __all__ = [
+    'BackboneConfig',
     'ControllerConfig',
-    'EvalMode',
     'StrategyConfig',
     'OptimizerConfig',
+    'TrainingConfig',
+    'RepairConfig',
     'RunConfig',
     'ExperimentConfig',
     'load_experiment_config',

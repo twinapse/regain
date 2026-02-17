@@ -48,15 +48,15 @@ and health score diagnostics.
 
 The typical workflow is:
 
-1) **Run an experiment** (logs metrics to MLflow).  
-2) **Run analysis** on the logged runs (writes CSV artifacts, and optionally plots).
+1) **Run experiments** (logs metrics to MLflow).  
+2) **Run analysis** on the logged runs (writes analysis artifacts, and optionally plots).
 
-### 1) Run an experiment (log metrics)
+### 1) Run experiments (log metrics)
 
-Provide a YAML config and run:
+Provide one or more YAML configs (comma-separated) and run:
 
 ```bash
-python -m regain.cli.run_experiment --config_file ./config/experiment.yaml
+python -m regain.cli.run_experiment --config_files ./config/experiment_a.yaml,./config/experiment_b.yaml
 ```
 
 This produces MLflow runs under your configured SQLite tracking URI (or the default `./mlflow.db` SQLite store).
@@ -64,19 +64,19 @@ If you set `mlflow_tracking_uri` in the YAML, it must be a SQLite URI (e.g., `sq
 filesystem path to a `.db` file. Artifact storage defaults to `./mlruns` unless you set `mlflow_artifact_uri` to a
 filesystem path or artifact URI (e.g., `file:///path/to/mlruns`).
 
-To export all MLflow runs in the experiment to CSVs (one row per run, written to 
-`./<export_dir>/<experiment>/run_metadata.csv`, `./<export_dir>/<experiment>/run_params.csv`, and 
+To export all MLflow runs in each experiment to CSVs (one row per run, written to
+`./<export_dir>/<experiment>/run_metadata.csv`, `./<export_dir>/<experiment>/run_params.csv`, and
 `./<export_dir>/<experiment>/run_metrics.csv`, overwrites existing exports to capture the latest snapshot/state):
 
 ```bash
-python -m regain.cli.run_experiment --config_file ./config/experiment.yaml --export-dir ./exports
+python -m regain.cli.run_experiment --config_files ./config/experiment_a.yaml,./config/experiment_b.yaml --export-dir ./exports
 ```
 
 ### 2) Analyze logged runs (write artifacts, optionally plot)
 
 `run_analysis` has subcommands:
 
-* `collect`: download/aggregate MLflow runs into tidy CSV tables
+* `collect`: download/aggregate finished parent MLflow runs into tidy JSONL tables
 * `curves`: compute recoverability curves (requires `collect`)
 * `frontier`: compute the efficiency frontier from the curve CSV (requires `curves` output)
 * `all`: run `collect + curves + frontier`
@@ -109,7 +109,7 @@ python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./a
 
 Outputs are organized under:
 
-* `./analysis_results/<experiment>/tables/` (from `collect`)
+* `./analysis_results/<experiment>/tables/` (from `collect`; JSONL: `runs_table.jsonl`, `experiences_table.jsonl`)
 * `./analysis_results/<experiment>/curves/` (from `curves`)
 * `./analysis_results/<experiment>/frontier/` (from `frontier`)
 * `./analysis_results/<experiment>/plots/` (when `--save-plots` is used)

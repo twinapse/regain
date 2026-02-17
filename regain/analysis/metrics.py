@@ -7,8 +7,10 @@ from enum import Enum
 import math
 from typing import Iterable, List, Optional, Tuple
 
+from regain.constants import NAMESPACE_EVAL
+from regain.constants import NAMESPACE_TRAIN
+
 __all__ = [
-    'METRIC_NAMESPACE_SEPARATOR',
     'MetricContext',
     'MetricPhase',
     'mean_ignore_invalid',
@@ -16,12 +18,10 @@ __all__ = [
     'retrieval_correctable_fractions',
 ]
 
-METRIC_NAMESPACE_SEPARATOR = '-'  # Avalanche uses "/", but we prefer "-" for logging
-
 
 class MetricPhase(Enum):
-    TRAIN = 'train'
-    EVAL = 'eval'
+    TRAIN = NAMESPACE_TRAIN
+    EVAL = NAMESPACE_EVAL
 
 
 @dataclass
@@ -43,7 +43,7 @@ class MetricContext:
     epoch_index: int = 0
     train_step: int = 0
     log_step: int = 0
-    log_namespace: str = 'train'
+    log_namespace: str = NAMESPACE_TRAIN
     log_enabled: bool = False
 
     _epoch_in_experience: int = 0  # Internal counter for deterministic epoch tracking

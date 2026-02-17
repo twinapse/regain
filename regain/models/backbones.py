@@ -24,7 +24,7 @@ class ResNet18Backbone(nn.Module):
 
     def __init__(self, pretrained: bool = False) -> None:
         super().__init__()
-        # Use the legacy `pretrained` flag for broad torchvision compatibility.
+        # Use the `pretrained` argument for compatibility across torchvision variants.
         resnet = tvm.resnet18(pretrained=pretrained)
         # Strip the final classification layer.
         self.features = nn.Sequential(*list(resnet.children())[:-1])

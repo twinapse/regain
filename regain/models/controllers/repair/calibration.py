@@ -200,7 +200,7 @@ class LogitBiasController(RepairController):
 
     def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
         """
-        Add the learned bias to logits during evaluation when enabled.
+        Add the learned bias to logits during evaluation.
 
         Args:
             outputs (Any): Logits shaped `(batch, num_classes)`.
@@ -210,8 +210,6 @@ class LogitBiasController(RepairController):
         Returns:
             Any: Adjusted logits.
         """
-        if not self.is_enabled():
-            return outputs
         if not torch.is_tensor(outputs):
             return outputs
         if outputs.ndim != 2:
@@ -369,7 +367,7 @@ class BiCController(RepairController):
         self._exp_idx += 1
 
     def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
-        if not self.is_enabled() or self.bias_layer is None:
+        if self.bias_layer is None:
             return outputs
         if not torch.is_tensor(outputs) or outputs.ndim != 2:
             return outputs
@@ -550,8 +548,6 @@ class IL2MController(RepairController):
     def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
         del model, inputs
 
-        if not self.is_enabled():
-            return outputs
         if not torch.is_tensor(outputs) or outputs.ndim != 2:
             return outputs
 

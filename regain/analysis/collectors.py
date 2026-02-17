@@ -9,8 +9,7 @@ This module converts MLflow runs into tidy tables suitable for automation of:
 import json
 from pathlib import Path
 import re
-import tempfile
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -18,7 +17,36 @@ from mlflow.tracking import MlflowClient
 from regain.analysis.utils import mean
 from regain.analysis.utils import to_float
 from regain.analysis.utils import to_int
+from regain.constants import COLUMN_B
+from regain.constants import COLUMN_CONTROLLER_MODEL_PARAM_COUNT
+from regain.constants import COLUMN_CONTROLLER_NAME
+from regain.constants import COLUMN_EXP_IDX
+from regain.constants import COLUMN_EXPERIMENT_ID
+from regain.constants import COLUMN_NUM_CLASSES
+from regain.constants import COLUMN_REPAIR_BUDGET_PER_CLASS
+from regain.constants import COLUMN_REPAIR_BUDGET_TOTAL
+from regain.constants import COLUMN_RUN_ID
+from regain.constants import COLUMN_RUN_NAME
+from regain.constants import COLUMN_SEED
+from regain.constants import COLUMN_STATUS
+from regain.constants import COLUMN_TASK_AGE
+from regain.constants import EXPERIENCE_KEY_PREFIX
+from regain.constants import METRIC_A_CTRL
+from regain.constants import METRIC_A_CTRL_MEAN
+from regain.constants import METRIC_A_POST
+from regain.constants import METRIC_A_POST_MEAN
+from regain.constants import METRIC_A_REF
+from regain.constants import METRIC_RHO
+from regain.constants import METRIC_RHO_MEAN
+from regain.constants import NS_SEP
+from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
+from regain.constants import PARAM_CONTROLLER_PATH
+from regain.constants import PARAM_NUM_CLASSES
+from regain.constants import PARAM_SEED
+from regain.mlflow_utils import download_json_artifact
+from regain.mlflow_utils import is_parent_mlflow_run
 from regain.mlflow_utils import resolve_experiment_id
+from regain.mlflow_utils import resolve_mlflow_run_name
 from regain.mlflow_utils import search_runs_paginated
 from regain.mlflow_utils import set_tracking_uri
 from regain.utils import get_logger
@@ -27,65 +55,40 @@ __all__ = [
     'collect_experiment_tables',
 ]
 
-
-_A_REF_RE = re.compile(r'^analysis-a_ref-exp(?P<idx>\d+)$')
-_A_POST_RE = re.compile(r'^analysis-a_post-exp(?P<idx>\d+)$')
-_A_CTRL_RE = re.compile(r'^analysis-a_ctrl-exp(?P<idx>\d+)$')
-_RHO_RE = re.compile(r'^analysis-rho-exp(?P<idx>\d+)$')
-
-
-def _is_parent_run(run_tags: dict[str, str]) -> bool:
-    """
-    Determine whether a run is a parent run (not a nested eval run).
-
-    Args:
-        run_tags: Run tags.
-
-    Returns:
-        True if run is a parent run, False otherwise.
-    """
-    # MLflow nested runs have a 'mlflow.parentRunId' tag.
-    return 'mlflow.parentRunId' not in (run_tags or {})
+_COLUMN_SCENARIO = 'scenario'
+_COLUMN_STRATEGY_NAME = 'strategy_name'
+_METRIC_ANALYSIS_A_CTRL = 'analysis.a_ctrl'
+_METRIC_ANALYSIS_A_POST = 'analysis.a_post'
+_METRIC_ANALYSIS_A_REF = 'analysis.a_ref'
+_METRIC_ANALYSIS_RHO = 'analysis.rho'
+_METRIC_A_REF_MEAN = 'a_ref_mean'
+_METRIC_SUMMARY_FINAL_A_CTRL_MEAN = 'summary.final_a_ctrl_mean'
+_METRIC_SUMMARY_FINAL_A_POST_MEAN = 'summary.final_a_post_mean'
+_METRIC_SUMMARY_FINAL_A_REF_MEAN = 'summary.final_a_ref_mean'
+_METRIC_SUMMARY_FINAL_RHO_MEAN = 'summary.final_rho_mean'
+_PARAM_BACKBONE_STRATEGY_NAME = 'backbone.training.strategy.name'
+_PARAM_CONTROLLER_NAME = 'controller.name'
+_PARAM_REPAIR_BUDGET_PER_CLASS = 'repair.budget_per_class'
 
 
-def _download_json_artifact(
-    client: MlflowClient,
-    *,
-    run_id: str,
-    artifact_path: str,
-) -> Optional[dict[str, Any]]:
-    """
-    Download and parse a JSON artifact from an MLflow run.
+_NS_SEP_ESCAPED = re.escape(NS_SEP)
 
-    Args:
-        client: MLflow client.
-        run_id: Run id.
-        artifact_path: Artifact path in the run.
-
-    Returns:
-        Parsed JSON dict, or None if not available.
-    """
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            dst = client.download_artifacts(run_id, artifact_path, tmp)
-            p = Path(dst)
-            if p.is_dir():
-                p = p / Path(artifact_path).name
-            if not p.exists():
-                return None
-            return json.loads(p.read_text(encoding='utf-8'))
-    except Exception:
-        # Fallback: mlflow.artifacts API (varies across MLflow versions)
-        try:
-            local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=artifact_path)
-            p = Path(local_path)
-            if p.is_dir():
-                p = p / Path(artifact_path).name
-            if not p.exists():
-                return None
-            return json.loads(p.read_text(encoding='utf-8'))
-        except Exception:
-            return None
+_A_REF_RE = re.compile(
+    rf'^{re.escape(_METRIC_ANALYSIS_A_REF)}'
+    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$'
+)
+_A_POST_RE = re.compile(
+    rf'^{re.escape(_METRIC_ANALYSIS_A_POST)}'
+    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$'
+)
+_A_CTRL_RE = re.compile(
+    rf'^{re.escape(_METRIC_ANALYSIS_A_CTRL)}'
+    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$'
+)
+_RHO_RE = re.compile(
+    rf'^{re.escape(_METRIC_ANALYSIS_RHO)}'
+    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$'
+)
 
 
 def _extract_experience_metrics(metrics: dict[str, float]) -> dict[int, dict[str, Optional[float]]]:
@@ -102,32 +105,37 @@ def _extract_experience_metrics(metrics: dict[str, float]) -> dict[int, dict[str
 
     def _ensure(idx: int) -> dict[str, Optional[float]]:
         if idx not in exp_metrics:
-            exp_metrics[idx] = {'a_ref': None, 'a_post': None, 'a_ctrl': None, 'rho': None}
+            exp_metrics[idx] = {
+                METRIC_A_REF: None,
+                METRIC_A_POST: None,
+                METRIC_A_CTRL: None,
+                METRIC_RHO: None,
+            }
         return exp_metrics[idx]
 
     for k, v in (metrics or {}).items():
         m = _A_REF_RE.match(k)
         if m:
             idx = int(m.group('idx'))
-            _ensure(idx)['a_ref'] = to_float(v)
+            _ensure(idx)[METRIC_A_REF] = to_float(v)
             continue
 
         m = _A_POST_RE.match(k)
         if m:
             idx = int(m.group('idx'))
-            _ensure(idx)['a_post'] = to_float(v)
+            _ensure(idx)[METRIC_A_POST] = to_float(v)
             continue
 
         m = _A_CTRL_RE.match(k)
         if m:
             idx = int(m.group('idx'))
-            _ensure(idx)['a_ctrl'] = to_float(v)
+            _ensure(idx)[METRIC_A_CTRL] = to_float(v)
             continue
 
         m = _RHO_RE.match(k)
         if m:
             idx = int(m.group('idx'))
-            _ensure(idx)['rho'] = to_float(v)
+            _ensure(idx)[METRIC_RHO] = to_float(v)
             continue
 
     return exp_metrics
@@ -136,17 +144,19 @@ def _extract_experience_metrics(metrics: dict[str, float]) -> dict[int, dict[str
 def _merge_experience_artifacts(
     exp_metrics: dict[int, dict[str, Optional[float]]],
     artifacts: dict[str, Any],
+    *,
+    include_keys: Sequence[str] | None = None,
 ) -> dict[int, dict[str, Optional[float]]]:
     """
     Merge analysis_artifacts.json vectors into a per-experience metrics dict.
 
     Expected artifact shape (best-effort):
         {
-          "a_ref": [...],
-          "a_post": [...],
-          "a_ctrl": [...],
-          "rho": [...],
-          "rho_mean": float,
+          "<analysis_metric_vector>": [...],
+          "<analysis_metric_vector>": [...],
+          "<analysis_metric_vector>": [...],
+          "<analysis_metric_vector>": [...],
+          "<summary_metric>": float,
           ...
         }
 
@@ -160,6 +170,12 @@ def _merge_experience_artifacts(
     if not artifacts:
         return exp_metrics
 
+    artifact_keys = (
+        list(include_keys)
+        if include_keys is not None
+        else [METRIC_A_REF, METRIC_A_POST, METRIC_A_CTRL, METRIC_RHO]
+    )
+
     def _ingest_vector(key: str) -> None:
         vec = artifacts.get(key)
         if not isinstance(vec, list):
@@ -167,31 +183,67 @@ def _merge_experience_artifacts(
         for i, raw in enumerate(vec):
             idx = int(i)
             if idx not in exp_metrics:
-                exp_metrics[idx] = {'a_ref': None, 'a_post': None, 'a_ctrl': None, 'rho': None}
+                exp_metrics[idx] = {
+                    METRIC_A_REF: None,
+                    METRIC_A_POST: None,
+                    METRIC_A_CTRL: None,
+                    METRIC_RHO: None,
+                }
             exp_metrics[idx][key] = to_float(raw)
 
-    for k in ['a_ref', 'a_post', 'a_ctrl', 'rho']:
+    for k in artifact_keys:
         _ingest_vector(k)
 
     return exp_metrics
 
 
-def _first_present(metrics: dict[str, float], keys: list[str]) -> Optional[float]:
+def _has_logged_ctrl_metrics(
+    *,
+    metrics: dict[str, float],
+    experience_metrics: dict[int, dict[str, Optional[float]]],
+) -> bool:
     """
-    Return the first present metric value among candidates.
+    Check whether repair-controller analysis metrics were logged for this run.
 
     Args:
-        metrics: Run metrics.
-        keys: Candidate metric keys in priority order.
+        metrics: Run-level metrics.
+        experience_metrics: Extracted per-experience metrics from the run.
 
     Returns:
-        First present float or None.
+        bool: True if repair-controller metrics are available, else False.
     """
-    for k in keys:
-        if k in (metrics or {}):
-            v = to_float(metrics.get(k))
-            if v is not None:
-                return v
+    if (
+        _METRIC_SUMMARY_FINAL_A_CTRL_MEAN in metrics
+        or _METRIC_SUMMARY_FINAL_RHO_MEAN in metrics
+    ):
+        return True
+
+    for values in experience_metrics.values():
+        if values.get(METRIC_A_CTRL) is not None or values.get(METRIC_RHO) is not None:
+            return True
+    return False
+
+
+def _controller_expects_ctrl_metrics(*, params: dict[str, Any]) -> bool | None:
+    """
+    Infer whether a run should expose repair-controller analysis metrics.
+
+    Args:
+        params: Run params dictionary.
+
+    Returns:
+        bool | None: True for repair controllers, False for known non-repair runs, None when unknown.
+    """
+    controller_name = str(params.get(_PARAM_CONTROLLER_NAME) or 'none').strip().lower()
+    if controller_name in {'', 'none'}:
+        return False
+
+    controller_path = str(params.get(PARAM_CONTROLLER_PATH) or '').strip().lower()
+    if '.repair.' in controller_path:
+        return True
+    if '.prevention.' in controller_path:
+        return False
+
     return None
 
 
@@ -239,95 +291,124 @@ def collect_experiment_tables(
         experiment=experiment,
     )
 
+    if max_runs is not None and int(max_runs) <= 0:
+        return [], []
+
     # Fetch runs with pagination (avoid brittle filter-string dependency on tags presence).
-    parent_runs = search_runs_paginated(
+    # Apply `max_runs` only after filtering nested runs so the limit refers to parent runs.
+    candidate_runs = search_runs_paginated(
         client=client,
         experiment_ids=[experiment_id],
         filter_string='',
         run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
         order_by=['attributes.start_time DESC'],
-        max_runs=max_runs,
     )
 
     runs_table: list[dict[str, Any]] = []
     experiences_table: list[dict[str, Any]] = []
 
-    for run in parent_runs:
-        tags = dict(getattr(run.data, 'tags', {}) or {})
-        if not _is_parent_run(tags):
+    for run in candidate_runs:
+        if not is_parent_mlflow_run(run=run):
             continue
 
         info = run.info
-        if require_finished and str(getattr(info, 'status', '')) != 'FINISHED':
+        if require_finished and str(getattr(info, COLUMN_STATUS, '')) != 'FINISHED':
             continue
 
         params = dict(getattr(run.data, 'params', {}) or {})
         metrics = dict(getattr(run.data, 'metrics', {}) or {})
 
-        controller_name = str(params.get('controller_name') or 'none')
+        run_name = resolve_mlflow_run_name(run=run)
+        controller_name = str(params.get(_PARAM_CONTROLLER_NAME) or 'none')
         if include_controllers is not None and controller_name not in include_controllers:
             continue
         if exclude_controllers is not None and controller_name in exclude_controllers:
             continue
 
-        seed = to_int(params.get('seed'))
-        repair_budget_per_class = to_int(params.get('repair_budget_per_class'))
-        num_classes = to_int(params.get('num_classes'))
+        seed = to_int(params.get(PARAM_SEED))
+        repair_budget_per_class = to_int(params.get(_PARAM_REPAIR_BUDGET_PER_CLASS))
+        num_classes = to_int(params.get(PARAM_NUM_CLASSES))
         if num_classes is None:
             num_classes = int(default_num_classes) if default_num_classes is not None else None
 
-        ctrl_param_count = to_int(params.get('controller_model_param_count'))
+        ctrl_param_count = to_int(params.get(PARAM_CONTROLLER_MODEL_PARAM_COUNT))
 
         b = float(repair_budget_per_class) if repair_budget_per_class is not None else None
         repair_budget_total = None
         if b is not None and num_classes is not None and num_classes > 0:
             repair_budget_total = int(float(b) * float(num_classes))
 
-        # Prefer logged summary metrics; fallback to analysis summary; then compute from per-task.
-        rho_mean = _first_present(metrics, ['summary-final_rho_mean', 'analysis-rho_mean'])
-        a_ctrl_mean = _first_present(metrics, ['summary-final_a_ctrl_mean', 'analysis-a_ctrl_mean'])
-        a_post_mean = _first_present(metrics, ['summary-final_a_post_mean', 'analysis-a_post_mean'])
-        a_ref_mean = _first_present(metrics, ['summary-final_a_ref_mean', 'analysis-a_ref_mean'])
+        # Prefer canonical summary metrics, then compute from per-task values.
+        rho_mean = to_float(metrics.get(_METRIC_SUMMARY_FINAL_RHO_MEAN))
+        a_ctrl_mean = to_float(metrics.get(_METRIC_SUMMARY_FINAL_A_CTRL_MEAN))
+        a_post_mean = to_float(metrics.get(_METRIC_SUMMARY_FINAL_A_POST_MEAN))
+        a_ref_mean = to_float(metrics.get(_METRIC_SUMMARY_FINAL_A_REF_MEAN))
+
+        strategy_name = str(params.get(_PARAM_BACKBONE_STRATEGY_NAME) or '')
 
         experience_metrics = _extract_experience_metrics(metrics)
+        has_logged_ctrl_metrics = _has_logged_ctrl_metrics(
+            metrics=metrics,
+            experience_metrics=experience_metrics,
+        )
+        ctrl_metrics_hint = _controller_expects_ctrl_metrics(params=params)
+        expects_ctrl_metrics = bool(has_logged_ctrl_metrics)
+        if ctrl_metrics_hint is True:
+            expects_ctrl_metrics = True
 
-        # Fallback to artifact if per-experience metrics are empty or sparse.
-        if not experience_metrics or any(v is None for row in experience_metrics.values() for v in row.values()):
-            artifacts = _download_json_artifact(client, run_id=str(info.run_id), artifact_path='analysis_artifacts.json')
+        required_experience_keys = [METRIC_A_REF, METRIC_A_POST]
+        if expects_ctrl_metrics:
+            required_experience_keys.extend([METRIC_A_CTRL, METRIC_RHO])
+
+        # Fallback to artifact if required per-experience metrics are empty or sparse.
+        if not experience_metrics or any(
+            row.get(key) is None
+            for row in experience_metrics.values()
+            for key in required_experience_keys
+        ):
+            artifacts = download_json_artifact(
+                client=client,
+                run_id=str(info.run_id),
+                artifact_path='analysis_artifacts.json',
+            )
             if artifacts:
-                experience_metrics = _merge_experience_artifacts(experience_metrics, artifacts)
+                experience_metrics = _merge_experience_artifacts(
+                    experience_metrics,
+                    artifacts,
+                    include_keys=required_experience_keys,
+                )
                 # Artifact may also include rho_mean directly
-                if rho_mean is None:
-                    rho_mean = to_float(artifacts.get('rho_mean'))
+                if rho_mean is None and expects_ctrl_metrics:
+                    rho_mean = to_float(artifacts.get(METRIC_RHO_MEAN))
 
         # Compute missing summary fields from per-experience metrics if needed.
         if rho_mean is None:
-            rho_mean = mean([row.get('rho') for row in experience_metrics.values()])
-        if a_ctrl_mean is None:
-            a_ctrl_mean = mean([row.get('a_ctrl') for row in experience_metrics.values()])
+            if expects_ctrl_metrics:
+                rho_mean = mean([row.get(METRIC_RHO) for row in experience_metrics.values()])
+        if a_ctrl_mean is None and expects_ctrl_metrics:
+            a_ctrl_mean = mean([row.get(METRIC_A_CTRL) for row in experience_metrics.values()])
         if a_post_mean is None:
-            a_post_mean = mean([row.get('a_post') for row in experience_metrics.values()])
+            a_post_mean = mean([row.get(METRIC_A_POST) for row in experience_metrics.values()])
         if a_ref_mean is None:
-            a_ref_mean = mean([row.get('a_ref') for row in experience_metrics.values()])
+            a_ref_mean = mean([row.get(METRIC_A_REF) for row in experience_metrics.values()])
 
         run_row: dict[str, Any] = {
-            'run_id': str(info.run_id),
-            'experiment_id': str(experiment_id),
-            'run_name': str(params.get('run_name') or getattr(info, 'run_name', '') or ''),
-            'scenario': str(params.get('scenario') or ''),
-            'strategy_name': str(params.get('strategy_name') or ''),
-            'eval_mode': str(params.get('eval_mode') or ''),
-            'seed': seed,
-            'controller_name': controller_name,
-            'repair_budget_per_class': repair_budget_per_class,
-            'repair_budget_total': repair_budget_total,
-            'num_classes': num_classes,
-            'b': b,
-            'controller_model_param_count': ctrl_param_count,
-            'rho_mean': rho_mean,
-            'a_ctrl_mean': a_ctrl_mean,
-            'a_post_mean': a_post_mean,
-            'a_ref_mean': a_ref_mean,
+            COLUMN_RUN_ID: str(info.run_id),
+            COLUMN_EXPERIMENT_ID: str(experiment_id),
+            COLUMN_RUN_NAME: run_name,
+            _COLUMN_SCENARIO: str(params.get(_COLUMN_SCENARIO) or ''),
+            _COLUMN_STRATEGY_NAME: strategy_name,
+            COLUMN_SEED: seed,
+            COLUMN_CONTROLLER_NAME: controller_name,
+            COLUMN_REPAIR_BUDGET_PER_CLASS: repair_budget_per_class,
+            COLUMN_REPAIR_BUDGET_TOTAL: repair_budget_total,
+            COLUMN_NUM_CLASSES: num_classes,
+            COLUMN_B: b,
+            COLUMN_CONTROLLER_MODEL_PARAM_COUNT: ctrl_param_count,
+            METRIC_RHO_MEAN: rho_mean,
+            METRIC_A_CTRL_MEAN: a_ctrl_mean,
+            METRIC_A_POST_MEAN: a_post_mean,
+            _METRIC_A_REF_MEAN: a_ref_mean,
         }
         runs_table.append(run_row)
 
@@ -340,21 +421,24 @@ def collect_experiment_tables(
         for exp_idx in sorted(experience_metrics.keys()):
             row = experience_metrics[exp_idx]
             experiences_table.append({
-                'run_id': str(info.run_id),
-                'seed': seed,
-                'controller_name': controller_name,
-                'repair_budget_per_class': repair_budget_per_class,
-                'repair_budget_total': repair_budget_total,
-                'num_classes': num_classes,
-                'b': b,
-                'controller_model_param_count': ctrl_param_count,
-                'exp_idx': int(exp_idx),
-                'task_age': int(max_idx - exp_idx) if max_idx >= 0 else None,
-                'a_ref': row.get('a_ref'),
-                'a_post': row.get('a_post'),
-                'a_ctrl': row.get('a_ctrl'),
-                'rho': row.get('rho'),
+                COLUMN_RUN_ID: str(info.run_id),
+                COLUMN_SEED: seed,
+                COLUMN_CONTROLLER_NAME: controller_name,
+                COLUMN_REPAIR_BUDGET_PER_CLASS: repair_budget_per_class,
+                COLUMN_REPAIR_BUDGET_TOTAL: repair_budget_total,
+                COLUMN_NUM_CLASSES: num_classes,
+                COLUMN_B: b,
+                COLUMN_CONTROLLER_MODEL_PARAM_COUNT: ctrl_param_count,
+                COLUMN_EXP_IDX: int(exp_idx),
+                COLUMN_TASK_AGE: int(max_idx - exp_idx) if max_idx >= 0 else None,
+                METRIC_A_REF: row.get(METRIC_A_REF),
+                METRIC_A_POST: row.get(METRIC_A_POST),
+                METRIC_A_CTRL: row.get(METRIC_A_CTRL),
+                METRIC_RHO: row.get(METRIC_RHO),
             })
+
+        if max_runs is not None and len(runs_table) >= int(max_runs):
+            break
 
     # Optional writeout (JSONL for robustness; analysis tool scripts write CSV).
     if out_dir is not None:

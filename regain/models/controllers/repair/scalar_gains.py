@@ -70,9 +70,9 @@ class _ScalarUnitGainController(BaseUnitGainController):
         units, unit_ids = self._refresh_units(model=model)
         active_keys = {k for k, _ in units}
 
-        # Purge stale entries from previous unit sets.
+        # Purge stale entries from prior unit sets.
         for k in list(self._raw_gains.keys()):
-            # Remove gains for units that no longer exist.
+            # Remove gains for units absent from the active set.
             if k not in active_keys:
                 del self._raw_gains[k]
 

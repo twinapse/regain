@@ -3,113 +3,26 @@ Helpers for exporting MLflow runs.
 """
 
 import csv
-from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import Any
 
-from mlflow.entities import Experiment
-from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
-from mlflow.utils.yaml_utils import write_yaml
 
+from regain.constants import COLUMN_END_TIME
+from regain.constants import COLUMN_PARENT_RUN_ID
+from regain.constants import COLUMN_RUN_ID
+from regain.constants import COLUMN_RUN_NAME
+from regain.constants import COLUMN_START_TIME
+from regain.constants import COLUMN_STATUS
+from regain.mlflow_utils import build_mlflow_run_columns
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import search_runs_paginated
 from regain.mlflow_utils import set_tracking_uri
+from regain.mlflow_utils import write_experiment_meta_yaml
 
 __all__ = [
     'export_runs_to_csvs',
 ]
-
-
-def _format_timestamp_ms(timestamp_ms: int | None) -> str:
-    """
-    Format a millisecond timestamp as an ISO-8601 UTC string.
-
-    Args:
-        timestamp_ms (int | None): Millisecond timestamp since epoch.
-
-    Returns:
-        str: ISO-8601 UTC timestamp string or empty string if unavailable.
-    """
-    if timestamp_ms is None:
-        return ''
-    return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc).isoformat()
-
-
-def _resolve_run_name(run: Run) -> str:
-    """
-    Resolve a human-readable MLflow run name.
-
-    Args:
-        run (Run): MLflow run to inspect.
-
-    Returns:
-        str: Resolved run name (empty string if missing).
-    """
-    if run.info.run_name:
-        return str(run.info.run_name)
-    tag_name = run.data.tags.get('mlflow.runName')
-    if tag_name:
-        return str(tag_name)
-    return ''
-
-
-def _build_run_columns(
-    run: Run,
-    *,
-    include_params: bool = True,
-    include_metrics: bool = True,
-) -> dict[str, Any]:
-    """
-    Build a flattened column map for a single MLflow run.
-
-    Args:
-        run (Run): MLflow run to flatten.
-        include_params (bool): Whether to include parameter columns.
-        include_metrics (bool): Whether to include metric columns.
-
-    Returns:
-        dict[str, Any]: Flattened columns for the run.
-    """
-    columns: dict[str, Any] = {}
-
-    columns['run_id'] = run.info.run_id
-    columns['run_name'] = _resolve_run_name(run)
-    columns['parent_run_id'] = run.data.tags.get('mlflow.parentRunId', '')
-    columns['status'] = run.info.status
-    columns['start_time'] = _format_timestamp_ms(run.info.start_time)
-    columns['end_time'] = _format_timestamp_ms(run.info.end_time)
-
-    reserved_keys = {'run_id', 'run_name', 'parent_run_id', 'status', 'start_time', 'end_time'}
-    if include_params:
-        for param_key, param_value in run.data.params.items():
-            if param_key in reserved_keys:
-                continue
-            columns[param_key] = param_value
-    if include_metrics:
-        for metric_key, metric_value in run.data.metrics.items():
-            if metric_key in reserved_keys:
-                continue
-            columns[metric_key] = metric_value
-
-    return columns
-
-
-def _write_experiment_meta(*, experiment: Experiment, output_dir: Path) -> None:
-    """
-    Write experiment metadata to a meta.yaml file.
-
-    Args:
-        experiment (Experiment): MLflow experiment metadata.
-        output_dir (Path): Directory where meta.yaml should be written.
-
-    Returns:
-        None
-    """
-    experiment_dict = dict(experiment)
-    experiment_dict['experiment_id'] = str(experiment.experiment_id)
-    write_yaml(str(output_dir), 'meta.yaml', experiment_dict, overwrite=True)
 
 
 def export_runs_to_csvs(
@@ -161,24 +74,39 @@ def export_runs_to_csvs(
     parent_metric_keys: set[str] = set()
 
     for run in all_runs:
-        row = _build_run_columns(run=run)
+        row = build_mlflow_run_columns(run=run)
         rows.append(row)
         parent_param_keys.update(run.data.params.keys())
         parent_metric_keys.update(run.data.metrics.keys())
 
-    parent_metadata = ['run_id', 'run_name', 'parent_run_id', 'status', 'start_time', 'end_time']
-    reserved_keys = {'run_id', 'run_name', 'parent_run_id', 'status', 'start_time', 'end_time'}
+    metadata_columns = [
+        COLUMN_RUN_ID,
+        COLUMN_RUN_NAME,
+        COLUMN_PARENT_RUN_ID,
+        COLUMN_STATUS,
+        COLUMN_START_TIME,
+        COLUMN_END_TIME,
+    ]
+    reserved_keys = set(metadata_columns)
     param_columns = sorted(key for key in parent_param_keys if key not in reserved_keys)
     metric_columns = sorted(key for key in parent_metric_keys if key not in reserved_keys)
 
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     params_path.parent.mkdir(parents=True, exist_ok=True)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_experiment_meta(experiment=experiment_meta, output_dir=metadata_path.parent)
+    write_experiment_meta_yaml(
+        experiment=experiment_meta,
+        output_dir=metadata_path.parent,
+    )
 
-    metadata_fieldnames = parent_metadata
-    params_fieldnames = ['run_id', 'run_name', 'parent_run_id'] + param_columns
-    metrics_fieldnames = ['run_id', 'run_name', 'parent_run_id'] + metric_columns
+    metadata_fieldnames = metadata_columns
+    row_identity_columns = [
+        COLUMN_RUN_ID,
+        COLUMN_RUN_NAME,
+        COLUMN_PARENT_RUN_ID,
+    ]
+    params_fieldnames = row_identity_columns + param_columns
+    metrics_fieldnames = row_identity_columns + metric_columns
 
     with metadata_path.open('w', newline='', encoding='utf-8') as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=metadata_fieldnames, extrasaction='ignore')

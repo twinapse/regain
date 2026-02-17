@@ -1,7 +1,8 @@
 # Experimental Framework
 
-This document specifies the benchmark protocol, controller regimes, **evaluation modes**, and **metric logging organization**
-used to measure **retrieval-correctable forgetting** on **SplitCIFAR-100** in a **single-head class-incremental learning (CIL)** setting.
+This document specifies the benchmark protocol, controller regimes, evaluation behavior, and metric logging
+organization used to measure **retrieval-correctable forgetting** on **SplitCIFAR-100** in a
+**single-head class-incremental learning (CIL)** setting.
 
 ---
 
@@ -10,7 +11,7 @@ used to measure **retrieval-correctable forgetting** on **SplitCIFAR-100** in a 
 - [0) Overview](#0-overview)
 - [1) Benchmark & Scenario](#1-benchmark--scenario)
 - [2) Model & Training Protocol](#2-model--training-protocol)
-- [3) Controllers & Evaluation Modes](#3-controllers--evaluation-modes)
+- [3) Controllers & Evaluation Behavior](#3-controllers--evaluation-behavior)
 - [4) Repair Data (Disjoint from Training)](#4-repair-data-disjoint-from-training)
 - [5) Recorded Accuracies](#5-recorded-accuracies)
 - [6) Forgetting & Repair Metrics](#6-forgetting--repair-metrics)
@@ -27,23 +28,21 @@ accuracies and derived analysis metrics.
 **High-level pipeline.**
 1. Build a SplitCIFAR-100 continual learning scenario (`num_experiences`, default 10).
 2. Train a single-head classifier sequentially over experiences.
-3. Optionally fit and/or apply a controller (depending on controller type).
-4. Evaluate and log metrics (with MLflow parent + nested evaluation runs).
+3. Fit and/or apply the configured controller (depending on controller type).
+4. Evaluate and log metrics (with MLflow parent runs and optional nested evaluation runs).
 5. Compute analysis artifacts: $A_{\text{ref}}, A_{\text{post}}$, plus $A_{\text{ctrl}}, \rho$ and aggregates when a
    repair controller is present.
 
 `regain/cli/run_experiment.py` executes this pipeline and logs metrics to MLflow. The REGAIN analysis tool
 (`regain/cli/run_analysis.py`) consumes the logged metrics to generate curves and frontiers.
 
+Experiment execution code is organized under `regain/experiments/`:
+`orchestrator.py` (run flow), `config.py` (YAML parsing/validation), `builders.py` (scenario/model/strategy builders),
+`backbone.py` (reserved backbone-run reuse helpers), `logging.py` (MLflow params/summary logging), and `utils.py`.
+
 **Mental model.** Experiments write per-experience metrics and analysis artifacts to MLflow. The analysis tool is a
 read-only post-processing step that aggregates those logged runs into tables, recoverability curves, and efficiency
 frontiers.
-
-**What varies across runs.**
-- Seed
-- Strategy (naive / replay)
-- Controller (optional)
-- `eval_mode` ("single" or "compare"; subject to constraints)
 
 ---
 
@@ -62,7 +61,7 @@ frontiers.
 - Each experience corresponds to one task $T_i$.
 - The class partition/order is determined by Avalanche under `seed` (tasks are defined by Avalanche).
 - Assumption: class IDs are contiguous starting from 0 across the full benchmark; this is enforced by the runner
-  (`_verify_classes` in `regain/experiments/core.py`).
+  (`verify_classes` in `regain/experiments/builders.py`).
 
 ### Label-space regimes (important!)
 We record accuracies under two different “label space” regimes:
@@ -97,7 +96,7 @@ We record accuracies under two different “label space” regimes:
 
 ---
 
-## 3) Controllers & Evaluation Modes
+## 3) Controllers & Evaluation Behavior
 
 This codebase distinguishes *when* a controller acts:
 
@@ -117,7 +116,7 @@ This codebase distinguishes *when* a controller acts:
   - fit after an experience or after training completes, and/or
   - correct logits during evaluation (inference-time correction).
 - In code, repair controllers receive post-training hooks (`on_train_experience_end`, `on_train_end`), plus evaluation
-  hooks (`on_eval_*`) and `correct_outputs` when enabled. They do **not** receive training-time hooks.
+  hooks (`on_eval_*`) and `correct_outputs` during evaluation. They do **not** receive training-time hooks.
 
 ### 3.2 Repair/fitting protocol by controller type
 
@@ -125,46 +124,78 @@ This codebase distinguishes *when* a controller acts:
 - Acts during training; it may change:
   - the loss surface and optimization trajectory, and/or
   - the backbone architecture/normalization behavior.
-- It is not purely post-hoc, so “base vs ctrl” comparisons must be treated carefully (see `eval_mode` constraints).
+- It is not purely post-hoc, so this pipeline does not expose a fair controller-off/controller-on toggle for prevention runs.
 
 **`RepairController` (post-hoc repair)**
 - After each training experience, the repair stream provides that experience’s repair subset.
 - Fitting schedule:
-  - If `repair_after_experience=True` (default), fit after each experience.
-  - If `repair_after_experience=False`, fit once after the full training sequence.
-  - Controllers that require per-experience fitting (`requires_per_experience_fitting()`) will error if the flag is off.
+  - If `repair.fit_schedule=per_experience` (default), fit after each experience.
+  - If `repair.fit_schedule=final_only`, fit once after the full training sequence.
+  - Controllers that require per-experience fitting (`requires_per_experience_fitting()`) will error when set to
+    `final_only`.
 - During fitting, backbone parameters $\phi$ are frozen (inference-only forwards); the controller trains on samples from
   the **repair stream** (aggregated across experiences).
 - The test set is never used for fitting $g_\theta$.
 
-### 3.3 `eval_mode` ("single" vs "compare") and constraints
+### 3.3 Posthoc evaluation behavior
 
-Posthoc evaluations (the ones that log `base-*` / `ctrl-*` metrics) are executed inside **nested** MLflow runs. Reference
-evaluation for $A_{\text{ref}}$ runs without a nested run and logs only `analysis-*` metrics to the parent run.
+Posthoc evaluations run either in the parent run or in nested MLflow runs, depending on whether per-experience posthoc
+logging is enabled. Reference evaluation for $A_{\text{ref}}$ runs without a nested run and logs only `analysis.*`
+metrics to the parent run.
 
-**`eval_mode="single"`**
-- One nested evaluation run is created:
-  - `run_name="ctrl"` when any controller is present (suffix `_exp###` when running per-experience posthoc evals).
-  - `run_name="base"` when no controller is configured (suffix `_exp###` when running per-experience posthoc evals).
-- Behavior:
-  - If a repair controller plugin exists, it is enabled for evaluation in this mode (prevention controllers are baked
-    into the trained model).
-  - Metrics are logged under the `ctrl-*` namespace when a controller is configured, otherwise `base-*` (see logging section).
+`run_experiment` executes runs with a fixed posthoc evaluation flow:
+- `backbone` configuration must define exactly one of:
+  - `backbone.training` (train from scratch in the current experiment), or
+  - `backbone.source_experiment` (reuse a reserved `backbone` run from another experiment).
+- When `backbone.source_experiment` is provided, it must be the only field under `backbone`.
+- `backbone.source_experiment` must be different from `experiment_name` (same-experiment reuse is rejected).
+- `repair` configuration is mandatory. All runs in an experiment (backbone, prevention controllers, repair controllers) 
+  share the exact same data split defined by `repair.budget_per_class`. 
+  - If `budget > 0`, all runs train on `Full - Budget`. 
+  - If `budget = 0`, all runs train on `Full`.
+- Every user-configured run in `runs` must define a controller.
+- Run-specific config blocks are not allowed to override experiment-level training/runtime parameters
+  (for example epochs, batch sizes, replay memory size, device, eval frequency, repair budget/fit schedule,
+  and checkpoint-saving flags).
+- Controller runs do not log `backbone.*` parameters, except `backbone.source_experiment.id` and
+  `backbone.source_experiment.name` when source reuse is configured. `backbone.source_experiment.name` is a
+  run-time snapshot and is not synchronized if the source experiment is renamed later.
+- If `runs` is omitted, `null`, or empty, the run executes backbone-only mode:
+  - if `backbone.source_experiment` is not set, it logs only the reserved `backbone` run (creating it only when absent);
+  - if `backbone.source_experiment` is set, it reuses the source `backbone` run without creating a new local run
+    (requires source backbone checkpoint artifacts and `a_ref`/`a_post` baselines).
+  - if a local `backbone` run already exists while `backbone` config is non-null, execution is rejected.
+- If `backbone.training` is not set and user-configured runs are present, all configured runs must be
+  repair-controller runs (non-repair runs require local backbone training).
+- The only controller-off run is the reserved internal `backbone` run
+  (automatically created in the current experiment when user-configured controller runs are present and
+  `backbone.source_experiment` is not set, or
+  loaded from `backbone.source_experiment` when reuse is configured).
+- For repair-controller runs, controller-off analysis baselines (`a_ref`, `a_post`) are sourced from that `backbone`
+  run and logged into each repair run.
+- Final-only posthoc evaluation metrics are logged in the parent run (no nested run).
+- For repair controllers with `repair.fit_schedule=per_experience`, per-experience nested runs are created
+  (`exp###`).
+- If the final checkpoint was not already evaluated during training in this mode, a final nested run `final` is created.
 
-**`eval_mode="compare"`**
-- Two nested evaluation runs are created:
-  - `run_name="base"`: controller disabled during evaluation (suffix `_exp###` when running per-experience posthoc evals)
-  - `run_name="ctrl"`: controller enabled during evaluation (suffix `_exp###` when running per-experience posthoc evals)
-- Metrics are logged separately under `base-*` and `ctrl-*` namespaces.
-- Summary metrics from both are also logged to the parent run (prefixed accordingly).
-
-**Constraint (enforced in code)**
-- `eval_mode="compare"` requires a controller and is only allowed for **toggleable repair controllers**.
-- In code terms: `compare` is disallowed if the controller is `None` or a `PreventionController`.
-
-Rationale:
-- Training-time controllers change the learned model itself, so you cannot fairly obtain a “base” model by simply toggling
-  evaluation-time application.
+### 3.4 Shared backbone execution for controller runs
+When one or more configured controller runs are present:
+- A controller-off `backbone` trajectory must be available, either by:
+  - automatically executing that dedicated `backbone` parent run in the current experiment when it does not exist, or
+  - loading an existing `backbone` run from `backbone.source_experiment`.
+- `backbone.source_experiment` reuse requires that source `backbone` run to contain
+  backbone checkpoint artifacts (i.e., checkpoints must have been saved in that source run), and controller-off
+  baseline vectors (`a_ref`, `a_post`) available as either metrics or in `analysis_artifacts.json`.
+- When executed in the current experiment, the `backbone` run performs the only backbone training pass and writes one
+  checkpoint per experience.
+- Each repair-controller run then reuses those checkpoints (the loader restores each experience checkpoint before the
+  experience hooks), so controller behavior is compared on the same trained backbone trajectory.
+- The `backbone` run is also the source of controller-off analysis vectors (`a_ref`, `a_post`) reused by repair runs.
+- `name: backbone` is reserved in `runs` (always).
+- An experiment cannot contain multiple parent runs named `backbone`.
+- If a local `backbone` run already exists while `backbone` config is non-null, execution is rejected
+  (including configurations that set `backbone.source_experiment`).
+- If `checkpoints_enabled: true`, shared checkpoints are also logged to MLflow artifacts.
 
 ---
 
@@ -183,8 +214,12 @@ We use two related but distinct concepts alongside the sequential training strea
   - a **repair subset** used only for controller fitting.
 - The split is stratified per class within the experience and controlled by the experiment seed.
 - Repair samples are never used for backbone training.
-- Per class, the repair subset size is `min(repair_budget_per_class, n_class - 1)`, clamped to `[1, n_class - 1]`.
-  Setting `repair_budget_per_class <= 0` disables the repair stream entirely.
+- Per class, the repair subset size is `max(1, min(repair.budget_per_class, n_class - 1))`.
+  Setting `repair.budget_per_class: 0` disables the repair stream entirely.
+- **Important:** The `repair` configuration section is **mandatory** for all experiments, even backbone-only runs.
+  This forces an explicit decision about data splitting. To use the full dataset (no repair hold-out), 
+  you must explicitly set `repair.budget_per_class: 0`. This prevents unintentional data leakage where a 
+  backbone sees data that should have been held out for a downstream repair controller.
 
 ---
 
@@ -205,9 +240,8 @@ A_{\text{post}}(T_i) =
 $$
 
 >ℹ️ With prevention controllers, $A_{\text{post}}$ is the posthoc evaluation of the model trained under the controller
-> (no eval-time toggling). With repair controllers, $A_{\text{post}}$ is the repair-disabled evaluation of the standard
-> trained model. Both are "no eval-time correction" baselines, but they are not directly comparable across controller
-> regimes without context.
+> (no eval-time toggling). With repair controllers, $A_{\text{post}}$ is the shared controller-off baseline taken from
+> the reserved `backbone` run for the same checkpoint trajectory.
 
 ### Controller accuracy (all-classes)
 $$
@@ -221,8 +255,9 @@ $$
 $$
 A_{\text{final}} = \text{Acc}\Big(\text{test}(\{0,\dots,99\})\Big)
 $$
->ℹ️ In practice this corresponds to the posthoc stream accuracy (e.g., `Top1_Acc_Stream`) and is logged under `base-*` or
-> `ctrl-*` in the nested eval run, then surfaced in the parent run as a normalized `summary-*` metric.
+>ℹ️ In practice this corresponds to the posthoc stream accuracy (e.g., `Top1_Acc_Stream`) and is logged in the parent
+> run (or nested `final` run when per-experience posthoc logging is enabled), then surfaced as a normalized
+> `summary.*` metric.
 
 ---
 
@@ -262,7 +297,7 @@ where $\epsilon = 10^{-4}$.
 
 - If $F_{\text{total}}(T_i) \le \epsilon$, then $\rho(T_i;\theta,b)$ is treated as **invalid** and set to `None`.
 - Invalid tasks are **excluded** from mean/aggregate $\rho$ computations.
-- All accuracies $A_{\text{ref}}, A_{\text{post}}, A_{\text{ctrl}}$ are still recorded for every task.
+- All accuracies $A_{\text{ref}}, A_{\text{post}}, A_{\text{ctrl}}$ are recorded for every task.
 
 ---
 
@@ -276,62 +311,71 @@ This section describes **how metrics are organized in MLflow** and **what we rep
 ### 7.1 MLflow run structure (parent + nested evaluation runs)
 Each experiment run creates:
 
-- A **parent MLflow run** (the main run configured by `run_name`).
-- One or more **nested MLflow runs** used for evaluation:
-  - Always at least one nested run (even in `eval_mode="single"`).
-  - In `eval_mode="compare"`, there are two nested runs (`base` and `ctrl`).
-  - If `repair_after_experience=True` with a repair controller, additional nested runs are created per experience
-    (named `base_exp###` and/or `ctrl_exp###`).
-- Reference evaluation for $A_{\text{ref}}$ does not use nested runs; it logs `analysis-a_ref-exp###` directly to the
+- A **parent MLflow run** for each configured run (`name` from `runs`).
+- In backbone-only mode (`runs` omitted/`null`/empty):
+  - if `backbone.source_experiment` is not set: a single parent run named `backbone`;
+  - if `backbone.source_experiment` is set: no new parent run (source `backbone` reuse).
+- If controller runs are present and `backbone.source_experiment` is not set: the reserved parent run named
+  `backbone` is created automatically when absent.
+- If controller runs are present and `backbone.source_experiment` is used: no new local `backbone` run is created in
+  the current experiment; checkpoints and baselines are reused from the source experiment
+  (requires backbone checkpoint artifacts plus `a_ref`/`a_post` baselines in the source `backbone` run).
+- If a local `backbone` run already exists while `backbone` config is non-null, execution is rejected.
+- **Nested MLflow runs** are created only for repair-controller runs when
+  `repair.fit_schedule=per_experience`:
+  - Per-experience posthoc evaluation metrics (at each checkpoint) are logged in nested runs named `exp###`.
+  - The fallback final-only posthoc evaluation (if needed) is logged in a nested run named `final`.
+- Reference evaluation for $A_{\text{ref}}$ does not use nested runs; it logs `analysis.a_ref.exp###` directly to the
   parent run.
 
-Nested evaluation runs are used so that metrics from different evaluation regimes do not collide.
+When nested runs are absent, final posthoc raw metrics are logged directly in the parent run.
 
 ### 7.2 Metric namespaces (how keys look)
 Metric keys are normalized and namespaced as:
 
-- `train-<metric>` for training-time logs
-- `eval-<metric>` for Avalanche built-in evaluation logs (when `eval_every` is enabled)
-- `ctrl-<metric>` for `eval_mode="single"` evaluation logs when a controller is configured
-- `base-<metric>` for `eval_mode="single"` evaluation logs when no controller is configured
-- `base-<metric>` for `eval_mode="compare"` base evaluation logs
-- `ctrl-<metric>` for `eval_mode="compare"` controller evaluation logs
-- `analysis-<...>` for analysis metrics computed by the evaluation plugin
-- `summary-<...>` for end-of-run summary scalars written to the parent run (including normalized posthoc eval metrics)
+- `train.<metric>` for training-time logs
+- `eval.<metric>` for Avalanche built-in evaluation logs
+- `analysis.<...>` for analysis metrics computed by the evaluation plugin
+- `summary.<...>` for end-of-run summary scalars written to the parent run (including normalized posthoc eval metrics)
+- `<metric>` (no additional prefix) for raw posthoc evaluation logs (parent run or nested `exp###` / `final`)
 
 **Important implications**
-- In `eval_mode="compare"`, you should compare `base-*` vs `ctrl-*` metrics.
-- In `eval_mode="single"`, evaluation metrics live under `ctrl-*` when a controller is configured, otherwise `base-*`.
-- `train-*` metrics always correspond to the actual training procedure that was executed:
-  - If a training-time controller was used, `train-*` metrics reflect that controller-influenced training.
-  - `train-*` is not “base vs ctrl”; it is simply “what happened during training”.
+- Runs do not emit paired controller-off/controller-on posthoc metric streams in the same nested run.
+- In repair-controller runs, controller-off analysis baselines (`a_ref`, `a_post`) are inherited from the `backbone`
+  run; posthoc raw metrics in repair runs correspond to controller-on evaluation.
+- Posthoc raw metrics are unprefixed and should be interpreted in the context of their run placement
+  (parent run or nested `exp###` / `final`).
+- `train.*` metrics always correspond to the actual training procedure that was executed:
+  - If a training-time controller was used, `train.*` metrics reflect that controller-influenced training.
+  - `train.*` is not a controller-off/controller-on comparison; it is simply “what happened during training”.
 
 ### 7.3 Where the analysis artifacts live
 After each experience, the evaluation plugin logs:
 
 - Per-task:
-  - `analysis-a_ref-exp###` (to the parent run)
+  - `analysis.a_ref.exp###` (to the parent run)
 
-At the end of training, the evaluation plugin logs:
+At the end of training, when reference accuracies are complete, the evaluation plugin logs:
 
 - Per-task:
-  - `analysis-a_post-exp###`
+  - `analysis.a_post.exp###`
 - Per-task (repair controllers only):
-  - `analysis-a_ctrl-exp###`
-  - `analysis-rho-exp###` (only for valid tasks)
+  - `analysis.a_ctrl.exp###`
+  - `analysis.rho.exp###` (only for valid tasks)
 - Aggregates:
-  - `summary-final_a_post_mean`
+  - `summary.final_a_post_mean`
 - Aggregates (repair controllers only):
-  - `analysis-rho_mean`
-  - `summary-final_rho_mean`
-  - `summary-final_a_ctrl_mean`
-- If reference accuracies are incomplete, a JSON artifact (`analysis_artifacts.json`) is logged containing:
+  - `analysis.rho_mean`
+  - `summary.final_rho_mean`
+  - `summary.final_a_ctrl_mean`
+- If reference accuracies are incomplete, the plugin logs no `analysis.a_post` / `analysis.a_ctrl` / `analysis.rho`
+  vectors and instead writes a JSON artifact (`analysis_artifacts.json`) containing:
   - `status` (set to `incomplete_a_ref`)
   - `expected_num_experiences`
   - `observed_num_reference_points`
   - `eps`
   - partial `a_ref` vector
-- A flag metric `analysis-incomplete_a_ref=1.0` is logged when reference accuracies are incomplete.
+- A flag metric `analysis.incomplete_a_ref=1.0` is logged when reference accuracies are incomplete.
 
 ### 7.4 What gets reported
 We report mean ± std across seeds (common configs use **3 seeds**) for:
@@ -342,9 +386,9 @@ We report mean ± std across seeds (common configs use **3 seeds**) for:
 - Optionally: $\overline{A}_{\text{ctrl}}(\theta,b)$ for each repair controller and budget
 
 **Persisted artifacts**
-- Per-task accuracies $(A_{\text{ref}}, A_{\text{post}})$ in all runs
-- Per-task accuracies $(A_{\text{ctrl}})$ for repair controllers
-- Per-task $\rho$ with invalid tasks marked for repair controllers
+- Per-task accuracies $(A_{\text{ref}}, A_{\text{post}})$ in runs with complete reference vectors
+- Per-task accuracies $(A_{\text{ctrl}})$ for repair controllers with complete reference vectors
+- Per-task $\rho$ for valid tasks in repair-controller runs (invalid tasks are omitted from `analysis.rho.exp###`)
 - Aggregate summaries and curve/frontier inputs
 
 ---
@@ -368,8 +412,8 @@ We also report $\rho(T_i;\theta,b)$ as a function of task index $i$ (“task age
 ### 8.2 Repair efficiency frontier
 We place controller configurations on frontiers defined by:
 
-- **Data cost:** shots/class $b$, where $b = \text{repair\_budget\_per\_class}$
-  (total repair examples = `repair_budget_per_class * num_classes`)
+- **Data cost:** shots/class $b$, where $b = \text{repair.budget\_per\_class}$
+  (total repair examples = `repair.budget_per_class * num_classes`)
 - **Parameter cost:** controller parameter count $|\theta|$
 
 Frontiers plot recovered performance (e.g., $\bar{\rho}$, $\overline{A}_{\text{ctrl}}$) against these costs.

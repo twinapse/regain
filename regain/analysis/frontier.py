@@ -6,7 +6,7 @@ Computes Pareto frontiers over:
   - parameter cost (controller_model_param_count),
   - performance (rho_mean or a_ctrl_mean).
 
-Also emits an optional scalar 'total_cost' view when repair_budget_total is known:
+Also emits an optional scalar total-cost view when repair_budget_total is known:
   total_cost = repair_budget_total + controller_model_param_count
 """
 
@@ -16,11 +16,23 @@ from typing import Any
 from regain.analysis.utils import to_float
 from regain.analysis.utils import to_int
 from regain.analysis.utils import write_csv
+from regain.constants import COLUMN_B
+from regain.constants import COLUMN_CONTROLLER_MODEL_PARAM_COUNT
+from regain.constants import COLUMN_CONTROLLER_NAME
+from regain.constants import COLUMN_NUM_CLASSES
+from regain.constants import COLUMN_PERFORMANCE
+from regain.constants import COLUMN_REPAIR_BUDGET_PER_CLASS
+from regain.constants import COLUMN_REPAIR_BUDGET_TOTAL
+from regain.constants import COLUMN_TOTAL_COST
+from regain.constants import METRIC_A_CTRL_MEAN_AVG
+from regain.constants import METRIC_RHO_MEAN_AVG
 from regain.utils import get_logger
 
 __all__ = [
     'write_efficiency_frontiers',
 ]
+
+_COLUMN_PERFORMANCE_KEY = 'performance_key'
 
 
 def _dominates(a: dict[str, Any], b: dict[str, Any], *, perf_key: str) -> bool:
@@ -37,10 +49,10 @@ def _dominates(a: dict[str, Any], b: dict[str, Any], *, perf_key: str) -> bool:
     Returns:
         True if a dominates b, else False.
     """
-    a_b = to_float(a.get('b'))
-    b_b = to_float(b.get('b'))
-    a_p = to_int(a.get('controller_model_param_count'))
-    b_p = to_int(b.get('controller_model_param_count'))
+    a_b = to_float(a.get(COLUMN_B))
+    b_b = to_float(b.get(COLUMN_B))
+    a_p = to_int(a.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT))
+    b_p = to_int(b.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT))
     a_perf = to_float(a.get(perf_key))
     b_perf = to_float(b.get(perf_key))
 
@@ -81,7 +93,7 @@ def write_efficiency_frontiers(
     *,
     curve_rows: list[dict[str, Any]],
     out_dir: str | Path,
-    perf_key: str = 'rho_mean_avg',
+    perf_key: str = METRIC_RHO_MEAN_AVG,
 ) -> tuple[Path, Path]:
     """
     Compute and write frontier tables from aggregated curve points.
@@ -89,9 +101,7 @@ def write_efficiency_frontiers(
     Args:
         curve_rows: Rows from recoverability_curve.csv (already aggregated across seeds).
         out_dir: Output directory.
-        perf_key: Which performance column to use (maximize). Typical:
-            - 'rho_mean_avg'
-            - 'a_ctrl_mean_avg'
+        perf_key: Which performance column to use (maximize), usually one of the aggregated curve metric columns.
 
     Returns:
         (frontier_points_path, frontier_pareto_path)
@@ -100,27 +110,27 @@ def write_efficiency_frontiers(
     outp = Path(out_dir)
     outp.mkdir(parents=True, exist_ok=True)
 
-    # Normalize points: rename perf_key -> 'performance' for a stable output schema.
+    # Normalize points: rename perf_key -> performance for a stable output schema.
     points: list[dict[str, Any]] = []
     missing_param_count_controllers: set[str] = set()
     for r in curve_rows:
         perf = to_float(r.get(perf_key))
-        pc = r.get('controller_model_param_count')
+        pc = r.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT)
         if to_int(pc) is None:
-            cn = r.get('controller_name')
+            cn = r.get(COLUMN_CONTROLLER_NAME)
             if cn is not None:
                 missing_param_count_controllers.add(str(cn))
         points.append({
-            'controller_name': r.get('controller_name'),
-            'b': r.get('b'),
-            'repair_budget_per_class': r.get('repair_budget_per_class'),
-            'repair_budget_total': r.get('repair_budget_total'),
-            'num_classes': r.get('num_classes'),
-            'controller_model_param_count': pc,
-            'performance': perf,
-            'performance_key': perf_key,
-            'rho_mean_avg': r.get('rho_mean_avg'),
-            'a_ctrl_mean_avg': r.get('a_ctrl_mean_avg'),
+            COLUMN_CONTROLLER_NAME: r.get(COLUMN_CONTROLLER_NAME),
+            COLUMN_B: r.get(COLUMN_B),
+            COLUMN_REPAIR_BUDGET_PER_CLASS: r.get(COLUMN_REPAIR_BUDGET_PER_CLASS),
+            COLUMN_REPAIR_BUDGET_TOTAL: r.get(COLUMN_REPAIR_BUDGET_TOTAL),
+            COLUMN_NUM_CLASSES: r.get(COLUMN_NUM_CLASSES),
+            COLUMN_CONTROLLER_MODEL_PARAM_COUNT: pc,
+            COLUMN_PERFORMANCE: perf,
+            _COLUMN_PERFORMANCE_KEY: perf_key,
+            METRIC_RHO_MEAN_AVG: r.get(METRIC_RHO_MEAN_AVG),
+            METRIC_A_CTRL_MEAN_AVG: r.get(METRIC_A_CTRL_MEAN_AVG),
         })
 
     if missing_param_count_controllers:
@@ -133,18 +143,18 @@ def write_efficiency_frontiers(
 
     # Total-cost view (optional).
     for p in points:
-        rb = to_int(p.get('repair_budget_total'))
-        pc = to_int(p.get('controller_model_param_count'))
+        rb = to_int(p.get(COLUMN_REPAIR_BUDGET_TOTAL))
+        pc = to_int(p.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT))
         if rb is not None and pc is not None:
-            p['total_cost'] = int(rb + pc)
+            p[COLUMN_TOTAL_COST] = int(rb + pc)
         else:
-            p['total_cost'] = None
+            p[COLUMN_TOTAL_COST] = None
 
     points_path = outp / 'frontier_points.csv'
     write_csv(points_path, points)
     logger.warning(f'Wrote {points_path}')
 
-    pareto = _pareto_set(points, perf_key='performance')
+    pareto = _pareto_set(points, perf_key=COLUMN_PERFORMANCE)
     pareto_path = outp / 'frontier_pareto.csv'
     write_csv(pareto_path, pareto)
     logger.warning(f'Wrote {pareto_path}')

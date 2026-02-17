@@ -1,0 +1,431 @@
+"""
+Builder utilities for experiment benchmarks, models, strategies, and controllers.
+"""
+
+from collections.abc import Sequence
+import inspect
+
+from avalanche.benchmarks.scenarios import NCScenario
+from avalanche.training.plugins import EvaluationPlugin
+from avalanche.training.supervised import Naive
+from avalanche.training.supervised import Replay
+from avalanche.training.templates import BaseTemplate
+import torch
+from torch.optim import SGD
+
+from regain.avalanche_utils.plugins import ControllerPlugin
+from regain.avalanche_utils.plugins import PreventionControllerPlugin
+from regain.avalanche_utils.plugins import RepairControllerPlugin
+from regain.avalanche_utils.scenarios import get_scenario_builder
+from regain.avalanche_utils.scenarios import ScenarioBuilder
+from regain.constants import NS_SEP
+from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
+from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
+from regain.constants import PARAM_NUM_CLASSES
+from regain.debug.avalanche_utils import DebugRepairControllerPlugin
+from regain.experiments.config import ControllerConfig
+from regain.experiments.config import ExperimentConfig
+from regain.experiments.config import OptimizerConfig
+from regain.experiments.config import StrategyConfig
+from regain.experiments.config import TrainingConfig
+from regain.experiments.utils import resolve_avalanche_eval_every
+from regain.models.controllers import Controller
+from regain.models.controllers import PreventionController
+from regain.models.controllers import RepairController
+from regain.registry import get_backbone_path
+from regain.registry import get_controller_path
+from regain.registry import import_symbol
+
+__all__ = [
+    'build_backbone',
+    'build_benchmark',
+    'build_controller',
+    'build_controller_plugin',
+    'build_optimizer',
+    'make_strategy',
+]
+
+_PARAM_CONTROLLER_CLASSES = 'classes'
+_PARAM_CONTROLLER_REPLAY_BATCH_SIZE = 'replay_batch_size'
+_PARAM_CONTROLLER_REPLAY_MEMORY_SIZE = 'replay_memory_size'
+_PARAM_CONTROLLER_TRAIN_BATCH_SIZE = 'train_batch_size'
+
+_PARAM_NAME_REPLAY_BATCH_SIZE_MEM = PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM.rsplit(NS_SEP, 1)[-1]
+_PARAM_NAME_REPLAY_MEM_SIZE = PARAM_BACKBONE_REPLAY_MEM_SIZE.rsplit(NS_SEP, 1)[-1]
+
+
+##########################
+# Benchmarks (scenarios) #
+##########################
+
+
+def build_benchmark(
+    *,
+    experiment_config: ExperimentConfig,
+    budget_per_class: int,
+) -> NCScenario:
+    """
+    Build the benchmark scenario.
+
+    Args:
+        experiment_config (ExperimentConfig): Experiment configuration.
+        budget_per_class (int): Per-class repair budget for scenario creation.
+
+    Returns:
+        NCScenario: Built benchmark.
+
+    Raises:
+        ValueError: If the scenario name is empty or not in the registered builder map.
+        RuntimeError: If the scenario builder fails to create a valid NCScenario.
+    """
+    scenario_builder: ScenarioBuilder = get_scenario_builder(
+        scenario=experiment_config.scenario
+    )
+    benchmark = scenario_builder(
+        num_experiences=experiment_config.num_experiences,
+        return_task_id=False,
+        repair_budget_per_class=budget_per_class,
+        dataset_path=experiment_config.dataset_path,
+        seed=experiment_config.seed,
+    )
+    return benchmark
+
+
+#############
+# Backbones #
+#############
+
+
+def build_backbone(*, name: str, num_classes: int) -> torch.nn.Module:
+    """
+    Build the backbone model.
+
+    Args:
+        name (str): Backbone registry name.
+        num_classes (int): Total number of target classes.
+
+    Returns:
+        torch.nn.Module: Instantiated backbone model.
+    """
+    backbone_path = get_backbone_path(name)
+    model_cls = import_symbol(backbone_path)
+    if not inspect.isclass(model_cls):
+        raise TypeError(f'Backbone symbol is not a class: {backbone_path}')
+
+    model_cls_sig = inspect.signature(model_cls.__init__)
+    if 'n_classes' in model_cls_sig.parameters:
+        backbone = model_cls(**{'n_classes': int(num_classes)})
+    elif PARAM_NUM_CLASSES in model_cls_sig.parameters:
+        backbone = model_cls(**{PARAM_NUM_CLASSES: int(num_classes)})
+    else:
+        raise ValueError(
+            f'Backbone `{backbone_path}` must accept either `n_classes` or '
+            '`num_classes`.'
+        )
+
+    if not isinstance(backbone, torch.nn.Module):
+        raise TypeError(f'Backbone `{backbone_path}` did not produce a torch.nn.Module.')
+    return backbone
+
+
+##############
+# Strategies #
+##############
+
+
+def make_strategy(
+    experiment_config: ExperimentConfig,
+    training_config: TrainingConfig,
+    strategy_config: StrategyConfig,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    criterion: torch.nn.Module,
+    evaluator: EvaluationPlugin,
+    plugins: Sequence[object],
+    *,
+    train_epochs_override: int | None = None,
+    eval_every_override: int | None = None,
+) -> BaseTemplate:
+    """
+    Instantiate an Avalanche strategy for the requested configuration.
+
+    Args:
+        experiment_config (ExperimentConfig): Experiment configuration shared across runs.
+        training_config (TrainingConfig): Backbone training configuration.
+        strategy_config (StrategyConfig): Strategy configuration for the run.
+        model (torch.nn.Module): Model to train.
+        optimizer (torch.optim.Optimizer): Optimizer.
+        criterion (torch.nn.Module): Training loss function.
+        evaluator (EvaluationPlugin): Evaluation plugin.
+        plugins (Sequence[object]): Additional Avalanche plugins (e.g., checkpointing).
+        train_epochs_override (int | None): Optional override for strategy `train_epochs`.
+        eval_every_override (int | None): Optional override for strategy `eval_every`.
+
+    Returns:
+        BaseTemplate: Concrete Avalanche strategy ready to train.
+    """
+    common_kwargs = dict(
+        model=model,
+        optimizer=optimizer,
+        criterion=criterion,
+        train_mb_size=training_config.batch_size,
+        train_epochs=(
+            int(train_epochs_override)
+            if train_epochs_override is not None
+            else training_config.num_epochs
+        ),
+        eval_mb_size=experiment_config.eval_batch_size,
+        device=experiment_config.device,
+        plugins=list(plugins),
+        evaluator=evaluator,
+        eval_every=(
+            int(eval_every_override)
+            if eval_every_override is not None
+            else resolve_avalanche_eval_every(
+                eval_schedule=experiment_config.eval_schedule
+            )
+        ),
+    )
+    common_kwarg_names = set(common_kwargs)
+
+    if not isinstance(strategy_config.kwargs, dict):
+        raise ValueError('Strategy kwargs must be a mapping.')
+    strategy_kwargs = dict(strategy_config.kwargs)
+
+    if strategy_config.name == 'naive':
+        reserved_overlap = common_kwarg_names.intersection(strategy_kwargs)
+        if reserved_overlap:
+            raise ValueError(
+                f'Strategy kwargs should not override {sorted(reserved_overlap)}.'
+            )
+        return Naive(**common_kwargs, **strategy_kwargs)
+
+    if strategy_config.name == 'replay':
+        reserved_overlap = common_kwarg_names.intersection(strategy_kwargs)
+        if reserved_overlap:
+            raise ValueError(
+                f'Strategy kwargs should not override {sorted(reserved_overlap)}.'
+            )
+
+        replay_batch_size = strategy_kwargs.pop(_PARAM_NAME_REPLAY_BATCH_SIZE_MEM, None)
+        if (
+            _PARAM_NAME_REPLAY_MEM_SIZE in strategy_kwargs
+            and strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE] is not None
+        ):
+            strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE] = int(
+                strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE]
+            )
+        replay_kwargs = dict(**common_kwargs, **strategy_kwargs)
+        strategy = Replay(**replay_kwargs)
+
+        replay_plugins = getattr(strategy, 'plugins', None)
+        if not replay_plugins:
+            raise ValueError('Replay strategy did not expose any plugins.')
+
+        replay_plugin = next(
+            (
+                plugin
+                for plugin in replay_plugins
+                if plugin.__class__.__name__ == 'ReplayPlugin'
+            ),
+            None,
+        )
+        if replay_plugin is None or not hasattr(
+            replay_plugin,
+            _PARAM_NAME_REPLAY_BATCH_SIZE_MEM,
+        ):
+            raise ValueError(
+                'Replay strategy did not expose a ReplayPlugin with batch_size_mem.'
+            )
+
+        if replay_batch_size is None:
+            setattr(replay_plugin, _PARAM_NAME_REPLAY_BATCH_SIZE_MEM, None)
+        else:
+            setattr(
+                replay_plugin,
+                _PARAM_NAME_REPLAY_BATCH_SIZE_MEM,
+                int(replay_batch_size),
+            )
+        return strategy
+
+    if strategy_config.name == 'bic':
+        raise ValueError(
+            'BiC is implemented as a post-hoc repair controller in this project'
+        )
+    if strategy_config.name == 'il2m':
+        raise ValueError(
+            'IL2M is implemented as a post-hoc repair controller in this project'
+        )
+    raise ValueError(f'Unsupported strategy: {strategy_config.name}')
+
+
+##############
+# Optimizers #
+##############
+
+
+def build_optimizer(
+    model: torch.nn.Module,
+    optimizer_config: OptimizerConfig,
+) -> tuple[torch.optim.Optimizer, dict[str, object]]:
+    """
+    Construct an optimizer instance from configuration.
+
+    Args:
+        model (torch.nn.Module): Model providing parameters.
+        optimizer_config (OptimizerConfig): Optimizer configuration.
+
+    Returns:
+        tuple[torch.optim.Optimizer, dict[str, object]]:
+            Tuple of optimizer instance and the keyword arguments used.
+    """
+    if not isinstance(optimizer_config.name, str):
+        raise ValueError('Optimizer name must be a string.')
+    optimizer_name = optimizer_config.name.lower()
+    if not isinstance(optimizer_config.kwargs, dict):
+        raise ValueError('Optimizer kwargs must be a mapping.')
+    optimizer_kwargs_payload = optimizer_config.kwargs
+    if optimizer_name == 'sgd':
+        default_kwargs = {
+            'lr': 0.1,
+            'momentum': 0.9,
+            'weight_decay': 5e-4,
+        }
+        optimizer_kwargs = {
+            kwarg: float(value)
+            for kwarg, value in {**default_kwargs, **optimizer_kwargs_payload}.items()
+        }
+        optimizer = SGD(model.parameters(), **optimizer_kwargs)
+        return optimizer, optimizer_kwargs
+    raise ValueError(f'Unsupported optimizer: {optimizer_config.name}')
+
+
+###############
+# Controllers #
+###############
+
+
+def build_controller(
+    *,
+    controller_config: ControllerConfig | None,
+    train_batch_size: int,
+    replay_batch_size: int | None,
+    replay_memory_size: int | None,
+) -> Controller | None:
+    """
+    Build a controller.
+
+    Args:
+        controller_config (ControllerConfig | None): Controller configuration.
+        train_batch_size (int): Training batch size.
+        replay_batch_size (int | None): Replay batch size.
+        replay_memory_size (int | None): Replay memory size.
+
+    Returns:
+        Controller | None: Controller instance or None if no controller is configured.
+    """
+    if controller_config is None:
+        return None
+
+    controller_path = get_controller_path(controller_config.name)
+    controller_cls = import_symbol(controller_path)
+    controller_cls_sig = inspect.signature(controller_cls.__init__)
+
+    controller_kwargs = dict(controller_config.kwargs)
+    injectable_kwargs = {
+        _PARAM_CONTROLLER_TRAIN_BATCH_SIZE: train_batch_size,
+        _PARAM_CONTROLLER_REPLAY_BATCH_SIZE: replay_batch_size,
+        _PARAM_CONTROLLER_REPLAY_MEMORY_SIZE: replay_memory_size,
+    }
+    for param_name, param_value in injectable_kwargs.items():
+        if param_value is None:
+            continue
+        if (
+            param_name in controller_cls_sig.parameters
+            and param_name not in controller_kwargs
+        ):
+            controller_kwargs[param_name] = param_value
+
+    forbidden_kwargs = (
+        PARAM_NUM_CLASSES,
+        'n_classes',
+        _PARAM_CONTROLLER_CLASSES,
+    )
+    found_forbidden_kwargs = [key for key in forbidden_kwargs if key in controller_kwargs]
+    if found_forbidden_kwargs:
+        raise ValueError(
+            f'Controller `{controller_path}` should not receive the following '
+            f'keyword arguments: {", ".join(found_forbidden_kwargs)}'
+        )
+
+    controller: Controller = controller_cls(**controller_kwargs)
+    if not isinstance(controller, (PreventionController, RepairController)):
+        raise ValueError(f'{controller_path} is not a prevention or repair controller.')
+    return controller
+
+
+def build_controller_plugin(
+    *,
+    controller: Controller,
+    fit_after_experience: bool | None = None,
+    num_epochs: int | None = None,
+    batch_size: int | None = None,
+    debug: bool = False,
+    debug_epochs: int | None = None,
+    debug_experiences: int | None = None,
+    debug_seed: int | None = None,
+) -> ControllerPlugin:
+    """
+    Build a controller plugin.
+
+    Args:
+        controller (Controller): Controller instance.
+        fit_after_experience (bool | None): Whether to fit after each experience.
+        num_epochs (int | None): Number of repair epochs.
+        batch_size (int | None): Repair batch size.
+        debug (bool): Whether to use the debug repair controller plugin.
+        debug_epochs (int | None): Epochs per experience for debug metric steps.
+        debug_experiences (int | None): Total experiences for debug metric steps.
+        debug_seed (int | None): Seed used for debug dataloader ordering.
+
+    Returns:
+        ControllerPlugin: Controller plugin instance.
+    """
+    if isinstance(controller, PreventionController):
+        return PreventionControllerPlugin(controller=controller)
+
+    if isinstance(controller, RepairController):
+        if fit_after_experience is None or num_epochs is None or batch_size is None:
+            raise ValueError(
+                'Repair controllers require `fit_after_experience`, `num_epochs`, '
+                'and `batch_size` to be specified.'
+            )
+        if debug:
+            if (
+                debug_epochs is None
+                or debug_experiences is None
+                or debug_seed is None
+            ):
+                raise ValueError(
+                    'Debug controller plugin requires debug_epochs, '
+                    'debug_experiences, debug_seed.'
+                )
+            return DebugRepairControllerPlugin(
+                controller=controller,
+                fit_after_experience=fit_after_experience,
+                repair_epochs=num_epochs,
+                repair_batch_size=batch_size,
+                debug_epochs=debug_epochs,
+                debug_experiences=debug_experiences,
+                debug_seed=debug_seed,
+            )
+        return RepairControllerPlugin(
+            controller=controller,
+            fit_after_experience=fit_after_experience,
+            repair_epochs=num_epochs,
+            repair_batch_size=batch_size,
+        )
+
+    raise ValueError(
+        f'Unsupported controller plugin type: {type(controller).__name__}.'
+    )

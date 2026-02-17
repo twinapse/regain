@@ -12,6 +12,7 @@ from torch.utils.data import Subset
 from regain.models.controllers.base import BackboneControllerInterface
 from regain.models.controllers.base import PreventionController
 from regain.models.controllers.base import TrainingObjectiveControllerInterface
+from regain.models.controllers.utils import resolve_backbone_or_raise
 from regain.models.normalization import ContinualNormalization4
 from regain.models.normalization import ContinualNormalization8
 from regain.models.normalization import ContinualNormalization16
@@ -493,28 +494,6 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
     ####################
 
     @staticmethod
-    def _get_backbone(model: nn.Module) -> nn.Module:
-        """
-        Resolve the encoder/backbone module used for KNN features.
-
-        Args:
-            model: Model exposing `.backbone` or `.encoder`.
-
-        Returns:
-            Backbone module.
-
-        Raises:
-            ValueError: If no compatible backbone interface exists.
-        """
-        backbone = getattr(model, 'backbone', None)
-        if isinstance(backbone, nn.Module):
-            return backbone
-        encoder = getattr(model, 'encoder', None)
-        if isinstance(encoder, nn.Module):
-            return encoder
-        raise ValueError('BaCEController requires the model to expose a `.backbone` (or `.encoder`) module.')
-
-    @staticmethod
     def _mask_from_classes(targets: torch.Tensor, classes: list[int]) -> torch.Tensor:
         """
         Build a boolean mask selecting targets belonging to a set of class IDs.
@@ -544,7 +523,10 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
         if self._dataset is None or self._teacher is None:
             return
 
-        teacher_backbone = self._get_backbone(self._teacher)
+        teacher_backbone = resolve_backbone_or_raise(
+            model=self._teacher,
+            error_message='BaCEController requires the model to expose a `.backbone` (or `.encoder`) module.',
+        )
         model_device = module_device(model, fallback='cpu')
 
         n = len(self._dataset)
@@ -702,7 +684,10 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
         joint_scores = self_scores * w0
 
         # Teacher features for queries
-        teacher_backbone = self._get_backbone(self._teacher)
+        teacher_backbone = resolve_backbone_or_raise(
+            model=self._teacher,
+            error_message='BaCEController requires the model to expose a `.backbone` (or `.encoder`) module.',
+        )
         with torch.inference_mode():
             query_feats = teacher_backbone(cur_inputs)
         if not torch.is_tensor(query_feats) or query_feats.ndim != 2:

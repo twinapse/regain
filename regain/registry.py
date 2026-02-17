@@ -2,12 +2,16 @@ import importlib
 from types import MappingProxyType
 from typing import Mapping
 
+from regain.constants import PARAM_SCENARIO
+
 __all__ = [
     'import_symbol',
     'list_scenarios',
+    'list_backbones',
     'list_controllers',
     'list_repair_buffer_policies',
     'get_scenario_builder_path',
+    'get_backbone_path',
     'get_controller_path',
     'get_repair_buffer_policy_path',
 ]
@@ -118,7 +122,7 @@ def _list_registry_entries(mapping: Mapping[str, str]) -> tuple[str, ...]:
 
 _SCENARIOS: Mapping[str, str] = MappingProxyType(
     {
-        'split_cifar100': 'regain.avalanche_utils.scenarios._SplitCIFAR100ScenarioBuilder',
+        'split_cifar100': 'regain.avalanche_utils.scenarios.SplitCIFAR100ScenarioBuilder',
     }
 )
 
@@ -150,8 +154,51 @@ def get_scenario_builder_path(scenario: str) -> str:
     return _resolve_registry_entry(
         mapping=_SCENARIOS,
         key=key,
-        label='scenario',
+        label=PARAM_SCENARIO,
         supported_label='scenarios',
+    )
+
+
+#############
+# Backbones #
+#############
+
+_BACKBONES: Mapping[str, str] = MappingProxyType(
+    {
+        'resnet18': 'regain.models.classifiers.ResNet18Classifier',
+    }
+)
+
+
+def list_backbones() -> tuple[str, ...]:
+    """
+    List available backbone registry names.
+
+    Returns:
+        tuple[str, ...]: Sorted backbone names.
+    """
+    return _list_registry_entries(_BACKBONES)
+
+
+def get_backbone_path(name: str) -> str:
+    """
+    Resolve a backbone name to its fully qualified path.
+
+    Args:
+        name (str): Backbone registry name.
+
+    Returns:
+        str: Fully qualified path for the backbone class.
+
+    Raises:
+        ValueError: If the backbone name is invalid or unsupported.
+    """
+    key = _normalize_registry_key(value=name, label='Backbone name')
+    return _resolve_registry_entry(
+        mapping=_BACKBONES,
+        key=key,
+        label='backbone name',
+        supported_label='backbones',
     )
 
 
@@ -213,7 +260,7 @@ def get_controller_path(name: str) -> str:
 ###############################################################
 # Repair buffer policies                                      #
 #                                                             #
-# NOTE: Currently unused. We keep it for possible future use. #
+# Optional repair-buffer policy registry.                     #
 ###############################################################
 
 _REPAIR_BUFFER_POLICIES: Mapping[str, str] = MappingProxyType(

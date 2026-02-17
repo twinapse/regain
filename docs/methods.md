@@ -17,8 +17,10 @@ See [*"Knowledge Accumulation in Continually Learned Representations and the Iss
 
 ### Our implementation
 
-- We use Avalanche built-in [`BiC`](https://avalanche-api.continualai.org/en/latest/generated/avalanche.training.BiC.html#avalanche.training.BiC) 
-  strategy.
+- We implement BiC as a **post-hoc repair controller** (`BiCController`) adapted from Avalanche's `BiCPlugin`
+  stage-2 bias-correction procedure.
+- Backbone training is still provided by the shared experiment backbone strategy; BiC fits a bias layer on the repair
+  stream and applies it during posthoc evaluation.
 
 ## IL2M (Class Incremental Learning With Dual Memory)
 
@@ -26,9 +28,9 @@ See [*"Knowledge Accumulation in Continually Learned Representations and the Iss
 
 ### Our implementation
 
-- We use Avalanche built-in 
-  [`IL2M`](https://avalanche-api.continualai.org/en/latest/generated/avalanche.training.IL2M.html#avalanche.training.IL2M) 
-  strategy.
+- We implement IL2M as a **post-hoc repair controller** (`IL2MController`) adapted from Avalanche's `IL2MPlugin`.
+- The controller accumulates IL2M statistics from repair data after each experience and applies IL2M rectification
+  during posthoc evaluation.
 
 ## CN (Continual Normalization)
 
@@ -64,10 +66,14 @@ See [*"Knowledge Accumulation in Continually Learned Representations and the Iss
   running statistics (the “balancing” is a training-only mechanism).
 - Assumptions/differences to be aware of:
   - **Minibatch layout + partition:** minibatches must be `[current-task samples | replay samples]` with
-    `B_c = train_mb_size` (current) and `B_p = replay_batch_size` (Avalanche `mem_mb_size` / `batch_size_mem`) (replay).
-    TBBN is only wired for replay-based strategies (Replay, BiC, IL2M) and validates the partition accordingly.
-  - **Explicit batch sizes only:** we no longer derive `(B_c, B_p)` from a single “total batch size”; both minibatch
-    sizes must be configured directly in the experiment/controller to match the strategy dataloaders.
+    `B_c = train_mb_size` (current) and `B_p` equal to the replay mini-batch size
+    (Avalanche `mem_mb_size` / `batch_size_mem`).
+    TBBN is only wired for replay-backed backbone training (`backbone.training.strategy.name: replay`) and validates
+    the partition accordingly.
+  - **Explicit partition (no total-batch inference):** `(B_c, B_p)` are not derived from a single “total batch size”.
+    `B_c` comes from `backbone.training.batch_size`; `B_p` comes from
+    `backbone.training.strategy.kwargs.batch_size_mem` when provided, and otherwise falls back to
+    `backbone.training.batch_size` (matching Replay defaults).
   - **Last minibatch robustness:** some strategies / dataloaders can yield a last minibatch whose current-part size is
     not divisible by the configured split factor. We reduce splits via `gcd` per minibatch to avoid invalid reshapes; a
     stricter reference implementation may simply assume divisibility and error out.

@@ -86,6 +86,76 @@ def _ensure_prerequisites() -> None:
     _patch_avalanche_il2m_initial_eval()
 
 
+def _export_runs_to_csvs(
+    *,
+    experiment_name: str,
+    export_dir: str,
+    tracking_uri: str | None,
+) -> None:
+    """
+    Export run data for one experiment to CSV files.
+
+    Args:
+        experiment_name (str): MLflow experiment name.
+        export_dir (str): Directory for exportable run outputs.
+        tracking_uri (str | None): MLflow tracking URI.
+
+    Returns:
+        None
+
+    Raises:
+        SystemExit: If one or more target export files already exist.
+    """
+    # Import `regain` modules after prerequisites are ensured
+    from regain.experiments.exports import export_runs_to_csvs
+
+    # Build export paths
+    export_root = Path(export_dir) / experiment_name
+    metadata_path = export_root / 'run_metadata.csv'
+    params_path = export_root / 'run_params.csv'
+    metrics_path = export_root / 'run_metrics.csv'
+
+    # Export runs to CSVs, handling existing files gracefully
+    try:
+        export_runs_to_csvs(
+            experiment=experiment_name,
+            metadata_path=metadata_path,
+            params_path=params_path,
+            metrics_path=metrics_path,
+            tracking_uri=tracking_uri,
+        )
+        print(
+            'Run exports written to: '
+            f'{metadata_path}, {params_path}, {metrics_path}'
+        )
+    except FileExistsError as exc:
+        message = f'{exc}. Remove it or choose a different --export-dir.'
+        print(message, file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_experiment(config_file: str) -> tuple[str, str | None]:
+    """
+    Load and run a single experiment configuration.
+
+    Args:
+        config_file (str): Path to a single experiment config YAML file.
+
+    Returns:
+        tuple[str, str | None]: Experiment name and MLflow tracking URI.
+    """
+    # Import `regain` modules after prerequisites are ensured
+    from regain.experiments.config import load_experiment_config
+    from regain.experiments.orchestrator import run_experiment
+
+    # Load experiment config
+    experiment_config = load_experiment_config(config_file)
+    # Run experiment
+    run_experiment(experiment_config)
+    # Return experiment name and tracking URI
+    return experiment_config.experiment_name, experiment_config.mlflow_tracking_uri
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     """
     Build the CLI argument parser for standalone execution.
@@ -94,66 +164,47 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: Configured ArgumentParser.
     """
     parser = argparse.ArgumentParser(description='Run a REGAIN experiment')
-    parser.add_argument('--config_file', required=True, help='Path to experiment config YAML')
-    parser.add_argument('--export-dir', type=str, default=None, help='Path to the directory for exportable run outputs.')
+    parser.add_argument(
+        '--config_files',
+        required=True,
+        help='Comma-separated list of paths to experiment config YAML files',
+    )
+    parser.add_argument(
+        '--export-dir',
+        type=str,
+        default=None,
+        help='Path to the directory for exportable run outputs.',
+    )
     return parser
 
 
 def main() -> None:
     """
-    CLI entrypoint to run experiments from a YAML config file.
+    CLI entrypoint to run experiments from YAML config files.
     """
     # Ensure prerequisites
     _ensure_prerequisites()
-
-    # Import `regain` modules after prerequisites are ensured
-    from regain.experiments.core import run_experiment
-    from regain.experiments.exports import export_runs_to_csvs
-    from regain.experiments.utils import load_experiment_config
 
     # Parse CLI arguments
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    # Load the experiment config
-    experiment_config = load_experiment_config(args.config_file)
+    # Get config files
+    config_files = [config_file.strip() for config_file in args.config_files.split(',') if config_file.strip()]
+    if not config_files:
+        parser.error('At least one config file must be provided via --config_files.')
 
-    # Prepare export paths if requested
-    metadata_path: Path | None = None
-    params_path: Path | None = None
-    metrics_path: Path | None = None
-    if args.export_dir is not None:
-        export_root = Path(args.export_dir) / experiment_config.experiment_name
-        metadata_path = export_root / 'run_metadata.csv'
-        params_path = export_root / 'run_params.csv'
-        metrics_path = export_root / 'run_metrics.csv'
-
-    # Run the experiment
-    run_experiment(experiment_config=experiment_config)
-
-    # Export runs to CSV if requested
-    if args.export_dir is not None:
-        if metadata_path is None or params_path is None or metrics_path is None:
-            export_root = Path(args.export_dir) / experiment_config.experiment_name
-            metadata_path = export_root / 'run_metadata.csv'
-            params_path = export_root / 'run_params.csv'
-            metrics_path = export_root / 'run_metrics.csv'
-        try:
-            export_runs_to_csvs(
-                experiment=experiment_config.experiment_name,
-                metadata_path=metadata_path,
-                params_path=params_path,
-                metrics_path=metrics_path,
-                tracking_uri=experiment_config.mlflow_tracking_uri,
+    # Run each experiment config file and optionally export runs to CSVs
+    for config_file in config_files:
+        # Run experiment
+        experiment_name, tracking_uri = _run_experiment(config_file)
+        # Export runs to CSV if requested
+        if args.export_dir is not None:
+            _export_runs_to_csvs(
+                experiment_name=experiment_name,
+                export_dir=args.export_dir,
+                tracking_uri=tracking_uri,
             )
-            print(
-                'Run exports written to: '
-                f'{metadata_path}, {params_path}, {metrics_path}'
-            )
-        except FileExistsError as exc:
-            message = f'{exc}. Remove it or choose a different --export-dir.'
-            print(message, file=sys.stderr)
-            sys.exit(1)
 
 
 if __name__ == '__main__':
