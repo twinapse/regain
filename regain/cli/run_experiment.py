@@ -165,7 +165,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(description='Run a REGAIN experiment')
     parser.add_argument(
-        '--config_files',
+        '--config-files',
         required=True,
         help='Comma-separated list of paths to experiment config YAML files',
     )
