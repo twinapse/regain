@@ -1,37 +1,66 @@
+# ============================================================
+# Experiment identity & scenario
+# ============================================================
 experiment_name: retrieval_controllers_split_cifar100
 scenario: split_cifar100
-num_experiences: 10
+num_experiences: 20
+
+# ============================================================
+# Backbone configuration
+# ============================================================
 backbone:
   name: resnet18
   training:
-    num_epochs: 10
+    num_epochs: 50
+    # We use balanced batches: each training mini-batch contains 64 stream + 64 buffer = 128 total
     strategy:
       name: replay
       kwargs:
-        mem_size: 2000
-        batch_size_mem: 128
+        mem_size: 2000          # replay buffer capacity (total stored examples)
+        batch_size_mem: 64      # samples drawn from the replay buffer per mini-batch
     optimizer:
       name: sgd
       kwargs:
         lr: 0.1
         momentum: 0.9
         weight_decay: 5e-4
-    batch_size: 128
+    batch_size: 64              # samples from the current experience (stream) per mini-batch
+    lr_scheduler:
+      name: multi_step
+      kwargs:
+        milestones: [35, 45]
+        gamma: 0.1
   source_experiment: null
+
+# ============================================================
+# Repair controller settings
+# ============================================================
 repair:
   budget_per_class: 100
   fit_schedule: per_experience
-  num_epochs: 10
-  batch_size: 128
-eval_batch_size: 128
+  num_epochs: 50
+  batch_size: 64                # mini-batch size used when fitting repair controllers
+
+# ============================================================
+# Evaluation & runtime settings
+# ============================================================
+eval_batch_size: 128            # mini-batch size used during evaluation
 eval_schedule: final_only
 checkpoints_enabled: false
 device: auto
 seed: 1
 deterministic: false
+
+# ============================================================
+# Tracking & storage
+# ============================================================
 mlflow_tracking_uri: null
 mlflow_artifact_uri: null
 dataset_path: null
+
+# ============================================================
+# Experiment runs — one entry per controller variant
+# ============================================================
 runs:
   - name: logit_bias
     controller:

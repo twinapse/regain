@@ -9,10 +9,12 @@ __all__ = [
     'list_scenarios',
     'list_backbones',
     'list_controllers',
+    'list_lr_schedulers',
     'list_repair_buffer_policies',
     'get_scenario_builder_path',
     'get_backbone_path',
     'get_controller_path',
+    'get_lr_scheduler_path',
     'get_repair_buffer_policy_path',
 ]
 
@@ -199,6 +201,49 @@ def get_backbone_path(name: str) -> str:
         key=key,
         label='backbone name',
         supported_label='backbones',
+    )
+
+
+#################
+# LR Schedulers #
+#################
+
+_LR_SCHEDULERS: Mapping[str, str] = MappingProxyType(
+    {
+        'multi_step': 'torch.optim.lr_scheduler.MultiStepLR',
+    }
+)
+
+
+def list_lr_schedulers() -> tuple[str, ...]:
+    """
+    List available LR scheduler registry names.
+
+    Returns:
+        tuple[str, ...]: Sorted LR scheduler names.
+    """
+    return _list_registry_entries(_LR_SCHEDULERS)
+
+
+def get_lr_scheduler_path(name: str) -> str:
+    """
+    Resolve an LR scheduler name to its fully qualified path.
+
+    Args:
+        name (str): LR scheduler registry name.
+
+    Returns:
+        str: Fully qualified path for the LR scheduler class.
+
+    Raises:
+        ValueError: If the LR scheduler name is invalid or unsupported.
+    """
+    key = _normalize_registry_key(value=name, label='LR scheduler name')
+    return _resolve_registry_entry(
+        mapping=_LR_SCHEDULERS,
+        key=key,
+        label='LR scheduler name',
+        supported_label='LR schedulers',
     )
 
 

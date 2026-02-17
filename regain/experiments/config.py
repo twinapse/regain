@@ -25,6 +25,7 @@ from regain.registry import get_scenario_builder_path
 
 __all__ = [
     'ControllerConfig',
+    'LRSchedulerConfig',
     'StrategyConfig',
     'OptimizerConfig',
     'TrainingConfig',
@@ -33,7 +34,6 @@ __all__ = [
     'RunConfig',
     'ExperimentConfig',
     'load_experiment_config',
-    'guard_experiment_config_overrides',
 ]
 
 _CONFIG_PARAM_OVERRIDE_MAP: list[tuple[str, list[str]]] = [
@@ -102,6 +102,20 @@ class OptimizerConfig:
 
 
 @dataclass
+class LRSchedulerConfig:
+    """
+    Learning rate schedule configuration.
+
+    Attributes:
+        name: Schedule type identifier (currently only ``multi_step`` is supported).
+        kwargs: Schedule-specific keyword arguments (e.g. ``milestones``, ``gamma`` for ``multi_step``).
+    """
+
+    name: Literal['multi_step']
+    kwargs: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
 class TrainingConfig:
     """
     Backbone training configuration for learning from scratch.
@@ -111,12 +125,14 @@ class TrainingConfig:
         strategy: Avalanche strategy configuration for backbone training.
         optimizer: Optimizer configuration for backbone training.
         batch_size: Training mini-batch size for current data (Avalanche `train_mb_size`).
+        lr_scheduler: Optional learning rate schedule applied within each experience.
     """
 
     num_epochs: int
     strategy: StrategyConfig
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     batch_size: int = 128
+    lr_scheduler: LRSchedulerConfig | None = None
 
 
 @dataclass
@@ -250,19 +266,6 @@ def _resolve_device(device: str | None) -> str:
     return device
 
 
-def _has_kwargs_segment(*, dotted_path: str) -> bool:
-    """
-    Check whether a dotted path includes a `kwargs` segment.
-
-    Args:
-        dotted_path (str): Candidate dotted path.
-
-    Returns:
-        bool: True when the path includes a `kwargs` segment.
-    """
-    return 'kwargs' in dotted_path.split(NS_SEP)
-
-
 def _normalize_logged_param_path(*, dotted_path: str) -> str:
     """
     Normalize a dotted path to match MLflow logging key normalization.
@@ -317,6 +320,71 @@ def _collect_logged_leaf_paths(
     return leaf_paths
 
 
+def _guard_config_tree(*, child_config: object, context: str) -> None:
+    """
+    Recursively validate a config subtree against parent-owned parameters.
+
+    Args:
+        child_config (object): Config subtree to validate.
+        context (str): Label for error messages.
+    """
+    if isinstance(child_config, Mapping):
+        for parent_key, child_keys in _CONFIG_PARAM_OVERRIDE_MAP:
+            overrides = [key for key in child_keys if key in child_config]
+            if overrides:
+                raise ValueError(
+                    f'{context} keys should not override `{parent_key}`; '
+                    f'use experiment config instead (remove: {sorted(overrides)}).'
+                )
+        for key, value in child_config.items():
+            if isinstance(value, Mapping) or isinstance(value, (list, tuple)):
+                _guard_config_tree(child_config=value, context=f'{context}.{key}')
+        return
+
+    if isinstance(child_config, (list, tuple)):
+        for index, value in enumerate(child_config):
+            if isinstance(value, Mapping) or isinstance(value, (list, tuple)):
+                _guard_config_tree(child_config=value, context=f'{context}[{index}]')
+
+
+def _guard_config_param_overrides(
+    *,
+    parent_config: Mapping[str, object],
+    child_config: Mapping[str, object],
+) -> None:
+    """
+    Raise if a child config subtree attempts to override parent-owned values.
+
+    Args:
+        parent_config (Mapping[str, object]): Parent config mapping.
+        child_config (Mapping[str, object]): Config subtree to validate.
+    """
+    if not isinstance(parent_config, Mapping):
+        raise TypeError('parent_config must be a mapping.')
+    if not isinstance(child_config, Mapping):
+        raise TypeError('child_config must be a mapping.')
+    _guard_config_tree(child_config=child_config, context='config')
+
+
+def _guard_experiment_config_overrides(experiment_config: dict[str, Any]) -> None:
+    """
+    Validate that nested run config parameters do not override experiment config parameters.
+
+    Args:
+        experiment_config (dict[str, Any]): Raw YAML payload.
+    """
+    runs_payload = experiment_config.get('runs')
+    runs = [] if runs_payload is None else runs_payload
+    if not isinstance(runs, list):
+        raise ValueError('Configuration field `runs` must be a list when provided.')
+
+    for run_config in runs:
+        if not isinstance(run_config, dict):
+            raise ValueError('Each run configuration must be a mapping.')
+
+        _guard_config_param_overrides(parent_config=experiment_config, child_config=run_config)
+
+
 def _guard_kwargs_conflicts_in_scope(
     *,
     scope_config: Mapping[str, object],
@@ -335,6 +403,19 @@ def _guard_kwargs_conflicts_in_scope(
     Raises:
         ValueError: If a param path in `kwargs` conflicts with a normalized or reserved logged param.
     """
+
+    def has_kwargs_segment(*, dotted_path: str) -> bool:
+        """
+        Check whether a dotted path includes a `kwargs` segment.
+
+        Args:
+            dotted_path (str): Candidate dotted path.
+
+        Returns:
+            bool: True when the path includes a `kwargs` segment.
+        """
+        return 'kwargs' in dotted_path.split(NS_SEP)
+
     leaf_paths = _collect_logged_leaf_paths(config_tree=scope_config)
     normalized_to_raw_paths: dict[str, set[str]] = {}
     for raw_path, normalized_path, _ in leaf_paths:
@@ -343,7 +424,7 @@ def _guard_kwargs_conflicts_in_scope(
     for normalized_path, raw_paths in normalized_to_raw_paths.items():
         if len(raw_paths) < 2:
             continue
-        param_paths_in_kwargs = sorted(path for path in raw_paths if _has_kwargs_segment(dotted_path=path))
+        param_paths_in_kwargs = sorted(path for path in raw_paths if has_kwargs_segment(dotted_path=path))
         if not param_paths_in_kwargs:
             continue
         conflicting_paths = sorted(path for path in raw_paths if path not in param_paths_in_kwargs)
@@ -401,195 +482,213 @@ def _guard_kwargs_conflicts(*, payload: Mapping[str, object]) -> None:
         )
 
 
-# TODO: Decompose this function. It is too long.
+def _parse_strategy_config(config: dict[str, Any], *, config_name: str) -> StrategyConfig:
+    strategy_config = config.get('strategy')
+    if not isinstance(strategy_config, dict):
+        raise ValueError(f'{config_name} must define a strategy configuration.')
+    if 'name' not in strategy_config:
+        raise ValueError(f'{config_name} strategy must provide a `name`.')
+    kwargs_payload = strategy_config.get('kwargs')
+    if kwargs_payload is None:
+        kwargs_payload = {}
+    if not isinstance(kwargs_payload, Mapping):
+        raise ValueError(f'{config_name} strategy `kwargs` must be a mapping.')
+    return StrategyConfig(
+        name=strategy_config['name'],
+        kwargs=dict(kwargs_payload),
+    )
+
+
+def _parse_optimizer_config(config: dict[str, Any], *, config_name: str) -> OptimizerConfig:
+    optimizer_config = config.get('optimizer')
+    if optimizer_config is None:
+        return OptimizerConfig()
+    if not isinstance(optimizer_config, dict):
+        raise ValueError(f'{config_name} must define an optimizer configuration.')
+    if 'name' not in optimizer_config:
+        raise ValueError(f'{config_name} optimizer configuration must include a `name`.')
+    kwargs_payload = optimizer_config.get('kwargs')
+    if kwargs_payload is None:
+        kwargs_payload = {}
+    if not isinstance(kwargs_payload, Mapping):
+        raise ValueError(f'{config_name} optimizer `kwargs` must be a mapping.')
+    return OptimizerConfig(
+        name=optimizer_config['name'],
+        kwargs=dict(kwargs_payload),
+    )
+
+
+def _parse_lr_scheduler_config(config: dict[str, Any]) -> LRSchedulerConfig | None:
+    lr_scheduler_config = config.get('lr_scheduler')
+    if lr_scheduler_config is None:
+        return None
+    if not isinstance(lr_scheduler_config, dict):
+        raise ValueError('`lr_scheduler` must be a mapping when provided.')
+    name = lr_scheduler_config.get('name')
+    if name is None:
+        raise ValueError('`lr_scheduler` must include a `name`.')
+    kwargs_payload = lr_scheduler_config.get('kwargs')
+    if kwargs_payload is None:
+        kwargs_payload = {}
+    if not isinstance(kwargs_payload, Mapping):
+        raise ValueError('`lr_scheduler.kwargs` must be a mapping when provided.')
+    return LRSchedulerConfig(name=name, kwargs=dict(kwargs_payload))
+
+
+def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
+    backbone_config = config.get(PARAM_BACKBONE)
+    if backbone_config is None:
+        return None
+    if not isinstance(backbone_config, dict):
+        raise ValueError('Experiment config `backbone` must be a mapping when provided.')
+
+    source_experiment_raw = backbone_config.get('source_experiment')
+    if source_experiment_raw not in (None, ''):
+        if not isinstance(source_experiment_raw, (str, int)):
+            raise ValueError('Backbone config `source_experiment` must be a string or integer experiment id.')
+        source_experiment = str(source_experiment_raw)
+        invalid_keys = sorted(
+            key
+            for key in backbone_config
+            if key != 'source_experiment'
+        )
+        if invalid_keys:
+            raise ValueError(
+                'When `backbone.source_experiment` is provided, it must be the only field under `backbone`. '
+                f'Remove: {invalid_keys}'
+            )
+        experiment_name_raw = config.get('experiment_name')
+        if experiment_name_raw is not None:
+            if source_experiment.strip() == str(experiment_name_raw).strip():
+                raise ValueError(
+                    'Backbone config `source_experiment` must be different from `experiment_name`.'
+                )
+        return BackboneConfig(
+            name=None,
+            training=None,
+            source_experiment=source_experiment,
+        )
+
+    backbone_name = backbone_config.get('name', 'resnet18')
+    if not isinstance(backbone_name, str):
+        raise ValueError('Backbone config `name` must be a string.')
+    backbone_name = backbone_name.strip()
+    get_backbone_path(backbone_name)
+
+    training_config = backbone_config.get('training')
+    if training_config is None:
+        raise ValueError('Backbone config must define exactly one of `training` or `source_experiment`.')
+    if not isinstance(training_config, dict):
+        raise ValueError('Backbone config `training` must be a mapping when provided.')
+    if 'num_epochs' not in training_config:
+        raise ValueError('Backbone config `training` must include `num_epochs`.')
+    lr_scheduler = _parse_lr_scheduler_config(training_config)
+    training = TrainingConfig(
+        num_epochs=training_config['num_epochs'],
+        strategy=_parse_strategy_config(training_config, config_name='Backbone training config'),
+        optimizer=_parse_optimizer_config(training_config, config_name='Backbone training config'),
+        batch_size=training_config.get('batch_size', 128),
+        lr_scheduler=lr_scheduler,
+    )
+
+    return BackboneConfig(
+        name=backbone_name,
+        training=training,
+        source_experiment=None,
+    )
+
+
+def _parse_controller_config(run_config: dict[str, Any]) -> ControllerConfig:
+    if PARAM_CONTROLLER not in run_config:
+        raise ValueError('Each run configuration must include a `controller` mapping.')
+    config = run_config[PARAM_CONTROLLER]
+    if not isinstance(config, dict):
+        raise ValueError('Controller configuration must be a mapping.')
+    if 'name' not in config:
+        raise ValueError('Controller configuration must include a `name`.')
+    kwargs_payload = config.get('kwargs')
+    if kwargs_payload is None:
+        kwargs_payload = {}
+    if not isinstance(kwargs_payload, Mapping):
+        raise ValueError('Controller config `kwargs` must be a mapping.')
+    get_controller_path(config['name'])
+    return ControllerConfig(
+        name=config['name'],
+        kwargs=dict(kwargs_payload),
+    )
+
+
+def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
+    repair_config = config.get('repair')
+    if repair_config is None:
+        raise ValueError(
+            'Experiment config must include a `repair` section to define data splitting. '
+            'Use `budget_per_class: 0` if using the full dataset (no repair).'
+        )
+    if not isinstance(repair_config, dict):
+        raise ValueError('`repair` must be a mapping when provided.')
+    fit_schedule = repair_config.get('fit_schedule', 'per_experience')
+    if fit_schedule not in {'per_experience', 'final_only'}:
+        raise ValueError('`repair.fit_schedule` must be one of: `per_experience`, `final_only`.')
+    return RepairConfig(
+        budget_per_class=repair_config.get('budget_per_class', 0),
+        fit_schedule=fit_schedule,
+        num_epochs=repair_config.get('num_epochs'),
+        batch_size=repair_config.get('batch_size'),
+    )
+
+
+def _parse_runs(payload: dict[str, Any]) -> list[RunConfig] | None:
+    runs_payload = payload.get('runs')
+    if runs_payload is None:
+        return None
+    if not isinstance(runs_payload, list):
+        raise ValueError('Configuration field `runs` must be a list when provided.')
+
+    runs: list[RunConfig] = []
+    for run_cfg in runs_payload:
+        if not isinstance(run_cfg, dict):
+            raise ValueError('Each run configuration must be a mapping.')
+        if 'name' not in run_cfg:
+            raise ValueError('Each run configuration must include a `name`.')
+        run_name = run_cfg['name']
+        if not isinstance(run_name, str):
+            raise ValueError('Run config `name` must be a string.')
+        if run_name == RUN_NAME_BACKBONE:
+            raise ValueError(
+                f"Run name '{RUN_NAME_BACKBONE}' is reserved and cannot be used in runs."
+            )
+        runs.append(
+            RunConfig(
+                name=run_name,
+                controller=_parse_controller_config(run_cfg),
+            )
+        )
+    return runs
+
+
 def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
     """
     Load an experiment configuration from a YAML file.
 
     Args:
-        config_path: Path to a YAML file matching ExperimentConfig/RunConfig fields.
+        config_path (str | Path): Path to the YAML file.
 
     Returns:
-        Parsed ExperimentConfig instance.
+        ExperimentConfig: Parsed experiment configuration instance.
     """
-    # Load raw YAML payload
+    # Load the YAML payload
     path = Path(config_path)
     with path.open('r', encoding='utf-8') as f:
         payload = yaml.safe_load(f) or {}
 
+    # Check for reserved param conflicts in `kwargs` across the entire payload before parsing
     _guard_kwargs_conflicts(payload=payload)
 
-    scenario = payload.get(PARAM_SCENARIO)
-    if scenario is not None:
-        get_scenario_builder_path(scenario)
+    # Check for invalid experiment config overrides in nested run configs before parsing
+    _guard_experiment_config_overrides(payload)
 
-    # Get optional dataset path
-    dataset_path_value = payload.get('dataset_path')
-    dataset_path = Path(dataset_path_value) if dataset_path_value is not None else None
-
-    # Parse run configurations
-    guard_experiment_config_overrides(payload)
-
-    def _parse_strategy_config(config: dict[str, Any], *, config_name: str) -> StrategyConfig:
-        strategy_config = config.get('strategy')
-        if not isinstance(strategy_config, dict):
-            raise ValueError(f'{config_name} must define a strategy configuration.')
-        if 'name' not in strategy_config:
-            raise ValueError(f'{config_name} strategy must provide a `name`.')
-        kwargs_payload = strategy_config.get('kwargs')
-        if kwargs_payload is None:
-            kwargs_payload = {}
-        if not isinstance(kwargs_payload, Mapping):
-            raise ValueError(f'{config_name} strategy `kwargs` must be a mapping.')
-        return StrategyConfig(
-            name=strategy_config['name'],
-            kwargs=dict(kwargs_payload),
-        )
-
-    def _parse_optimizer_config(config: dict[str, Any], *, config_name: str) -> OptimizerConfig:
-        optimizer_config = config.get('optimizer')
-        if optimizer_config is None:
-            return OptimizerConfig()
-        if not isinstance(optimizer_config, dict):
-            raise ValueError(f'{config_name} must define an optimizer configuration.')
-        if 'name' not in optimizer_config:
-            raise ValueError(f'{config_name} optimizer configuration must include a `name`.')
-        kwargs_payload = optimizer_config.get('kwargs')
-        if kwargs_payload is None:
-            kwargs_payload = {}
-        if not isinstance(kwargs_payload, Mapping):
-            raise ValueError(f'{config_name} optimizer `kwargs` must be a mapping.')
-        return OptimizerConfig(
-            name=optimizer_config['name'],
-            kwargs=dict(kwargs_payload),
-        )
-
-    def _parse_controller_config(run_config: dict[str, Any]) -> ControllerConfig:
-        if PARAM_CONTROLLER not in run_config:
-            raise ValueError('Each run configuration must include a `controller` mapping.')
-        # Get and validate controller config
-        config = run_config[PARAM_CONTROLLER]
-        if not isinstance(config, dict):
-            raise ValueError('Controller configuration must be a mapping.')
-        if 'name' not in config:
-            raise ValueError('Controller configuration must include a `name`.')
-        kwargs_payload = config.get('kwargs')
-        if kwargs_payload is None:
-            kwargs_payload = {}
-        if not isinstance(kwargs_payload, Mapping):
-            raise ValueError('Controller config `kwargs` must be a mapping.')
-        get_controller_path(config['name'])
-        # Return parsed controller config
-        return ControllerConfig(
-            name=config['name'],
-            kwargs=dict(kwargs_payload),
-        )
-
-    def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
-        backbone_config = config.get(PARAM_BACKBONE)
-        if backbone_config is None:
-            return None
-        if not isinstance(backbone_config, dict):
-            raise ValueError('Experiment config `backbone` must be a mapping when provided.')
-
-        source_experiment_raw = backbone_config.get('source_experiment')
-        if source_experiment_raw not in (None, ''):
-            if not isinstance(source_experiment_raw, (str, int)):
-                raise ValueError('Backbone config `source_experiment` must be a string or integer experiment id.')
-            source_experiment = str(source_experiment_raw)
-            invalid_keys = sorted(
-                key
-                for key in backbone_config
-                if key != 'source_experiment'
-            )
-            if invalid_keys:
-                raise ValueError(
-                    'When `backbone.source_experiment` is provided, it must be the only field under `backbone`. '
-                    f'Remove: {invalid_keys}'
-                )
-            experiment_name_raw = config.get('experiment_name')
-            if experiment_name_raw is not None:
-                if source_experiment.strip() == str(experiment_name_raw).strip():
-                    raise ValueError(
-                        'Backbone config `source_experiment` must be different from `experiment_name`.'
-                    )
-            return BackboneConfig(
-                name=None,
-                training=None,
-                source_experiment=source_experiment,
-            )
-
-        backbone_name = backbone_config.get('name', 'resnet18')
-        if not isinstance(backbone_name, str):
-            raise ValueError('Backbone config `name` must be a string.')
-        backbone_name = backbone_name.strip()
-        get_backbone_path(backbone_name)
-
-        training_config = backbone_config.get('training')
-        if training_config is None:
-            raise ValueError('Backbone config must define exactly one of `training` or `source_experiment`.')
-        if not isinstance(training_config, dict):
-            raise ValueError('Backbone config `training` must be a mapping when provided.')
-        if 'num_epochs' not in training_config:
-            raise ValueError('Backbone config `training` must include `num_epochs`.')
-        training = TrainingConfig(
-            num_epochs=training_config['num_epochs'],
-            strategy=_parse_strategy_config(training_config, config_name='Backbone training config'),
-            optimizer=_parse_optimizer_config(training_config, config_name='Backbone training config'),
-            batch_size=training_config.get('batch_size', 128),
-        )
-
-        return BackboneConfig(
-            name=backbone_name,
-            training=training,
-            source_experiment=None,
-        )
-
-    def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
-        repair_config = config.get('repair')
-        if repair_config is None:
-            raise ValueError(
-                'Experiment config must include a `repair` section to define data splitting. '
-                'Use `budget_per_class: 0` if using the full dataset (no repair).'
-            )
-        if not isinstance(repair_config, dict):
-            raise ValueError('`repair` must be a mapping when provided.')
-        fit_schedule = repair_config.get('fit_schedule', 'per_experience')
-        if fit_schedule not in {'per_experience', 'final_only'}:
-            raise ValueError('`repair.fit_schedule` must be one of: `per_experience`, `final_only`.')
-        return RepairConfig(
-            budget_per_class=repair_config.get('budget_per_class', 0),
-            fit_schedule=fit_schedule,
-            num_epochs=repair_config.get('num_epochs'),
-            batch_size=repair_config.get('batch_size'),
-        )
-
-    runs_payload = payload.get('runs')
-    runs: list[RunConfig] | None = None
-    if runs_payload is not None:
-        if not isinstance(runs_payload, list):
-            raise ValueError('Configuration field `runs` must be a list when provided.')
-
-        runs = []
-        for run_cfg in runs_payload:
-            if not isinstance(run_cfg, dict):
-                raise ValueError('Each run configuration must be a mapping.')
-            if 'name' not in run_cfg:
-                raise ValueError('Each run configuration must include a `name`.')
-            run_name = run_cfg['name']
-            if not isinstance(run_name, str):
-                raise ValueError('Run config `name` must be a string.')
-            if run_name == RUN_NAME_BACKBONE:
-                raise ValueError(
-                    f"Run name '{RUN_NAME_BACKBONE}' is reserved and cannot be used in runs."
-                )
-            runs.append(
-                RunConfig(
-                    name=run_name,
-                    controller=_parse_controller_config(run_cfg),
-                )
-            )
-
+    # Validate top-level fields
     checkpoints_enabled = payload.get('checkpoints_enabled', False)
     if not isinstance(checkpoints_enabled, bool):
         raise ValueError('`checkpoints_enabled` must be a boolean.')
@@ -598,14 +697,18 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
     if eval_schedule not in {'per_experience', 'final_only'}:
         raise ValueError('`eval_schedule` must be one of: `per_experience`, `final_only`.')
 
-    # Build and return experiment config
+    # Get dataset path
+    dataset_path_value = payload.get('dataset_path')
+    dataset_path = Path(dataset_path_value) if dataset_path_value is not None else None
+
+    # Build the experiment config instance
     return ExperimentConfig(
         experiment_name=payload['experiment_name'],
         scenario=payload[PARAM_SCENARIO],
         num_experiences=payload['num_experiences'],
         backbone=_parse_backbone_config(payload),
         repair=_parse_repair_config(payload),
-        runs=runs,
+        runs=_parse_runs(payload),
         eval_batch_size=payload.get('eval_batch_size', 128),
         eval_schedule=eval_schedule,
         checkpoints_enabled=checkpoints_enabled,
@@ -617,68 +720,3 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
         dataset_path=dataset_path,
         debug=payload.get('debug', False),
     )
-
-
-def guard_experiment_config_overrides(experiment_config: dict[str, Any]) -> None:
-    """
-    Validate that nested run config parameters do not override experiment config parameters.
-
-    Args:
-        experiment_config (dict[str, Any]): Raw YAML payload.
-    """
-    runs_payload = experiment_config.get('runs')
-    runs = [] if runs_payload is None else runs_payload
-    if not isinstance(runs, list):
-        raise ValueError('Configuration field `runs` must be a list when provided.')
-
-    for run_config in runs:
-        if not isinstance(run_config, dict):
-            raise ValueError('Each run configuration must be a mapping.')
-
-        _guard_config_param_overrides(parent_config=experiment_config, child_config=run_config)
-
-
-def _guard_config_param_overrides(
-    *,
-    parent_config: Mapping[str, object],
-    child_config: Mapping[str, object],
-) -> None:
-    """
-    Raise if a child config subtree attempts to override parent-owned values.
-
-    Args:
-        parent_config (Mapping[str, object]): Parent config mapping.
-        child_config (Mapping[str, object]): Config subtree to validate.
-    """
-    if not isinstance(parent_config, Mapping):
-        raise TypeError('parent_config must be a mapping.')
-    if not isinstance(child_config, Mapping):
-        raise TypeError('child_config must be a mapping.')
-    _guard_config_tree(child_config=child_config, context='config')
-
-
-def _guard_config_tree(*, child_config: object, context: str) -> None:
-    """
-    Recursively validate a config subtree against parent-owned parameters.
-
-    Args:
-        child_config (object): Config subtree to validate.
-        context (str): Label for error messages.
-    """
-    if isinstance(child_config, Mapping):
-        for parent_key, child_keys in _CONFIG_PARAM_OVERRIDE_MAP:
-            overrides = [key for key in child_keys if key in child_config]
-            if overrides:
-                raise ValueError(
-                    f'{context} keys should not override `{parent_key}`; '
-                    f'use experiment config instead (remove: {sorted(overrides)}).'
-                )
-        for key, value in child_config.items():
-            if isinstance(value, Mapping) or isinstance(value, (list, tuple)):
-                _guard_config_tree(child_config=value, context=f'{context}.{key}')
-        return
-
-    if isinstance(child_config, (list, tuple)):
-        for index, value in enumerate(child_config):
-            if isinstance(value, Mapping) or isinstance(value, (list, tuple)):
-                _guard_config_tree(child_config=value, context=f'{context}[{index}]')

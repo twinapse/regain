@@ -55,6 +55,7 @@ __all__ = [
     'BackboneCheckpointLoaderPlugin',
     'BackboneCheckpointWriterPlugin',
     'ControllerPlugin',
+    'LRSchedulerPlugin',
     'PreventionControllerPlugin',
     'RepairControllerPlugin',
     'RegainEvaluationPlugin',
@@ -260,6 +261,42 @@ class BackboneCheckpointLoaderPlugin(SupervisedPlugin):
         payload = torch.load(str(checkpoint_path), map_location='cpu')
         state_dict = self._extract_state_dict(payload)
         model.load_state_dict(state_dict=state_dict, strict=True)
+
+
+class LRSchedulerPlugin(SupervisedPlugin):
+    """
+    Reset and apply a learning rate schedule at the start of each training experience.
+
+    At the beginning of every experience the optimizer's learning rate is restored to its
+    initial value and a fresh scheduler is created from the provided class + ``kwargs``.
+    The scheduler is stepped after each training epoch so that within-experience decay
+    works correctly regardless of how many experiences precede the current one.
+    """
+
+    def __init__(
+        self,
+        *,
+        scheduler_cls: type[torch.optim.lr_scheduler.LRScheduler],
+        scheduler_kwargs: dict[str, object],
+        initial_lr: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self._scheduler_cls = scheduler_cls
+        self._scheduler_kwargs = dict(scheduler_kwargs)
+        self._initial_lr = float(initial_lr)
+        self._scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
+
+    def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        for param_group in strategy.optimizer.param_groups:
+            param_group['lr'] = self._initial_lr
+        self._scheduler = self._scheduler_cls(
+            optimizer=strategy.optimizer,
+            **self._scheduler_kwargs,
+        )
+
+    def after_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
+        if self._scheduler is not None:
+            self._scheduler.step()
 
 
 # TODO: Wire missing hooks

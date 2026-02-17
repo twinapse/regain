@@ -42,12 +42,12 @@ from regain.experiments.builders import build_backbone
 from regain.experiments.builders import build_benchmark
 from regain.experiments.builders import build_controller
 from regain.experiments.builders import build_controller_plugin
+from regain.experiments.builders import build_lr_scheduler_plugin
 from regain.experiments.builders import build_optimizer
 from regain.experiments.builders import make_strategy
 from regain.experiments.config import BackboneConfig
 from regain.experiments.config import ControllerConfig
 from regain.experiments.config import ExperimentConfig
-from regain.experiments.config import guard_experiment_config_overrides
 from regain.experiments.config import RunConfig
 from regain.experiments.config import TrainingConfig
 from regain.experiments.logging import log_dataset_indices
@@ -114,9 +114,6 @@ def _train_and_evaluate_strategy(
     Returns:
         Tuple of (strategy, benchmark, final evaluation results, checkpoint paths).
     """
-    # Guard against unsupported configuration overrides
-    guard_experiment_config_overrides(asdict(experiment_config))
-
     # Set random seeds and enable determinism if requested
     RNGManager.set_random_seeds(experiment_config.seed)
     deterministic_algorithms_enabled = False
@@ -304,6 +301,19 @@ def _train_and_evaluate_strategy(
                 optimizer_config=backbone_training.optimizer,
             )
             criterion = CrossEntropyLoss()
+
+            # Attach LR scheduler plugin if configured
+            if (
+                backbone_training.lr_scheduler is not None
+                and not use_backbone_checkpoints
+            ):
+                initial_lr = float(optimizer_kwargs.get('lr', 0.1))
+                lr_scheduler_plugin = build_lr_scheduler_plugin(
+                    name=backbone_training.lr_scheduler.name,
+                    scheduler_kwargs=backbone_training.lr_scheduler.kwargs,
+                    initial_lr=initial_lr,
+                )
+                strategy_plugins.append(lr_scheduler_plugin)
 
             # Build the strategy
             strategy = make_strategy(
