@@ -3,6 +3,7 @@ isort
 mlflow
 numpy
 pylint
+pytest
 pyyaml
 ruff
 torch

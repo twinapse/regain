@@ -1,0 +1,7 @@
+avalanche-lib @ git+https://github.com/ContinualAI/avalanche@eb075be393e1f458b2c352514ff6c17b5a2c0f4e  # Pinned for CI cache stability; update intentionally when upgrading Avalanche behavior.
+mlflow
+numpy
+pytest
+pyyaml
+torch
+torchvision

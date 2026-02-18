@@ -31,6 +31,7 @@ __all__ = [
     'TrainingConfig',
     'BackboneConfig',
     'RepairConfig',
+    'EvaluationConfig',
     'RunConfig',
     'ExperimentConfig',
     'load_experiment_config',
@@ -39,11 +40,12 @@ __all__ = [
 _CONFIG_PARAM_OVERRIDE_MAP: list[tuple[str, list[str]]] = [
     ('num_epochs', ['num_epochs', 'train_epochs', 'n_epochs', 'epochs']),
     (PARAM_NUM_CLASSES, ['n_classes']),
-    ('batch_size', ['batch_size', 'train_mb_size', 'train_batch_size']),
+    ('batch_size', ['batch_size', 'train_batch_size', 'train_mb_size']),
     ('eval_batch_size', ['eval_batch_size', 'eval_mb_size']),
-    ('batch_size_mem', ['batch_size_mem', 'mem_mb_size', 'mem_batch_size']),
-    ('mem_size', ['mem_size']),
-    ('eval_schedule', ['eval_schedule']),
+    ('batch_size_mem', ['batch_size_mem', 'replay_batch_size', 'mem_mb_size', 'mem_batch_size']),
+    ('mem_size', ['mem_size', 'replay_memory_size']),
+    ('evaluation', ['evaluation']),
+    ('avalanche_schedule', ['avalanche_schedule', 'eval_schedule', 'eval_every']),
     ('device', ['device']),
     ('budget_per_class', ['budget_per_class']),
     ('fit_schedule', ['fit_schedule']),
@@ -173,6 +175,20 @@ class RepairConfig:
 
 
 @dataclass
+class EvaluationConfig:
+    """
+    Experiment-level evaluation configuration.
+
+    Attributes:
+        batch_size: Evaluation mini-batch size.
+        avalanche_schedule: Avalanche built-in evaluation schedule (`per_experience` or `final_only`).
+    """
+
+    batch_size: int = 128
+    avalanche_schedule: Literal['per_experience', 'final_only'] = 'per_experience'
+
+
+@dataclass
 class RunConfig:
     """
     Configuration for an individual run within an experiment.
@@ -201,8 +217,7 @@ class ExperimentConfig:
                 This is mandatory because the backbone must be trained with the same data splitting
                 logic as the repair controllers to prevent data leakage.
         runs: Sequence of run configurations to execute. May be empty for backbone-only pretraining.
-        eval_batch_size: Evaluation mini-batch size.
-        eval_schedule: Evaluation schedule for Avalanche built-in evaluation (`per_experience` or `final_only`).
+        evaluation: Evaluation settings for batch size and Avalanche built-in schedule.
         checkpoints_enabled: Whether to persist checkpoints to MLflow artifacts.
                              Checkpoint artifact logging applies to backbone checkpoints.
         device: Device identifier for training.
@@ -222,14 +237,12 @@ class ExperimentConfig:
     num_experiences: int
     backbone: BackboneConfig | None
     repair: RepairConfig
-    runs: list[RunConfig] | None
 
     #################
     # Training/eval #
     #################
-    eval_batch_size: int = 128
-    eval_schedule: Literal['per_experience', 'final_only'] = 'per_experience'
     checkpoints_enabled: bool = False
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     ###############################
     # Runtime and reproducibility #
@@ -249,6 +262,11 @@ class ExperimentConfig:
     # Debug/diagnosis #
     ###################
     debug: bool = False
+
+    ########
+    # Runs #
+    ########
+    runs: list[RunConfig] | None = None
 
 
 def _resolve_device(device: str | None) -> str:
@@ -598,26 +616,6 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
     )
 
 
-def _parse_controller_config(run_config: dict[str, Any]) -> ControllerConfig:
-    if PARAM_CONTROLLER not in run_config:
-        raise ValueError('Each run configuration must include a `controller` mapping.')
-    config = run_config[PARAM_CONTROLLER]
-    if not isinstance(config, dict):
-        raise ValueError('Controller configuration must be a mapping.')
-    if 'name' not in config:
-        raise ValueError('Controller configuration must include a `name`.')
-    kwargs_payload = config.get('kwargs')
-    if kwargs_payload is None:
-        kwargs_payload = {}
-    if not isinstance(kwargs_payload, Mapping):
-        raise ValueError('Controller config `kwargs` must be a mapping.')
-    get_controller_path(config['name'])
-    return ControllerConfig(
-        name=config['name'],
-        kwargs=dict(kwargs_payload),
-    )
-
-
 def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
     repair_config = config.get('repair')
     if repair_config is None:
@@ -635,6 +633,44 @@ def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
         fit_schedule=fit_schedule,
         num_epochs=repair_config.get('num_epochs'),
         batch_size=repair_config.get('batch_size'),
+    )
+
+
+def _parse_evaluation_config(payload: dict[str, Any]) -> EvaluationConfig:
+    evaluation_config = payload.get('evaluation')
+    if not isinstance(evaluation_config, Mapping):
+        raise ValueError('Experiment config must include an `evaluation` mapping.')
+
+    avalanche_schedule = evaluation_config.get('avalanche_schedule', 'per_experience')
+    if avalanche_schedule not in {'per_experience', 'final_only'}:
+        raise ValueError(
+            '`evaluation.avalanche_schedule` must be one of: '
+            '`per_experience`, `final_only`.'
+        )
+
+    return EvaluationConfig(
+        batch_size=evaluation_config.get('batch_size', 128),
+        avalanche_schedule=avalanche_schedule,
+    )
+
+
+def _parse_controller_config(run_config: dict[str, Any]) -> ControllerConfig:
+    if PARAM_CONTROLLER not in run_config:
+        raise ValueError('Each run configuration must include a `controller` mapping.')
+    config = run_config[PARAM_CONTROLLER]
+    if not isinstance(config, dict):
+        raise ValueError('Controller configuration must be a mapping.')
+    if 'name' not in config:
+        raise ValueError('Controller configuration must include a `name`.')
+    kwargs_payload = config.get('kwargs')
+    if kwargs_payload is None:
+        kwargs_payload = {}
+    if not isinstance(kwargs_payload, Mapping):
+        raise ValueError('Controller config `kwargs` must be a mapping.')
+    get_controller_path(config['name'])
+    return ControllerConfig(
+        name=config['name'],
+        kwargs=dict(kwargs_payload),
     )
 
 
@@ -688,15 +724,6 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
     # Check for invalid experiment config overrides in nested run configs before parsing
     _guard_experiment_config_overrides(payload)
 
-    # Validate top-level fields
-    checkpoints_enabled = payload.get('checkpoints_enabled', False)
-    if not isinstance(checkpoints_enabled, bool):
-        raise ValueError('`checkpoints_enabled` must be a boolean.')
-
-    eval_schedule = payload.get('eval_schedule', 'per_experience')
-    if eval_schedule not in {'per_experience', 'final_only'}:
-        raise ValueError('`eval_schedule` must be one of: `per_experience`, `final_only`.')
-
     # Get dataset path
     dataset_path_value = payload.get('dataset_path')
     dataset_path = Path(dataset_path_value) if dataset_path_value is not None else None
@@ -709,9 +736,8 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
         backbone=_parse_backbone_config(payload),
         repair=_parse_repair_config(payload),
         runs=_parse_runs(payload),
-        eval_batch_size=payload.get('eval_batch_size', 128),
-        eval_schedule=eval_schedule,
-        checkpoints_enabled=checkpoints_enabled,
+        evaluation=_parse_evaluation_config(payload),
+        checkpoints_enabled=payload.get('checkpoints_enabled', False),
         device=_resolve_device(payload.get('device')),
         seed=payload.get(PARAM_SEED, 1),
         deterministic=payload.get('deterministic', False),

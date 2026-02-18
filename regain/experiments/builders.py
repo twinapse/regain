@@ -177,7 +177,7 @@ def make_strategy(
             if train_epochs_override is not None
             else training_config.num_epochs
         ),
-        eval_mb_size=experiment_config.eval_batch_size,
+        eval_mb_size=experiment_config.evaluation.batch_size,
         device=experiment_config.device,
         plugins=list(plugins),
         evaluator=evaluator,
@@ -185,7 +185,7 @@ def make_strategy(
             int(eval_every_override)
             if eval_every_override is not None
             else resolve_avalanche_eval_every(
-                eval_schedule=experiment_config.eval_schedule
+                avalanche_schedule=experiment_config.evaluation.avalanche_schedule
             )
         ),
     )
@@ -365,6 +365,11 @@ def build_controller(
 
     controller_path = get_controller_path(controller_config.name)
     controller_cls = import_symbol(controller_path)
+    _validate_controller_replay_requirements(
+        controller_cls=controller_cls,
+        replay_batch_size=replay_batch_size,
+        controller_path=controller_path,
+    )
     controller_cls_sig = inspect.signature(controller_cls.__init__)
 
     controller_kwargs = dict(controller_config.kwargs)
@@ -398,6 +403,41 @@ def build_controller(
     if not isinstance(controller, (PreventionController, RepairController)):
         raise ValueError(f'{controller_path} is not a prevention or repair controller.')
     return controller
+
+
+def _validate_controller_replay_requirements(
+    *,
+    controller_cls: object,
+    replay_batch_size: int | None,
+    controller_path: str,
+) -> None:
+    """
+    Validate replay requirements before controller instantiation.
+
+    Args:
+        controller_cls (object): Imported controller class candidate.
+        replay_batch_size (int | None): Replay batch size resolved from strategy config.
+        controller_path (str): Fully qualified controller path used for error reporting.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If a replay-required controller is configured without replay batch metadata.
+    """
+    if not inspect.isclass(controller_cls):
+        return
+    if not issubclass(controller_cls, PreventionController):
+        return
+    if not controller_cls.requires_replay():
+        return
+    if replay_batch_size is not None:
+        return
+
+    raise ValueError(
+        f'Controller `{controller_path}` requires a replay-based strategy and replay batch size '
+        '(`training.strategy.kwargs.batch_size_mem`).'
+    )
 
 
 def build_controller_plugin(
