@@ -29,7 +29,7 @@ accuracies and derived analysis metrics.
 1. Build a SplitCIFAR-100 continual learning scenario (`num_experiences`, default 10).
 2. Train a single-head classifier sequentially over experiences.
 3. Fit and/or apply the configured controller (depending on controller type).
-4. Evaluate and log metrics (with MLflow parent runs and optional nested evaluation runs).
+4. Evaluate and log metrics.
 5. Compute analysis artifacts: $A_{\text{ref}}, A_{\text{post}}$, plus $A_{\text{ctrl}}, \rho$ and aggregates when a
    repair controller is present.
 
@@ -98,9 +98,9 @@ We record accuracies under two different “label space” regimes:
 
 ## 3) Controllers & Evaluation Behavior
 
-This codebase distinguishes *when* a controller acts:
+This codebase distinguishes when a controller acts and how evaluation is executed.
 
-### 3.1 Controller types (code-level meaning)
+### 3.1 Controller types
 
 **Prevention (training-time) controllers** (`PreventionController`)
 - Affect training dynamics and therefore the final learned model.
@@ -137,51 +137,37 @@ This codebase distinguishes *when* a controller acts:
   the **repair stream** (aggregated across experiences).
 - The test set is never used for fitting $g_\theta$.
 
-### 3.3 Posthoc evaluation behavior
+### 3.3 Evaluation
 
-Posthoc evaluations run either in the parent run or in nested MLflow runs, depending on whether per-experience posthoc
-logging is enabled. Reference evaluation for $A_{\text{ref}}$ runs without a nested run and logs only `analysis.*`
-metrics to the parent run.
+Evaluation flow per run:
 
-`run_experiment` executes runs with a fixed posthoc evaluation flow:
-- `backbone` configuration must define exactly one of:
-  - `backbone.training` (train from scratch in the current experiment), or
-  - `backbone.source_experiment` (reuse a reserved `backbone` run from another experiment).
-- When `backbone.source_experiment` is provided, it must be the only field under `backbone`.
-- `backbone.source_experiment` must be different from `experiment_name` (same-experiment reuse is rejected).
-- `repair` configuration is mandatory. All runs in an experiment (backbone, prevention controllers, repair controllers) 
-  share the exact same data split defined by `repair.budget_per_class`. 
-  - If `budget > 0`, all runs train on `Full - Budget`. 
-  - If `budget = 0`, all runs train on `Full`.
-- Every user-configured run in `runs` must define a controller.
-- Run-specific config blocks are not allowed to override experiment-level training/runtime parameters
-  (for example epochs, batch sizes, replay memory size, device, eval frequency, repair budget/fit schedule,
-  and checkpoint-saving flags).
-- Controller runs do not log `backbone.*` parameters, except `backbone.source_experiment.id` and
-  `backbone.source_experiment.name` when source reuse is configured. `backbone.source_experiment.name` is a
-  run-time snapshot and is not synchronized if the source experiment is renamed later.
-- If `runs` is omitted, `null`, or empty, the run executes backbone-only mode:
-  - if `backbone.source_experiment` is not set, it logs only the reserved `backbone` run (creating it only when absent);
-  - if `backbone.source_experiment` is set, it reuses the source `backbone` run without creating a new local run
-    (requires source backbone checkpoint artifacts and `a_ref`/`a_post` baselines).
-  - if a local `backbone` run already exists while `backbone` config is non-null, execution is rejected.
-- If `backbone.training` is not set and user-configured runs are present, all configured runs must be
-  repair-controller runs (non-repair runs require local backbone training).
-- The only controller-off run is the reserved internal `backbone` run
-  (automatically created in the current experiment when user-configured controller runs are present and
-  `backbone.source_experiment` is not set, or
-  loaded from `backbone.source_experiment` when reuse is configured).
-- For repair-controller runs, controller-off analysis baselines (`a_ref`, `a_post`) are sourced from that `backbone`
-  run and logged into each repair run.
-- Final-only posthoc evaluation metrics are logged in the parent run (no nested run).
-- For repair controllers with `repair.fit_schedule=per_experience`, per-experience nested runs are created
-  (`exp###`).
-- If the final checkpoint was not already evaluated during training in this mode, a final nested run `final` is created.
+- After each training experience, a reference seen-classes accuracy point ($A_{\text{ref}}$) is computed and recorded.
+- For repair-controller runs with `repair.fit_schedule=per_experience`, posthoc raw evaluation also runs after each
+  experience.
+- At training end, final posthoc raw evaluation is guaranteed:
+  - if final checkpoint was already covered by per-experience posthoc evaluation, no extra pass is needed;
+  - otherwise, one final posthoc raw evaluation pass is executed.
+- In repair-controller runs, controller-off baselines ($A_{\text{ref}}$, $A_{\text{post}}$) are inherited from the
+  reserved `backbone` run. In backbone/prevention runs, they are computed from the current run.
+
+Within that flow, evaluation cadence is controlled by two knobs:
+
+1. `evaluation.avalanche_schedule` controls only Avalanche built-in evaluation logs (`eval.*`):
+   - `per_experience` maps to `eval_every=0` (evaluate after each experience).
+   - `final_only` maps to `eval_every=-1` (evaluate only at the end).
+   - Forward-transfer metrics are emitted only when `evaluation.avalanche_schedule=per_experience`.
+2. `repair.fit_schedule` (repair controllers) controls repair fitting cadence and posthoc raw evaluation cadence:
+   - `per_experience`: fit after each experience; posthoc raw evaluation runs after each experience.
+   - `final_only`: fit once after training; posthoc raw evaluation runs once after training.
+   - If the final checkpoint was not already evaluated in `per_experience` mode, one final posthoc raw evaluation pass
+     is executed.
+
+>ℹ️ Metric placement and metric namespaces are defined in [section 7](#7-metric-logging--reporting-mlflow).
 
 ### 3.4 Shared backbone execution for controller runs
 When one or more configured controller runs are present:
 - A controller-off `backbone` trajectory must be available, either by:
-  - automatically executing that dedicated `backbone` parent run in the current experiment when it does not exist, or
+  - automatically executing that dedicated reserved `backbone` run in the current experiment when it does not exist, or
   - loading an existing `backbone` run from `backbone.source_experiment`.
 - `backbone.source_experiment` reuse requires that source `backbone` run to contain
   backbone checkpoint artifacts (i.e., checkpoints must have been saved in that source run), and controller-off
@@ -192,10 +178,35 @@ When one or more configured controller runs are present:
   experience hooks), so controller behavior is compared on the same trained backbone trajectory.
 - The `backbone` run is also the source of controller-off analysis vectors (`a_ref`, `a_post`) reused by repair runs.
 - `name: backbone` is reserved in `runs` (always).
-- An experiment cannot contain multiple parent runs named `backbone`.
+- An experiment cannot contain multiple runs named `backbone`.
 - If a local `backbone` run already exists while `backbone` config is non-null, execution is rejected
   (including configurations that set `backbone.source_experiment`).
 - If `checkpoints_enabled: true`, shared checkpoints are also logged to MLflow artifacts.
+
+### 3.5 Run Configuration Constraints
+- `backbone` configuration must define exactly one of:
+  - `backbone.training` (train from scratch in the current experiment), or
+  - `backbone.source_experiment` (reuse a reserved `backbone` run from another experiment).
+- When `backbone.source_experiment` is provided, it must be the only field under `backbone`.
+- `backbone.source_experiment` must be different from `experiment_name` (same-experiment reuse is rejected).
+- `repair` configuration is mandatory. All runs in an experiment (backbone, prevention controllers, repair controllers)
+  share the exact same data split defined by `repair.budget_per_class`.
+  - If `budget > 0`, all runs train on `Full - Budget`.
+  - If `budget = 0`, all runs train on `Full`.
+- Every user-configured run in `runs` must define a controller.
+- Run-specific config blocks are not allowed to override experiment-level training/runtime parameters
+  (for example epochs, batch sizes, replay memory size, device, eval frequency, repair budget/fit schedule,
+  and checkpoint-saving flags).
+- Controller runs do not log `backbone.*` parameters, except `backbone.source_experiment.id` and
+  `backbone.source_experiment.name` when source reuse is configured. `backbone.source_experiment.name` is a run-time
+  snapshot and is not synchronized if the source experiment is renamed later.
+- If `runs` is omitted, `null`, or empty, the run executes backbone-only mode:
+  - if `backbone.source_experiment` is not set, it logs only the reserved `backbone` run (creating it only when absent);
+  - if `backbone.source_experiment` is set, it reuses the source `backbone` run without creating a new local run
+    (requires source backbone checkpoint artifacts and `a_ref`/`a_post` baselines).
+  - if a local `backbone` run already exists while `backbone` config is non-null, execution is rejected.
+- If `backbone.training` is not set and user-configured runs are present, all configured runs must be repair-controller
+  runs (non-repair runs require local backbone training).
 
 ---
 
@@ -255,9 +266,8 @@ $$
 $$
 A_{\text{final}} = \text{Acc}\Big(\text{test}(\{0,\dots,99\})\Big)
 $$
->ℹ️ In practice this corresponds to the posthoc stream accuracy (e.g., `Top1_Acc_Stream`) and is logged in the parent
-> run (or nested `final` run when per-experience posthoc logging is enabled), then surfaced as a normalized
-> `summary.*` metric.
+>ℹ️ In practice this corresponds to the posthoc stream accuracy (e.g., `Top1_Acc_Stream`). It is also surfaced as a
+> normalized `summary.final_a_post_mean`; see [section 7](#7-metric-logging--reporting-mlflow).
 
 ---
 
@@ -305,39 +315,19 @@ where $\epsilon = 10^{-4}$.
 
 This section describes **how metrics are organized in MLflow** and **what we report**.
 
+>ℹ️ Evaluation cadence rules are defined in section 3.3.
+
 > ℹ️ **SQLite backend required:** REGAIN forces MLflow to use a SQLite backend. Provide a tracking URI like
 > `sqlite:///path/to/mlflow.db` (or a filesystem path such as `./mlflow.db`). Non-SQLite tracking URIs are rejected.
 
-### 7.1 MLflow run structure (parent + nested evaluation runs)
-Each experiment run creates:
-
-- A **parent MLflow run** for each configured run (`name` from `runs`).
-- In backbone-only mode (`runs` omitted/`null`/empty):
-  - if `backbone.source_experiment` is not set: a single parent run named `backbone`;
-  - if `backbone.source_experiment` is set: no new parent run (source `backbone` reuse).
-- If controller runs are present and `backbone.source_experiment` is not set: the reserved parent run named
-  `backbone` is created automatically when absent.
-- If controller runs are present and `backbone.source_experiment` is used: no new local `backbone` run is created in
-  the current experiment; checkpoints and baselines are reused from the source experiment
-  (requires backbone checkpoint artifacts plus `a_ref`/`a_post` baselines in the source `backbone` run).
-- If a local `backbone` run already exists while `backbone` config is non-null, execution is rejected.
-- **Nested MLflow runs** are created only for repair-controller runs when
-  `repair.fit_schedule=per_experience`:
-  - Per-experience posthoc evaluation metrics (at each checkpoint) are logged in nested runs named `exp###`.
-  - The fallback final-only posthoc evaluation (if needed) is logged in a nested run named `final`.
-- Reference evaluation for $A_{\text{ref}}$ does not use nested runs; it logs `analysis.a_ref.exp###` directly to the
-  parent run.
-
-When nested runs are absent, final posthoc raw metrics are logged directly in the parent run.
-
-### 7.2 Metric namespaces (how keys look)
+### 7.1 Metric namespaces
 Metric keys are normalized and namespaced as:
 
 - `train.<metric>` for training-time logs
 - `eval.<metric>` for Avalanche built-in evaluation logs
 - `analysis.<...>` for analysis metrics computed by the evaluation plugin
-- `summary.<...>` for end-of-run summary scalars written to the parent run (including normalized posthoc eval metrics)
-- `<metric>` (no additional prefix) for raw posthoc evaluation logs (parent run or nested `exp###` / `final`)
+- `summary.<...>` for end-of-run summary scalars (including normalized posthoc eval metrics)
+- `<metric>` (no additional prefix) for raw posthoc evaluation logs
 
 **Important implications**
 - Runs do not emit paired controller-off/controller-on posthoc metric streams in the same nested run.
@@ -348,6 +338,28 @@ Metric keys are normalized and namespaced as:
 - `train.*` metrics always correspond to the actual training procedure that was executed:
   - If a training-time controller was used, `train.*` metrics reflect that controller-influenced training.
   - `train.*` is not a controller-off/controller-on comparison; it is simply “what happened during training”.
+
+### 7.2 MLflow run structure
+Each experiment run creates:
+
+- A **parent MLflow run** for each executed run.
+- Parent-run creation rules (reserved `backbone` run, `backbone.source_experiment` reuse, and rejection conditions) are
+  defined in section 3.5.
+- **Nested MLflow runs** are created only for repair-controller runs with `repair.fit_schedule=per_experience`:
+  - Per-experience checkpoint runs: `exp###`
+  - Optional fallback final run: `final`
+- Nested runs store only unprefixed posthoc raw metrics (`<metric>`).
+- `analysis.*` and `summary.*` metrics always remain in the parent run.
+
+Metric-family placement summary:
+
+| Metric family                          | Key pattern      | Run placement                           |
+|----------------------------------------|------------------|-----------------------------------------|
+| Training metrics                       | `train.<metric>` | Parent run                              |
+| Avalanche scheduled evaluation metrics | `eval.<metric>`  | Parent run                              |
+| Analysis vectors                       | `analysis.<...>` | Parent run                              |
+| Summary metrics                        | `summary.<...>`  | Parent run                              |
+| Posthoc raw evaluation metrics         | `<metric>`       | Parent run or nested `exp###` / `final` |
 
 ### 7.3 Where the analysis artifacts live
 After each experience, the evaluation plugin logs:

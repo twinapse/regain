@@ -20,6 +20,7 @@ from regain.analysis.metrics import MetricContext
 from regain.avalanche_utils.plugins import BackboneCheckpointLoaderPlugin
 from regain.avalanche_utils.plugins import BackboneCheckpointWriterPlugin
 from regain.avalanche_utils.plugins import ControllerPlugin
+from regain.avalanche_utils.plugins import EvaluationIntegrityPlugin
 from regain.avalanche_utils.plugins import make_evaluation_plugin
 from regain.avalanche_utils.plugins import MetricContextPlugin
 from regain.avalanche_utils.plugins import RegainEvaluationPlugin
@@ -211,6 +212,9 @@ def _train_and_evaluate_strategy(
                 keep_timestep_results=True,
                 log_to_console=True,
                 log_to_mlflow=True,
+                include_forward_transfer=(
+                    experiment_config.evaluation.avalanche_schedule == 'per_experience'
+                ),
             )
 
             # Build the seen classes mask plugin
@@ -254,6 +258,9 @@ def _train_and_evaluate_strategy(
                 backbone_analysis_baseline=backbone_analysis_baseline,
                 eps=1e-4,
             )
+            eval_integrity_plugin = EvaluationIntegrityPlugin(
+                controller_plugin=controller_plugin,
+            )
 
             # Save the plugins that will be used in the strategy
             strategy_plugins = [context_plugin, seen_mask_plugin]
@@ -270,6 +277,7 @@ def _train_and_evaluate_strategy(
             if controller_plugin is not None:
                 strategy_plugins.append(controller_plugin)
             strategy_plugins.append(regain_evaluation_plugin)
+            strategy_plugins.append(eval_integrity_plugin)
 
             # Build the backbone model
             backbone_name = (

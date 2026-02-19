@@ -73,7 +73,7 @@ def resolve_backbone_training_config(
         num_epochs=1,
         strategy=StrategyConfig(name='naive'),
         optimizer=OptimizerConfig(),
-        batch_size=experiment_config.eval_batch_size,
+        batch_size=128,
     )
 
 
@@ -100,22 +100,22 @@ def resolve_controller_type(controller_config: ControllerConfig) -> str:
 
 def resolve_avalanche_eval_every(
     *,
-    eval_schedule: str,
+    avalanche_schedule: str,
 ) -> int:
     """
-    Convert the config-level evaluation schedule to Avalanche `eval_every`.
+    Convert the config-level Avalanche evaluation schedule to `eval_every`.
 
     Args:
-        eval_schedule (str): Config schedule (`per_experience` or `final_only`).
+        avalanche_schedule (str): Config schedule (`per_experience` or `final_only`).
 
     Returns:
         int: Avalanche `eval_every` value.
     """
-    if eval_schedule == 'per_experience':
+    if avalanche_schedule == 'per_experience':
         return 0
-    if eval_schedule == 'final_only':
+    if avalanche_schedule == 'final_only':
         return -1
-    raise ValueError(f'Unsupported eval schedule: {eval_schedule}')
+    raise ValueError(f'Unsupported eval schedule: {avalanche_schedule}')
 
 
 def to_scalar(value: object) -> float | None:

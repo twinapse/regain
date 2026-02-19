@@ -44,8 +44,9 @@ repair:
 # ============================================================
 # Evaluation & runtime settings
 # ============================================================
-eval_batch_size: 128            # mini-batch size used during evaluation
-eval_schedule: final_only
+evaluation:
+  batch_size: 128               # mini-batch size used during evaluation
+  avalanche_schedule: final_only
 checkpoints_enabled: false
 device: auto
 seed: 1

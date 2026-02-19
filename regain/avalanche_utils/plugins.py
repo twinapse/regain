@@ -1,6 +1,7 @@
 """
 Avalanche plugins.
 """
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -8,6 +9,7 @@ from avalanche.benchmarks.scenarios import NCScenario
 from avalanche.core import SupervisedPlugin
 from avalanche.evaluation.metrics import accuracy_metrics
 from avalanche.evaluation.metrics import forgetting_metrics
+from avalanche.evaluation.metrics import forward_transfer_metrics
 from avalanche.evaluation.metrics import loss_metrics
 from avalanche.evaluation.metrics import timing_metrics
 from avalanche.logging import InteractiveLogger
@@ -55,6 +57,7 @@ __all__ = [
     'BackboneCheckpointLoaderPlugin',
     'BackboneCheckpointWriterPlugin',
     'ControllerPlugin',
+    'EvaluationIntegrityPlugin',
     'LRSchedulerPlugin',
     'PreventionControllerPlugin',
     'RepairControllerPlugin',
@@ -158,12 +161,7 @@ class BackboneCheckpointWriterPlugin(SupervisedPlugin):
         }
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Save a checkpoint for the completed experience.
-
-        Args:
-            strategy (BaseTemplate): Strategy containing model and experience index.
-        """
+        # Persist a checkpoint for the completed training experience.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
@@ -171,6 +169,7 @@ class BackboneCheckpointWriterPlugin(SupervisedPlugin):
         experience = strategy.experience
         exp_idx = int(experience.current_experience)
         checkpoint_path = self._checkpoint_dir / f'exp_{exp_idx:03d}.pt'
+        # Serialize a CPU state snapshot to keep checkpoints device-agnostic.
         torch.save(
             {
                 'experience': exp_idx,
@@ -178,6 +177,7 @@ class BackboneCheckpointWriterPlugin(SupervisedPlugin):
             },
             checkpoint_path,
         )
+        # Track paths by experience so callers can retrieve a validated ordered list.
         self._checkpoint_paths[exp_idx] = checkpoint_path
 
     def checkpoint_paths(self, *, expected_count: int | None = None) -> list[Path]:
@@ -236,18 +236,14 @@ class BackboneCheckpointLoaderPlugin(SupervisedPlugin):
         raise TypeError('Invalid checkpoint payload. Expected a state_dict mapping.')
 
     def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Load the checkpoint corresponding to the current experience index.
-
-        Args:
-            strategy (BaseTemplate): Strategy containing model and experience index.
-        """
+        # Restore the checkpoint tied to the upcoming training experience.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
 
         experience = strategy.experience
         exp_idx = int(experience.current_experience)
+        # Ensure the requested experience index is backed by a checkpoint.
         if exp_idx < 0 or exp_idx >= len(self._checkpoint_paths):
             raise ValueError(
                 'Missing backbone checkpoint for experience '
@@ -258,6 +254,7 @@ class BackboneCheckpointLoaderPlugin(SupervisedPlugin):
         if not checkpoint_path.exists():
             raise FileNotFoundError(f'Backbone checkpoint not found: {checkpoint_path}')
 
+        # Load a CPU payload and enforce strict state compatibility on restore.
         payload = torch.load(str(checkpoint_path), map_location='cpu')
         state_dict = self._extract_state_dict(payload)
         model.load_state_dict(state_dict=state_dict, strict=True)
@@ -299,7 +296,6 @@ class LRSchedulerPlugin(SupervisedPlugin):
             self._scheduler.step()
 
 
-# TODO: Wire missing hooks
 class PreventionControllerPlugin(SupervisedPlugin):
     """
     Wire a prevention controller into Avalanche strategy lifecycles.
@@ -324,34 +320,19 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller: PreventionController = controller
 
     def before_training(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Run controller initialization once before training begins.
-
-        Args:
-            strategy: Avalanche strategy containing the model.
-
-        Returns:
-            None.
-        """
+        # Initialize controller state from the strategy model once per training run.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
 
         self.controller.on_train_begin(model)
 
+        # Some prevention controllers also patch backbone behavior up front.
         if isinstance(self.controller, BackboneControllerInterface):
             self.controller.correct_backbone(model)
 
     def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Forward the training experience start hook to the controller.
-
-        Args:
-            strategy: Avalanche strategy providing the current experience.
-
-        Returns:
-            None.
-        """
+        # Resolve the experience dataset and forward the start-of-experience hook.
         experience = strategy.experience
         dataset: RegainDataset | None = None
         if experience is not None:
@@ -363,15 +344,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller.on_train_experience_begin(dataset)
 
     def before_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Forward the training epoch start hook to the controller.
-
-        Args:
-            strategy: Avalanche strategy containing the model.
-
-        Returns:
-            None.
-        """
+        # Forward the epoch-start hook with a validated model instance.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
@@ -379,15 +352,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller.on_train_epoch_begin(model)
 
     def before_backward(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Allow controllers to modify the training loss before backpropagation.
-
-        Args:
-            strategy: Avalanche strategy containing minibatch tensors and loss.
-
-        Returns:
-            None.
-        """
+        # Only objective-aware controllers are allowed to rewrite loss values.
         if not isinstance(self.controller, TrainingObjectiveControllerInterface):
             return
 
@@ -395,6 +360,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
 
+        # Gather minibatch tensors required by controller loss correction.
         loss = strategy.loss
         outputs = strategy.mb_output
         inputs = strategy.mb_x
@@ -412,15 +378,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
             strategy.loss = updated_loss
 
     def after_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Forward the training epoch end hook to the controller.
-
-        Args:
-            strategy: Avalanche strategy containing the model.
-
-        Returns:
-            None.
-        """
+        # Forward the epoch-end hook to keep controller state synchronized.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
@@ -428,15 +386,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller.on_train_epoch_end(model)
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Forward the post-training experience hook to the controller.
-
-        Args:
-            strategy: Avalanche strategy containing the trained model.
-
-        Returns:
-            None.
-        """
+        # Notify controller that an experience has finished training.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
@@ -444,24 +394,34 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller.on_train_experience_end(model)
 
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Forward the post-training hook to the controller.
-
-        Args:
-            strategy: Avalanche strategy containing the trained model.
-
-        Returns:
-            None.
-        """
+        # Notify controller that the full training lifecycle has completed.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
 
         self.controller.on_train_end(model)
 
+    def before_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Do not leak strategy metadata during evaluation hooks.
+        del strategy, kwargs
+        self.controller.on_eval_begin()
 
-# TODO: Be more restrictive on the arguments passed to controller hooks.
-#       Controllers shouldn't have access to the whole strategy or experience object.
+    def after_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Do not leak strategy metadata during evaluation hooks.
+        del strategy, kwargs
+        self.controller.on_eval_end()
+
+    def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Do not leak per-experience strategy metadata during evaluation hooks.
+        del strategy, kwargs
+        self.controller.on_eval_experience_begin()
+
+    def after_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Do not leak per-experience strategy metadata during evaluation hooks.
+        del strategy, kwargs
+        self.controller.on_eval_experience_end()
+
+
 class RepairControllerPlugin(SupervisedPlugin):
     """
     Wire a repair controller into Avalanche strategy lifecycles.
@@ -504,6 +464,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         self.fit_after_experience = fit_after_experience
         self._repair_datasets: list[Dataset] = []
         self._seen_classes: set[int] = set()
+        self._train_seen_classes: set[int] = set()
 
     def initialize_parameters(self, *, model: nn.Module, dataset: Dataset | None) -> None:
         """
@@ -523,35 +484,34 @@ class RepairControllerPlugin(SupervisedPlugin):
             probe_inputs = None
         self.controller.initialize_parameters(model=model, sample_inputs=probe_inputs)
 
+    def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Track classes seen in the training stream for downstream anti-cheat checks.
+        del kwargs
+        experience = strategy.experience
+        if experience is None:
+            return
+        self._train_seen_classes.update(self._resolve_training_classes(experience))
+
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Forward the post-training experience hook to the controller and surface repair data.
-
-        Args:
-            strategy: Avalanche strategy containing the trained model.
-
-        Returns:
-            None.
-        """
-        # Get the experience and model
+        # Resolve training outputs for this experience.
         experience = strategy.experience
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
 
-        # Get the repair dataset
+        # Aggregate repair data exposed by the benchmark.
         repair_ds = self._resolve_repair_dataset(experience)
         if repair_ds is not None:
             self._repair_datasets.append(repair_ds)
 
-        # Keep track of the new classes
+        # Track classes introduced at this experience boundary.
         new_classes = self._resolve_new_classes(experience, repair_ds)
         self._seen_classes.update(new_classes)
 
-        # Notify the controller of experience end
+        # Notify controller lifecycle hook.
         self.controller.on_train_experience_end(model)
 
-        # Fit on repair data if per-experience fitting is enabled
+        # Run per-experience repair fitting when configured.
         if self.fit_after_experience:
             combined_dataset = self._combined_repair_dataset()
             if combined_dataset is None:
@@ -565,24 +525,15 @@ class RepairControllerPlugin(SupervisedPlugin):
             )
 
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Forward the post-training hook to the controller and fit on repair data.
-
-        Args:
-            strategy: Avalanche strategy containing the trained model.
-
-        Returns:
-            None.
-        """
-        # Get and validate the model
+        # Resolve final model instance and close the training lifecycle.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
 
-        # Notify the controller of training end
+        # Notify controller that full training is complete.
         self.controller.on_train_end(model)
 
-        # Fit on repair data (only if per-experience fitting is not done)
+        # If fitting was deferred, run one final fit on accumulated repair data.
         if not self.fit_after_experience:
             combined_dataset = self._combined_repair_dataset()
             if combined_dataset is None:
@@ -595,38 +546,93 @@ class RepairControllerPlugin(SupervisedPlugin):
                 batch_size=self.repair_batch_size,
             )
 
-    def before_eval(self, strategy: BaseTemplate, **kwargs):
-        self.controller.on_eval_begin(strategy)
+    def before_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
+        # Anti-cheat: don't expose strategy metadata to controllers during evaluation.
+        self.controller.on_eval_begin()
 
-    def after_eval(self, strategy: BaseTemplate, **kwargs):
-        self.controller.on_eval_end(strategy)
+    def after_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
+        # Anti-cheat: don't expose strategy metadata to controllers during evaluation.
+        self.controller.on_eval_end()
 
-    def before_eval_exp(self, strategy: BaseTemplate, **kwargs):
-        self.controller.on_eval_experience_begin(strategy.experience)
+    def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
+        # Anti-cheat: don't expose per-experience metadata to controllers.
+        self.controller.on_eval_experience_begin()
 
-    def after_eval_exp(self, strategy: BaseTemplate, **kwargs):
-        self.controller.on_eval_experience_end(strategy.experience)
+    def after_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
+        # Anti-cheat: don't expose per-experience metadata to controllers.
+        self.controller.on_eval_experience_end()
 
     def after_eval_forward(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Apply output correction after evaluation forward pass.
-
-        Args:
-            strategy: Avalanche strategy with minibatch outputs.
-
-        Returns:
-            None.
-        """
+        # Apply controller output correction while enforcing anti-cheat invariants.
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
 
+        # Run controller correction starting from backbone logits.
         inputs = strategy.mb_x
-        strategy.mb_output = self.controller.correct_outputs(
-            outputs=strategy.mb_output,
+        backbone_outputs = strategy.mb_output
+        corrected_outputs = self.controller.correct_outputs(
+            outputs=backbone_outputs,
             model=model,
             inputs=inputs,
         )
+
+        # For non-logit or non-tensor outputs, forward controller output unchanged.
+        if not (torch.is_tensor(backbone_outputs) and torch.is_tensor(corrected_outputs)):
+            strategy.mb_output = corrected_outputs
+            return
+        if backbone_outputs.ndim != 2 or corrected_outputs.ndim != 2:
+            strategy.mb_output = corrected_outputs
+            return
+
+        # Normalize device/dtype and validate batch compatibility.
+        if int(corrected_outputs.shape[0]) != int(backbone_outputs.shape[0]):
+            raise RuntimeError(
+                'Repair controller output batch dimension mismatch. '
+                f'backbone_batch={int(backbone_outputs.shape[0])}, '
+                f'controller_batch={int(corrected_outputs.shape[0])}'
+            )
+        if corrected_outputs.device != backbone_outputs.device:
+            corrected_outputs = corrected_outputs.to(device=backbone_outputs.device)
+        if corrected_outputs.dtype != backbone_outputs.dtype:
+            corrected_outputs = corrected_outputs.to(dtype=backbone_outputs.dtype)
+
+        # Enforce anti-cheat constraints for output width and seen-class coverage.
+        backbone_width = int(backbone_outputs.shape[1])
+        corrected_width = int(corrected_outputs.shape[1])
+        if corrected_width > backbone_width:
+            raise RuntimeError(
+                'Repair controller output width exceeds backbone output width. '
+                f'backbone_width={backbone_width}, controller_width={corrected_width}'
+            )
+
+        if self._train_seen_classes:
+            max_seen_class = int(max(self._train_seen_classes))
+            if max_seen_class >= backbone_width:
+                raise RuntimeError(
+                    'Seen class ID exceeds backbone output width. '
+                    f'max_seen_class={max_seen_class}, backbone_width={backbone_width}'
+                )
+            if max_seen_class >= corrected_width:
+                raise RuntimeError(
+                    'Repair controller output does not cover all seen classes. '
+                    f'max_seen_class={max_seen_class}, controller_width={corrected_width}'
+                )
+
+        # Merge only seen-class columns so unseen classes remain backbone-owned.
+        merged_outputs = backbone_outputs.clone()
+        seen_class_ids = sorted(
+            cls for cls in self._train_seen_classes
+            if 0 <= int(cls) < backbone_width and int(cls) < corrected_width
+        )
+        if seen_class_ids:
+            merged_outputs[:, seen_class_ids] = corrected_outputs[:, seen_class_ids]
+
+        strategy.mb_output = merged_outputs
 
     @staticmethod
     def _resolve_repair_dataset(experience: object) -> Dataset | None:
@@ -680,6 +686,33 @@ class RepairControllerPlugin(SupervisedPlugin):
         targets = extract_targets(repair_dataset)
         return sorted({int(t) for t in targets})
 
+    @staticmethod
+    def _resolve_training_classes(experience: object) -> list[int]:
+        """
+        Resolve class IDs present in a training experience.
+
+        Args:
+            experience (object): Avalanche experience instance.
+
+        Returns:
+            list[int]: Sorted class IDs in the training experience.
+        """
+        classes = getattr(experience, 'classes_in_this_experience', None)
+        if classes is not None:
+            try:
+                return sorted({int(c) for c in classes})
+            except Exception:
+                pass
+
+        dataset = None
+        if hasattr(experience, 'dataset'):
+            dataset = experience.dataset
+        elif hasattr(experience, '_dataset'):
+            dataset = experience._dataset
+
+        targets = extract_targets(dataset)
+        return sorted({int(t) for t in targets})
+
     def _combined_repair_dataset(self) -> Dataset | None:
         """
         Build a combined repair dataset from all seen repair experiences.
@@ -696,6 +729,456 @@ class RepairControllerPlugin(SupervisedPlugin):
 
 
 ControllerPlugin = PreventionControllerPlugin | RepairControllerPlugin
+
+
+@dataclass(frozen=True)
+class _TensorStateSignature:
+    """
+    Signature used for low-overhead mutation detection during evaluation.
+
+    Args:
+        tensor_id (int): Python object identifier for the tensor.
+        data_ptr (int): Data pointer for the underlying storage.
+        shape (tuple[int, ...]): Tensor shape.
+        dtype (torch.dtype): Tensor dtype.
+        device (torch.device): Tensor device.
+        version (int): PyTorch internal tensor version counter.
+    """
+
+    tensor_id: int
+    data_ptr: int
+    shape: tuple[int, ...]
+    dtype: torch.dtype
+    device: torch.device
+    version: int
+
+
+class EvaluationIntegrityPlugin(SupervisedPlugin):
+    """
+    Enforce global evaluation integrity and anti-mutation constraints.
+    """
+
+    def __init__(self, *, controller_plugin: ControllerPlugin | None = None) -> None:
+        """
+        Initialize the evaluation integrity plugin.
+
+        Args:
+            controller_plugin (ControllerPlugin | None): Optional controller plugin used in the run.
+
+        Returns:
+            None.
+        """
+        super().__init__()
+        self._controller_plugin = controller_plugin
+        self._tracked_modules: dict[str, nn.Module] = {}
+        self._fast_signatures: dict[str, dict[str, _TensorStateSignature]] = {}
+        self._exact_snapshots: dict[str, dict[str, torch.Tensor]] = {}
+
+    def before_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Start evaluation with a clean integrity snapshot state.
+        del strategy, kwargs
+        self._clear_snapshots()
+
+    def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Resolve protected modules and rebuild per-experience baselines.
+        del kwargs
+        self._tracked_modules = self._resolve_tracked_modules(strategy=strategy)
+        self._fast_signatures = {}
+        self._exact_snapshots = {}
+        # Keep both fast signatures and exact values for layered checks.
+        for module_name, module in self._tracked_modules.items():
+            self._fast_signatures[module_name] = self._build_fast_signature(module=module)
+            self._exact_snapshots[module_name] = self._build_exact_snapshot(module=module)
+
+    def after_eval_forward(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Validate the global output/label contract on final evaluation tensors.
+        del kwargs
+        outputs = strategy.mb_output
+        targets = strategy.mb_y
+
+        # Validate output tensor shape and rank.
+        if not torch.is_tensor(outputs):
+            raise RuntimeError(
+                'Evaluation integrity violation: `strategy.mb_output` must be a tensor.'
+            )
+        if outputs.ndim != 2:
+            raise RuntimeError(
+                'Evaluation integrity violation: `strategy.mb_output` must be 2D logits. '
+                f'observed_shape={tuple(outputs.shape)}'
+            )
+
+        # Validate target tensor type and batch alignment.
+        if not torch.is_tensor(targets):
+            raise RuntimeError(
+                'Evaluation integrity violation: `strategy.mb_y` must be a tensor of class indices.'
+            )
+        target_vector = targets.reshape(-1) if targets.ndim > 0 else targets.view(1)
+        batch_size = int(outputs.shape[0])
+        target_batch = int(target_vector.shape[0])
+        if target_batch != batch_size:
+            raise RuntimeError(
+                'Evaluation integrity violation: target batch size must match output batch size. '
+                f'output_batch={batch_size}, target_batch={target_batch}, '
+                f'target_shape={tuple(targets.shape)}'
+            )
+
+        # Validate integer target values and class-range bounds.
+        if torch.is_floating_point(target_vector) or torch.is_complex(target_vector):
+            raise RuntimeError(
+                'Evaluation integrity violation: `strategy.mb_y` must use integer class indices. '
+                f'observed_dtype={targets.dtype}'
+            )
+        if target_vector.numel() == 0:
+            return
+        num_classes = int(outputs.shape[1])
+        invalid_mask = (target_vector < 0) | (target_vector >= num_classes)
+        invalid_count = int(torch.sum(invalid_mask).item())
+        if invalid_count > 0:
+            min_target = int(torch.min(target_vector).item())
+            max_target = int(torch.max(target_vector).item())
+            raise RuntimeError(
+                'Evaluation integrity violation: target class indices are out of range. '
+                f'invalid_count={invalid_count}, target_min={min_target}, '
+                f'target_max={max_target}, num_classes={num_classes}'
+            )
+
+    def after_eval_iteration(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Run cheap mutation checks after each evaluation iteration.
+        del strategy, kwargs
+        self._assert_all_fast_signatures_unchanged()
+
+    def after_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Clear all evaluation snapshots at the end of the eval loop.
+        del strategy, kwargs
+        self._clear_snapshots()
+
+    def after_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Run fast and exact checks, then clear baselines even on failure.
+        del strategy, kwargs
+        try:
+            self._assert_all_fast_signatures_unchanged()
+            self._assert_all_exact_snapshots_unchanged()
+        finally:
+            self._clear_snapshots()
+
+    def _resolve_tracked_modules(self, *, strategy: BaseTemplate) -> dict[str, nn.Module]:
+        """
+        Resolve modules to protect from mutation during evaluation.
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy.
+
+        Returns:
+            dict[str, nn.Module]: Named tracked modules.
+        """
+        model = strategy.model
+        if not isinstance(model, nn.Module):
+            raise TypeError('Strategy.model must be an nn.Module.')
+        modules: dict[str, nn.Module] = {'model': model}
+
+        controller_module = self._resolve_controller_module(strategy=strategy)
+        if controller_module is not None:
+            modules['controller'] = controller_module
+        return modules
+
+    def _resolve_controller_module(self, *, strategy: BaseTemplate) -> nn.Module | None:
+        """
+        Resolve an optional controller module from configured or attached plugins.
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy.
+
+        Returns:
+            nn.Module | None: Controller module if present.
+        """
+        plugin = self._controller_plugin
+        if plugin is None:
+            plugin = self._find_controller_plugin(strategy=strategy)
+        if plugin is None:
+            return None
+        controller = getattr(plugin, 'controller', None)
+        if not isinstance(controller, nn.Module):
+            return None
+        return controller
+
+    @staticmethod
+    def _find_controller_plugin(*, strategy: BaseTemplate) -> ControllerPlugin | None:
+        """
+        Find the first attached controller plugin from strategy plugins.
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy.
+
+        Returns:
+            ControllerPlugin | None: Attached controller plugin if present.
+        """
+        plugins = getattr(strategy, 'plugins', None)
+        if plugins is None:
+            return None
+        for plugin in plugins:
+            if isinstance(plugin, (PreventionControllerPlugin, RepairControllerPlugin)):
+                return plugin
+        return None
+
+    @staticmethod
+    def _named_state_tensors(*, module: nn.Module) -> dict[str, torch.Tensor]:
+        """
+        Enumerate named parameters and buffers for a module.
+
+        Args:
+            module (nn.Module): Module to inspect.
+
+        Returns:
+            dict[str, torch.Tensor]: Named tensors keyed by prefixed state names.
+        """
+        named_tensors: dict[str, torch.Tensor] = {}
+        for name, parameter in module.named_parameters():
+            named_tensors[f'parameter:{name}'] = parameter
+        for name, buffer in module.named_buffers():
+            named_tensors[f'buffer:{name}'] = buffer
+        return named_tensors
+
+    @staticmethod
+    def _build_fast_signature(*, module: nn.Module) -> dict[str, _TensorStateSignature]:
+        """
+        Build a low-overhead signature snapshot for mutation checks.
+
+        Args:
+            module (nn.Module): Module to inspect.
+
+        Returns:
+            dict[str, _TensorStateSignature]: Fast signatures keyed by state tensor name.
+        """
+        signature: dict[str, _TensorStateSignature] = {}
+        for name, tensor in EvaluationIntegrityPlugin._named_state_tensors(module=module).items():
+            signature[name] = _TensorStateSignature(
+                tensor_id=int(id(tensor)),
+                data_ptr=int(tensor.data_ptr()),
+                shape=tuple(int(dim) for dim in tensor.shape),
+                dtype=tensor.dtype,
+                device=tensor.device,
+                version=int(getattr(tensor, '_version', -1)),
+            )
+        return signature
+
+    @staticmethod
+    def _build_exact_snapshot(*, module: nn.Module) -> dict[str, torch.Tensor]:
+        """
+        Build an exact CPU tensor snapshot for final deep comparison.
+
+        Args:
+            module (nn.Module): Module to inspect.
+
+        Returns:
+            dict[str, torch.Tensor]: Cloned CPU tensor snapshots keyed by state tensor name.
+        """
+        snapshot: dict[str, torch.Tensor] = {}
+        for name, tensor in EvaluationIntegrityPlugin._named_state_tensors(module=module).items():
+            snapshot[name] = tensor.detach().cpu().clone()
+        return snapshot
+
+    def _assert_all_fast_signatures_unchanged(self) -> None:
+        """
+        Assert that tracked module fast signatures have not changed.
+
+        Returns:
+            None.
+        """
+        if not self._tracked_modules:
+            return
+        for module_name, module in self._tracked_modules.items():
+            self._assert_fast_signature_unchanged(module_name=module_name, module=module)
+
+    def _assert_fast_signature_unchanged(self, *, module_name: str, module: nn.Module) -> None:
+        """
+        Assert fast signature invariants for one tracked module.
+
+        Args:
+            module_name (str): Tracked module name.
+            module (nn.Module): Tracked module instance.
+
+        Returns:
+            None.
+        """
+        baseline = self._fast_signatures.get(module_name)
+        if baseline is None:
+            raise RuntimeError(
+                'Evaluation integrity violation: missing fast signature baseline. '
+                f'module={module_name}'
+            )
+        current = self._build_fast_signature(module=module)
+
+        baseline_keys = set(baseline.keys())
+        current_keys = set(current.keys())
+        if baseline_keys != current_keys:
+            missing_keys = sorted(baseline_keys - current_keys)
+            new_keys = sorted(current_keys - baseline_keys)
+            raise RuntimeError(
+                'Evaluation integrity violation: state tensor membership changed during evaluation. '
+                f'module={module_name}, missing_keys={missing_keys}, new_keys={new_keys}'
+            )
+
+        for tensor_name, current_signature in current.items():
+            baseline_signature = baseline[tensor_name]
+            if current_signature == baseline_signature:
+                continue
+
+            changed_fields: list[str] = []
+            if current_signature.tensor_id != baseline_signature.tensor_id:
+                changed_fields.append('tensor_id')
+            if current_signature.data_ptr != baseline_signature.data_ptr:
+                changed_fields.append('data_ptr')
+            if current_signature.shape != baseline_signature.shape:
+                changed_fields.append('shape')
+            if current_signature.dtype != baseline_signature.dtype:
+                changed_fields.append('dtype')
+            if current_signature.device != baseline_signature.device:
+                changed_fields.append('device')
+            if current_signature.version != baseline_signature.version:
+                changed_fields.append('version')
+
+            raise RuntimeError(
+                'Evaluation integrity violation: state tensor signature changed during evaluation. '
+                f'module={module_name}, tensor={tensor_name}, changed_fields={changed_fields}'
+            )
+
+    def _assert_all_exact_snapshots_unchanged(self) -> None:
+        """
+        Assert exact tensor-value equality for tracked modules.
+
+        Returns:
+            None.
+        """
+        if not self._tracked_modules:
+            return
+        for module_name, module in self._tracked_modules.items():
+            self._assert_exact_snapshot_unchanged(module_name=module_name, module=module)
+
+    def _assert_exact_snapshot_unchanged(self, *, module_name: str, module: nn.Module) -> None:
+        """
+        Assert exact snapshot invariants for one tracked module.
+
+        Args:
+            module_name (str): Tracked module name.
+            module (nn.Module): Tracked module instance.
+
+        Returns:
+            None.
+        """
+        baseline = self._exact_snapshots.get(module_name)
+        if baseline is None:
+            raise RuntimeError(
+                'Evaluation integrity violation: missing exact snapshot baseline. '
+                f'module={module_name}'
+            )
+        current = self._build_exact_snapshot(module=module)
+
+        baseline_keys = set(baseline.keys())
+        current_keys = set(current.keys())
+        if baseline_keys != current_keys:
+            missing_keys = sorted(baseline_keys - current_keys)
+            new_keys = sorted(current_keys - baseline_keys)
+            raise RuntimeError(
+                'Evaluation integrity violation: exact snapshot membership changed during evaluation. '
+                f'module={module_name}, missing_keys={missing_keys}, new_keys={new_keys}'
+            )
+
+        for tensor_name, current_value in current.items():
+            baseline_value = baseline[tensor_name]
+            # Fast path for exact bitwise equality.
+            if torch.equal(current_value, baseline_value):
+                continue
+
+            # Treat aligned NaN values as unchanged for floating/complex tensors.
+            if self._tensors_equal_for_snapshot(
+                current_value=current_value,
+                baseline_value=baseline_value,
+            ):
+                continue
+
+            max_abs_delta = self._compute_snapshot_max_abs_delta(
+                current_value=current_value,
+                baseline_value=baseline_value,
+            )
+            raise RuntimeError(
+                'Evaluation integrity violation: state tensor values changed during evaluation. '
+                f'module={module_name}, tensor={tensor_name}, max_abs_delta={max_abs_delta}'
+            )
+
+    @staticmethod
+    def _tensors_equal_for_snapshot(
+        *,
+        current_value: torch.Tensor,
+        baseline_value: torch.Tensor,
+    ) -> bool:
+        """
+        Check exact snapshot equality while treating aligned NaN values as equal.
+
+        Args:
+            current_value (torch.Tensor): Current tensor value.
+            baseline_value (torch.Tensor): Baseline tensor value.
+
+        Returns:
+            bool: True when tensors are unchanged under snapshot semantics.
+        """
+        if current_value.shape != baseline_value.shape:
+            return False
+        if current_value.dtype != baseline_value.dtype:
+            return False
+
+        # Floating and complex tensors use exact tolerance with NaN-equivalence.
+        if torch.is_floating_point(current_value) or torch.is_complex(current_value):
+            return bool(
+                torch.allclose(
+                    current_value,
+                    baseline_value,
+                    rtol=0.0,
+                    atol=0.0,
+                    equal_nan=True,
+                )
+            )
+
+        return bool(torch.equal(current_value, baseline_value))
+
+    @staticmethod
+    def _compute_snapshot_max_abs_delta(
+        *,
+        current_value: torch.Tensor,
+        baseline_value: torch.Tensor,
+    ) -> float | None:
+        """
+        Compute a stable max absolute delta used in immutability error messages.
+
+        Args:
+            current_value (torch.Tensor): Current tensor value.
+            baseline_value (torch.Tensor): Baseline tensor value.
+
+        Returns:
+            float | None: Max absolute difference, or None for non-numeric tensors.
+        """
+        if not (torch.is_floating_point(current_value) or torch.is_complex(current_value)):
+            return None
+
+        # Compute on CPU with a high-precision dtype for stable diagnostics.
+        target_dtype = torch.complex128 if torch.is_complex(current_value) else torch.float64
+        current_cpu = current_value.detach().to(device='cpu', dtype=target_dtype)
+        baseline_cpu = baseline_value.detach().to(device='cpu', dtype=target_dtype)
+        delta = torch.abs(current_cpu - baseline_cpu)
+        delta = torch.nan_to_num(delta, nan=float('inf'))
+        if delta.numel() == 0:
+            return 0.0
+        return float(torch.max(delta).item())
+
+    def _clear_snapshots(self) -> None:
+        """
+        Clear all cached module snapshots after evaluation.
+
+        Returns:
+            None.
+        """
+        self._tracked_modules = {}
+        self._fast_signatures = {}
+        self._exact_snapshots = {}
 
 
 class SeenClassesMaskPlugin(SupervisedPlugin):
@@ -722,12 +1205,7 @@ class SeenClassesMaskPlugin(SupervisedPlugin):
         self.mask_enabled = False
 
     def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Avalanche hook: update the seen class set from the upcoming training dataset.
-
-        Args:
-            strategy: Avalanche strategy providing the dataset.
-        """
+        # Update the seen-class set from the upcoming training dataset.
         experience = strategy.experience
         dataset = None
         if experience is not None:
@@ -743,17 +1221,13 @@ class SeenClassesMaskPlugin(SupervisedPlugin):
         self.seen_classes.update(targets)
 
     def after_eval_forward(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Mask logits for unseen classes when enabled.
-
-        Args:
-            strategy: Avalanche strategy exposing minibatch outputs.
-        """
+        # Optionally mask logits for classes that have not been seen in training.
         if not self.mask_enabled:
             return
         outputs = strategy.mb_output
         if not torch.is_tensor(outputs) or outputs.ndim != 2:
             return
+        # Build mask indices from the current output width and seen-class cache.
         num_classes = outputs.shape[1]
         unseen_classes = [cls for cls in range(num_classes) if cls not in self.seen_classes]
         if not unseen_classes:
@@ -1053,12 +1527,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         )
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Record reference accuracy for the just-trained experience.
-
-        Args:
-            strategy: Trained Avalanche strategy.
-        """
+        # Collect reference accuracy right after each training experience.
         experience = strategy.experience
         if experience is None or not hasattr(experience, 'current_experience'):
             raise ValueError('Strategy experience is required to compute analysis metrics.')
@@ -1066,6 +1535,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         if exp_idx_raw is None:
             raise ValueError('Strategy experience index is missing.')
         exp_idx = int(exp_idx_raw)
+        # Select backbone-only reference values for repair runs; otherwise compute live.
         if isinstance(self.controller_plugin, RepairControllerPlugin):
             # Repair runs inherit controller-off reference baselines from the reserved backbone run.
             if self._backbone_a_ref is None:
@@ -1090,12 +1560,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         self._run_posthoc_eval_after_experience(strategy=strategy, exp_idx=exp_idx)
 
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
-        """
-        Log analysis artifacts after training completes.
-
-        Args:
-            strategy: Trained Avalanche strategy.
-        """
+        # Finalize posthoc evaluation state and validate reference completeness.
         expected = int(self._num_experiences)
         have = int(len(self.a_ref))
         final_step = int(self._num_experiences * self.num_epochs_per_experience)
@@ -1111,6 +1576,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 run_name_suffix=None,
             )
 
+        # Emit an incomplete artifact payload when reference points are missing.
         if have != expected:
             self.artifacts = {
                 COLUMN_STATUS: _METRIC_INCOMPLETE_A_REF,
@@ -1123,6 +1589,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             mlflow.log_dict(self.artifacts, 'analysis_artifacts.json')
             return
 
+        # Build post-training baseline (`a_post`) from inherited or current evaluations.
         if isinstance(self.controller_plugin, RepairControllerPlugin):
             # Repair runs inherit controller-off post-sequence baselines from the reserved backbone run.
             if self._backbone_a_post is None:
@@ -1141,6 +1608,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 )
             a_post = ordered_accuracies(a_post_results, self._num_experiences)
 
+        # Build controller-aware (`a_ctrl`) outputs for downstream analysis.
         if self.controller_plugin is None:
             a_ctrl = list(a_post)
         else:
@@ -1153,6 +1621,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 )
             a_ctrl = ordered_accuracies(a_ctrl_results, self._num_experiences)
 
+        # Compute and persist full analysis artifact payload.
         artifacts = build_analysis_artifacts(
             a_ref=self.a_ref,
             a_post=a_post,
@@ -1163,6 +1632,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         self.artifacts = artifacts
         log_ctrl_metrics = isinstance(self.controller_plugin, RepairControllerPlugin)
         final_step = int(self._num_experiences * self.num_epochs_per_experience)
+        # Log per-experience analysis vectors.
         for i, value in enumerate(a_post):
             self._log_analysis_metric(
                 key=METRIC_A_POST,
@@ -1188,6 +1658,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                     experience=i,
                 )
 
+        # Log aggregate controller summary metrics.
         rho_mean = artifacts.get(METRIC_RHO_MEAN, None)
         if rho_mean is not None and log_ctrl_metrics:
             self._log_analysis_metric(key=METRIC_RHO_MEAN, value=float(rho_mean), step=final_step)
@@ -1215,6 +1686,7 @@ def make_evaluation_plugin(
     keep_timestep_results: bool = True,
     log_to_console: bool = True,
     log_to_mlflow: bool = True,
+    include_forward_transfer: bool = False,
 ) -> EvaluationPlugin:
     """
     Create an EvaluationPlugin with standard metrics and loggers.
@@ -1225,6 +1697,7 @@ def make_evaluation_plugin(
                                       (accessible via `EvaluationPlugin.get_all_metrics()`)
         log_to_console (bool): Whether to include console logging.
         log_to_mlflow (bool): Whether to include MLflow logging.
+        include_forward_transfer (bool): Whether to include forward transfer metrics.
 
     Returns:
         EvaluationPlugin: Configured evaluation plugin.
@@ -1245,6 +1718,8 @@ def make_evaluation_plugin(
         loss_metrics(epoch=True, experience=True, stream=True),
         timing_metrics(epoch=True),
     ]
+    if include_forward_transfer:
+        metrics.append(forward_transfer_metrics(experience=True, stream=True))
 
     # Create EvaluationPlugin
     return EvaluationPlugin(*metrics, loggers=loggers, collect_all=keep_timestep_results)
