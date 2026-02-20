@@ -20,7 +20,6 @@ from mlflow.utils.yaml_utils import write_yaml
 
 from regain.constants import COLUMN_END_TIME
 from regain.constants import COLUMN_EXPERIMENT_ID
-from regain.constants import COLUMN_PARENT_RUN_ID
 from regain.constants import COLUMN_RUN_ID
 from regain.constants import COLUMN_RUN_NAME
 from regain.constants import COLUMN_START_TIME
@@ -33,10 +32,8 @@ __all__ = [
     'ensure_experiment',
     'format_timestamp_ms',
     'init_mlflow',
-    'is_parent_mlflow_run',
     'resolve_artifact_uri',
     'resolve_experiment_id',
-    'resolve_mlflow_parent_run_id',
     'resolve_mlflow_run_name',
     'resolve_tracking_uri',
     'search_runs_paginated',
@@ -340,20 +337,6 @@ def search_runs_paginated(
 ######################
 
 
-def is_parent_mlflow_run(*, run: Run) -> bool:
-    """
-    Check whether an MLflow run is a parent run.
-
-    Args:
-        run (Run): MLflow run.
-
-    Returns:
-        bool: True when the run is not nested.
-    """
-    tags = dict(run.data.tags or {})
-    return 'mlflow.parentRunId' not in tags
-
-
 def resolve_mlflow_run_name(*, run: Run) -> str:
     """
     Resolve a stable run name from MLflow run data.
@@ -377,22 +360,6 @@ def resolve_mlflow_run_name(*, run: Run) -> str:
     if tag_name:
         return str(tag_name)
     return ''
-
-
-def resolve_mlflow_parent_run_id(*, run: Run) -> str:
-    """
-    Resolve the parent run id for an MLflow run.
-
-    Args:
-        run (Run): MLflow run.
-
-    Returns:
-        str: Parent run id when nested, otherwise empty string.
-    """
-    parent_run_id = run.data.tags.get('mlflow.parentRunId')
-    if parent_run_id is None:
-        return ''
-    return str(parent_run_id)
 
 
 ########################
@@ -434,11 +401,9 @@ def build_mlflow_run_columns(
     """
     columns: dict[str, object] = {}
     run_name = resolve_mlflow_run_name(run=run)
-    parent_run_id = resolve_mlflow_parent_run_id(run=run)
 
     columns[COLUMN_RUN_ID] = run.info.run_id
     columns[COLUMN_RUN_NAME] = run_name
-    columns[COLUMN_PARENT_RUN_ID] = parent_run_id
     columns[COLUMN_STATUS] = run.info.status
     columns[COLUMN_START_TIME] = format_timestamp_ms(run.info.start_time)
     columns[COLUMN_END_TIME] = format_timestamp_ms(run.info.end_time)
@@ -446,7 +411,6 @@ def build_mlflow_run_columns(
     reserved_keys = {
         COLUMN_RUN_ID,
         COLUMN_RUN_NAME,
-        COLUMN_PARENT_RUN_ID,
         COLUMN_STATUS,
         COLUMN_START_TIME,
         COLUMN_END_TIME,

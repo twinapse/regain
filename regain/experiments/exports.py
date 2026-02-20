@@ -9,7 +9,6 @@ from typing import Any
 from mlflow.tracking import MlflowClient
 
 from regain.constants import COLUMN_END_TIME
-from regain.constants import COLUMN_PARENT_RUN_ID
 from regain.constants import COLUMN_RUN_ID
 from regain.constants import COLUMN_RUN_NAME
 from regain.constants import COLUMN_START_TIME
@@ -82,7 +81,6 @@ def export_runs_to_csvs(
     metadata_columns = [
         COLUMN_RUN_ID,
         COLUMN_RUN_NAME,
-        COLUMN_PARENT_RUN_ID,
         COLUMN_STATUS,
         COLUMN_START_TIME,
         COLUMN_END_TIME,
@@ -103,7 +101,6 @@ def export_runs_to_csvs(
     row_identity_columns = [
         COLUMN_RUN_ID,
         COLUMN_RUN_NAME,
-        COLUMN_PARENT_RUN_ID,
     ]
     params_fieldnames = row_identity_columns + param_columns
     metrics_fieldnames = row_identity_columns + metric_columns

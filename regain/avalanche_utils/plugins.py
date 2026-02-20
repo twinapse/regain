@@ -72,7 +72,7 @@ _METRIC_FINAL_A_POST_MEAN = 'final_a_post_mean'
 _METRIC_FINAL_RHO_MEAN = 'final_rho_mean'
 _METRIC_INCOMPLETE_A_REF = 'incomplete_a_ref'
 _NAMESPACE_ANALYSIS = 'analysis'
-_RUN_NAME_FINAL = 'final'
+_NAMESPACE_FINAL = 'final'
 
 
 class MetricContextPlugin(SupervisedPlugin):
@@ -1391,7 +1391,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         mask_enabled: bool,
         log_namespace: str,
         log_step: int,
-        run_name: str | None,
     ) -> dict[str, object]:
         """
         Run evaluation with toggled mask state and metric logging enabled.
@@ -1402,7 +1401,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             mask_enabled (bool): Whether to enable seen-class masking.
             log_namespace (str): Namespace to apply to logged metrics.
             log_step (int): Step to assign to logged metrics.
-            run_name (str | None): Optional nested MLflow run name.
 
         Returns:
             dict[str, object]: Avalanche evaluation results.
@@ -1417,31 +1415,13 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             self.context.set_log_namespace(log_namespace)
             self.context.set_log_step(int(log_step))
             self.context.set_log_enabled(True)
-            if run_name is None:
-                return strategy.eval(stream)
-            with mlflow.start_run(nested=True, run_name=run_name):
-                return strategy.eval(stream)
+            return strategy.eval(stream)
         finally:
             self.context.set_phase(prev_phase)
             self.context.set_log_namespace(prev_log_namespace)
             self.context.set_log_step(prev_log_step)
             self.context.set_log_enabled(prev_log_enabled)
             self._toggle_mask(prev_mask_state)
-
-    @staticmethod
-    def _format_nested_eval_run_name(*, suffix: str | None) -> str:
-        """
-        Build the nested run name used for post-training evaluation.
-
-        Args:
-            suffix (str | None): Optional suffix to include in the run name.
-
-        Returns:
-            str: `final` or `<suffix>`.
-        """
-        if suffix:
-            return suffix
-        return _RUN_NAME_FINAL
 
     def _build_posthoc_stream(self, exp_idx: int | None) -> list[object]:
         if exp_idx is None:
@@ -1454,7 +1434,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         strategy: BaseTemplate,
         exp_idx: int | None,
         log_step: int,
-        run_name_suffix: str | None,
+        log_namespace: str,
     ) -> dict[str, float]:
         """
         Run posthoc evaluation for the requested checkpoint.
@@ -1463,7 +1443,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             strategy (BaseTemplate): Avalanche strategy to evaluate.
             exp_idx (int | None): Experience index for the stream checkpoint.
             log_step (int): Logging step for the evaluation metrics.
-            run_name_suffix (str | None): Optional suffix to attach to nested run names.
+            log_namespace (str): Namespace prefix for logged metrics.
 
         Returns:
             dict[str, float]: Scalar metric results for the posthoc checkpoint.
@@ -1472,19 +1452,12 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         final_exp_idx = exp_idx if exp_idx is not None else self._num_experiences - 1
 
         has_controller = self.controller_plugin is not None
-        run_name: str | None = None
-        if run_name_suffix is not None:
-            run_name = self._format_nested_eval_run_name(suffix=run_name_suffix)
-        elif self.repair_after_experience and isinstance(self.controller_plugin, RepairControllerPlugin):
-            # Only keep a nested final run when per-experience checkpoints are also logged.
-            run_name = self._format_nested_eval_run_name(suffix=None)
         eval_results = self._run_eval_with_logging(
             strategy=strategy,
             stream=stream,
             mask_enabled=False,
-            log_namespace='',
+            log_namespace=log_namespace,
             log_step=log_step,
-            run_name=run_name,
         )
         scalar_results = extract_scalar_metrics(eval_results)
         self.last_posthoc_scalar_results = scalar_results
@@ -1523,7 +1496,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             strategy=strategy,
             exp_idx=exp_idx,
             log_step=log_step,
-            run_name_suffix=f'{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}',
+            log_namespace=f'{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}',
         )
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
@@ -1573,7 +1546,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 strategy=strategy,
                 exp_idx=None,
                 log_step=final_step,
-                run_name_suffix=None,
+                log_namespace=_NAMESPACE_FINAL,
             )
 
         # Emit an incomplete artifact payload when reference points are missing.

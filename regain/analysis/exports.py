@@ -113,7 +113,7 @@ def export_analysis_to_json(
         experiences_table (list[dict[str, Any]]): Table rows for experiences.
         include_controllers (list[str] | None): Parsed controller allowlist.
         exclude_controllers (list[str] | None): Parsed controller denylist.
-        max_runs (int | None): Optional maximum number of parent runs.
+        max_runs (int | None): Optional maximum number of runs.
         default_num_classes (int | None): Optional default class count.
         require_finished (bool): Whether to require finished runs.
 
