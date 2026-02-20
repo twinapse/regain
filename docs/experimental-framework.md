@@ -327,45 +327,40 @@ Metric keys are normalized and namespaced as:
 - `eval.<metric>` for Avalanche built-in evaluation logs
 - `analysis.<...>` for analysis metrics computed by the evaluation plugin
 - `summary.<...>` for end-of-run summary scalars (including normalized posthoc eval metrics)
-- `<metric>` (no additional prefix) for raw posthoc evaluation logs
+- `exp###.<metric>` for per-experience checkpoint posthoc evaluation logs (repair runs with `per_experience` schedule)
+- `final.<metric>` for the final posthoc evaluation
 
 **Important implications**
-- Runs do not emit paired controller-off/controller-on posthoc metric streams in the same nested run.
+- Runs do not emit paired controller-off/controller-on posthoc metric streams in the same run.
 - In repair-controller runs, controller-off analysis baselines (`a_ref`, `a_post`) are inherited from the `backbone`
   run; posthoc raw metrics in repair runs correspond to controller-on evaluation.
-- Posthoc raw metrics are unprefixed and should be interpreted in the context of their run placement
-  (parent run or nested `exp###` / `final`).
 - `train.*` metrics always correspond to the actual training procedure that was executed:
   - If a training-time controller was used, `train.*` metrics reflect that controller-influenced training.
   - `train.*` is not a controller-off/controller-on comparison; it is simply “what happened during training”.
 
 ### 7.2 MLflow run structure
-Each experiment run creates:
+Each experiment run creates a single MLflow run. Run creation rules (reserved `backbone` run,
+`backbone.source_experiment` reuse, and rejection conditions) are defined in section 3.5.
 
-- A **parent MLflow run** for each executed run.
-- Parent-run creation rules (reserved `backbone` run, `backbone.source_experiment` reuse, and rejection conditions) are
-  defined in section 3.5.
-- **Nested MLflow runs** are created only for repair-controller runs with `repair.fit_schedule=per_experience`:
-  - Per-experience checkpoint runs: `exp###`
-  - Optional fallback final run: `final`
-- Nested runs store only unprefixed posthoc raw metrics (`<metric>`).
-- `analysis.*` and `summary.*` metrics always remain in the parent run.
+All metrics live on the run. The final posthoc evaluation is always prefixed with `final.`. For repair-controller
+runs with `repair.fit_schedule=per_experience`, per-experience checkpoint metrics are additionally prefixed with the
+checkpoint name (`exp000.`, `exp001.`, ...).
 
 Metric-family placement summary:
 
-| Metric family                          | Key pattern      | Run placement                           |
-|----------------------------------------|------------------|-----------------------------------------|
-| Training metrics                       | `train.<metric>` | Parent run                              |
-| Avalanche scheduled evaluation metrics | `eval.<metric>`  | Parent run                              |
-| Analysis vectors                       | `analysis.<...>` | Parent run                              |
-| Summary metrics                        | `summary.<...>`  | Parent run                              |
-| Posthoc raw evaluation metrics         | `<metric>`       | Parent run or nested `exp###` / `final` |
+| Metric family                          | Key pattern                                         |
+|----------------------------------------|-----------------------------------------------------|
+| Training metrics                       | `train.<metric>`                                    |
+| Avalanche scheduled evaluation metrics | `eval.<metric>`                                     |
+| Analysis vectors                       | `analysis.<...>`                                    |
+| Summary metrics                        | `summary.<...>`                                     |
+| Posthoc raw evaluation metrics         | `final.<metric>` or `exp###.<metric>`               |
 
 ### 7.3 Where the analysis artifacts live
 After each experience, the evaluation plugin logs:
 
 - Per-task:
-  - `analysis.a_ref.exp###` (to the parent run)
+  - `analysis.a_ref.exp###`
 
 At the end of training, when reference accuracies are complete, the evaluation plugin logs:
 

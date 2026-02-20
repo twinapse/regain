@@ -44,7 +44,6 @@ from regain.constants import PARAM_CONTROLLER_PATH
 from regain.constants import PARAM_NUM_CLASSES
 from regain.constants import PARAM_SEED
 from regain.mlflow_utils import download_json_artifact
-from regain.mlflow_utils import is_parent_mlflow_run
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import resolve_mlflow_run_name
 from regain.mlflow_utils import search_runs_paginated
@@ -259,10 +258,10 @@ def collect_experiment_tables(
     default_num_classes: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
-    Collect parent-run tables for the analysis tool.
+    Collect run tables for the analysis tool.
 
     Produces:
-      - runs_table: one row per parent run
+      - runs_table: one row per run
       - experiences_table: one row per experience (run, experience index)
 
     Args:
@@ -271,7 +270,7 @@ def collect_experiment_tables(
         tracking_uri: Optional MLflow tracking URI or filesystem path (SQLite only).
         include_controllers: Optional allowlist of controller_name values.
         exclude_controllers: Optional denylist of controller_name values.
-        max_runs: Optional limit on number of parent runs to load.
+        max_runs: Optional limit on number of runs to load.
         require_finished: If True, keep only runs with status FINISHED.
         default_num_classes: Fallback number of classes when not logged.
 
@@ -295,7 +294,6 @@ def collect_experiment_tables(
         return [], []
 
     # Fetch runs with pagination (avoid brittle filter-string dependency on tags presence).
-    # Apply `max_runs` only after filtering nested runs so the limit refers to parent runs.
     candidate_runs = search_runs_paginated(
         client=client,
         experiment_ids=[experiment_id],
@@ -308,9 +306,6 @@ def collect_experiment_tables(
     experiences_table: list[dict[str, Any]] = []
 
     for run in candidate_runs:
-        if not is_parent_mlflow_run(run=run):
-            continue
-
         info = run.info
         if require_finished and str(getattr(info, COLUMN_STATUS, '')) != 'FINISHED':
             continue

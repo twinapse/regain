@@ -114,7 +114,7 @@ def main() -> None:
     )
     p.add_argument('--include-controllers', type=str, default=None, help='Comma-separated allowlist for controller_name.')
     p.add_argument('--exclude-controllers', type=str, default=None, help='Comma-separated denylist for controller_name.')
-    p.add_argument('--max-runs', type=int, default=None, help='Max number of parent runs.')
+    p.add_argument('--max-runs', type=int, default=None, help='Max number of runs.')
     p.add_argument('--default-num-classes', type=int, default=None, help='Fallback num classes when not logged.')
     p.add_argument('--show-plots', action='store_true', help='Show plots.')
     p.add_argument('--save-plots', action='store_true', help='Save plots.')

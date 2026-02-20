@@ -24,7 +24,6 @@ from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import StrategyConfig
 from regain.experiments.config import TrainingConfig
 from regain.mlflow_utils import download_json_artifact
-from regain.mlflow_utils import is_parent_mlflow_run
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import resolve_mlflow_run_name
 from regain.mlflow_utils import search_runs_paginated
@@ -38,7 +37,7 @@ __all__ = [
     'extract_backbone_training_config_from_run',
     'extract_required_float_vector',
     'extract_summary_metrics_from_run',
-    'find_backbone_parent_runs',
+    'find_backbone_runs',
     'load_backbone_from_existing_run',
     'load_backbone_analysis_baseline_from_run',
     'load_backbone_from_source_experiment',
@@ -67,7 +66,7 @@ def load_backbone_from_source_experiment(
             (checkpoint paths, summary metrics, baseline vectors, source run).
     """
     try:
-        backbone_runs = find_backbone_parent_runs(
+        backbone_runs = find_backbone_runs(
             client=client,
             experiment=source_experiment,
             allow_missing_experiment=False,
@@ -424,14 +423,14 @@ def extract_backbone_analysis_baseline(
     }
 
 
-def find_backbone_parent_runs(
+def find_backbone_runs(
     *,
     client: MlflowClient,
     experiment: str,
     allow_missing_experiment: bool = False,
 ) -> list[Run]:
     """
-    Find parent runs named `backbone` for an experiment.
+    Find runs named `backbone` for an experiment.
 
     Args:
         client (MlflowClient): MLflow client.
@@ -439,7 +438,7 @@ def find_backbone_parent_runs(
         allow_missing_experiment (bool): Whether missing experiments return an empty list.
 
     Returns:
-        list[Run]: Matching parent runs.
+        list[Run]: Matching backbone runs.
     """
     try:
         experiment_id = resolve_experiment_id(client=client, experiment=experiment)
@@ -456,8 +455,7 @@ def find_backbone_parent_runs(
     return [
         run
         for run in runs
-        if is_parent_mlflow_run(run=run)
-           and resolve_mlflow_run_name(run=run) == RUN_NAME_BACKBONE
+        if resolve_mlflow_run_name(run=run) == RUN_NAME_BACKBONE
     ]
 
 
@@ -467,7 +465,7 @@ def resolve_local_backbone_run(
     experiment_name: str,
 ) -> Run | None:
     """
-    Resolve the single local reserved `backbone` parent run for an experiment.
+    Resolve the single local reserved `backbone` run for an experiment.
 
     Args:
         client (MlflowClient): MLflow client.
@@ -476,7 +474,7 @@ def resolve_local_backbone_run(
     Returns:
         Run | None: Existing local `backbone` run, if present.
     """
-    local_backbone_runs = find_backbone_parent_runs(
+    local_backbone_runs = find_backbone_runs(
         client=client,
         experiment=experiment_name,
         allow_missing_experiment=True,
@@ -504,7 +502,7 @@ def load_backbone_from_existing_run(
 
     Args:
         client (MlflowClient): MLflow client.
-        backbone_run (Run): Existing local `backbone` parent run.
+        backbone_run (Run): Existing local `backbone` run.
         checkpoint_dir (Path): Local directory where checkpoints are downloaded.
         expected_num_experiences (int): Expected number of experiences.
         include_checkpoints_and_baseline (bool): Whether to load checkpoints and analysis baseline vectors.
