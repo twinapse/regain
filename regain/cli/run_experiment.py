@@ -164,10 +164,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: Configured ArgumentParser.
     """
     parser = argparse.ArgumentParser(description='Run a REGAIN experiment')
-    parser.add_argument(
+    config_group = parser.add_mutually_exclusive_group(required=True)
+    config_group.add_argument(
         '--config-files',
-        required=True,
         help='Comma-separated list of paths to experiment config YAML files',
+    )
+    config_group.add_argument(
+        '--config-dir',
+        type=str,
+        help='Path to a directory recursively searched for experiment config YAML files',
     )
     parser.add_argument(
         '--export-dir',
@@ -176,6 +181,35 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help='Path to the directory for exportable run outputs.',
     )
     return parser
+
+
+def _find_config_files(*, config_dir: str) -> list[str]:
+    """
+    Recursively find experiment config YAML files in a directory.
+
+    Args:
+        config_dir (str): Root directory path.
+
+    Returns:
+        list[str]: Sorted config file paths.
+
+    Raises:
+        ValueError: If `config_dir` does not exist or is not a directory.
+    """
+    root_dir = Path(config_dir)
+    if not root_dir.exists():
+        raise ValueError(f'Config directory does not exist: {config_dir}')
+    if not root_dir.is_dir():
+        raise ValueError(f'Config directory is not a directory: {config_dir}')
+
+    config_paths = sorted(
+        [
+            path
+            for path in root_dir.rglob('*')
+            if path.is_file() and path.suffix.lower() in ['.yaml', '.yml']
+        ]
+    )
+    return [str(path) for path in config_paths]
 
 
 def main() -> None:
@@ -190,9 +224,18 @@ def main() -> None:
     args = parser.parse_args()
 
     # Get config files
-    config_files = [config_file.strip() for config_file in args.config_files.split(',') if config_file.strip()]
-    if not config_files:
-        parser.error('At least one config file must be provided via --config_files.')
+    config_files: list[str] = []
+    if args.config_files is not None:
+        config_files = [config_file.strip() for config_file in args.config_files.split(',') if config_file.strip()]
+        if not config_files:
+            parser.error('At least one config file must be provided via --config-files.')
+    elif args.config_dir is not None:
+        try:
+            config_files = _find_config_files(config_dir=args.config_dir)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if not config_files:
+            parser.error(f'No config YAML files found in --config-dir: {args.config_dir}')
 
     # Run each experiment config file and optionally export runs to CSVs
     for config_file in config_files:
