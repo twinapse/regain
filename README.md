@@ -77,9 +77,20 @@ python -m regain.cli.run_experiment --config_files ./config/experiment_a.yaml,./
 `run_analysis` has subcommands:
 
 * `collect`: download/aggregate finished parent MLflow runs into tidy JSONL tables
-* `curves`: compute recoverability curves (requires `collect`)
+* `curves`: compute recoverability, task-age, calibration-vs-budget, and latency-vs-budget curves (requires `collect`)
 * `frontier`: compute the efficiency frontier from the curve CSV (requires `curves` output)
-* `all`: run `collect + curves + frontier`
+* `predictive`: compute diagnostic-vs-repairability correlations (requires `collect`)
+* `all`: run `collect + curves + frontier + predictive`
+
+Notes:
+* For repair-controller runs, predictive summaries and run-level `run.calibration.max_ece` in `runs_table` are baseline-only:
+  sourced from base values in `analysis_artifacts.json`.
+  `run.calibration.max_ece` is defined as `max(run.calibration.ece)` over artifact baseline vectors.
+* Analysis collection requires each run to include `controller.type` (`none`, `prevention`, or `repair`) and
+  `repair.split_fraction` parameters.
+* `repair_set_total` in analysis tables is:
+  - `0` when `repair.split_fraction == 0.0`;
+  - otherwise, the exact total non-empty line count across `repair/exp_*.txt` in `splits.tar.gz`.
 
 Common flags:
 
@@ -98,7 +109,8 @@ Examples:
 # Step-by-step
 python -m regain.cli.run_analysis collect  --experiment experiment_1 --output-dir ./analysis_results
 python -m regain.cli.run_analysis curves   --experiment experiment_1 --output-dir ./analysis_results --show-plots
-python -m regain.cli.run_analysis frontier --experiment experiment_1 --output-dir ./analysis_results --perf-key rho_mean_avg --save-plots
+python -m regain.cli.run_analysis frontier --experiment experiment_1 --output-dir ./analysis_results --perf-key analysis.repair.rho.avg --save-plots
+python -m regain.cli.run_analysis predictive --experiment experiment_1 --output-dir ./analysis_results
 
 # One-shot (recommended for most use)
 python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results --show-plots --save-plots
@@ -110,8 +122,9 @@ python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./a
 Outputs are organized under:
 
 * `./analysis_results/<experiment>/tables/` (from `collect`; JSONL: `runs_table.jsonl`, `experiences_table.jsonl`)
-* `./analysis_results/<experiment>/curves/` (from `curves`)
+* `./analysis_results/<experiment>/curves/` (from `curves`; CSV: `recoverability_curve.csv`, `task_age_rho.csv`, `calibration_vs_budget.csv`, `latency_vs_budget.csv`)
 * `./analysis_results/<experiment>/frontier/` (from `frontier`)
+* `./analysis_results/<experiment>/predictive/` (from `predictive`; CSV: `predictive_correlations.csv`)
 * `./analysis_results/<experiment>/plots/` (when `--save-plots` is used)
 
 ### Plot later (if you didn’t plot during analysis)
@@ -121,7 +134,7 @@ If you ran analysis without `--show-plots` / `--save-plots`, you can render plot
 ```bash
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --show
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save
-python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save --perf-key a_ctrl_mean_avg
+python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save --perf-key analysis.accuracy.final.avg.ctrl
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --show --save --save-dir ./plots
 ```
 

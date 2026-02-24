@@ -105,18 +105,18 @@ class MetricContext:
 
 
 def retrieval_correctable_fraction(
-    a_ref: float,
-    a_post: float,
-    a_ctrl: float,
+    a_exp_base: float,
+    a_base: float,
+    a_final_ctrl: float,
     eps: float = 1e-6,
 ) -> Optional[float]:
     """
     Compute the retrieval-correctable fraction for a single task.
 
     Args:
-        a_ref: Accuracy immediately after training the task.
-        a_post: Accuracy after completing all subsequent tasks (forgetting applied).
-        a_ctrl: Accuracy after applying the retrieval-based controller.
+        a_exp_base: Accuracy immediately after training the task (end-of-experience base).
+        a_base: Accuracy after completing all subsequent tasks without controller (final, base).
+        a_final_ctrl: Accuracy after applying the retrieval-based controller (final, ctrl).
         eps: Minimum magnitude of total forgetting to consider the task valid.
 
     Returns:
@@ -125,16 +125,16 @@ def retrieval_correctable_fraction(
     Notes:
         Definitions (per proposal):
 
-        - F_total = A_ref - A_post
-        - F_res = A_ref - A_ctrl
+        - F_total = A_exp_base - A_base
+        - F_res = A_exp_base - A_final_ctrl
         - ρ = (F_total - F_res) / F_total
 
         Tasks with non-positive or negligible forgetting (F_total <= eps) return None.
     """
-    f_total = a_ref - a_post
+    f_total = a_exp_base - a_base
     if f_total <= eps:
         return None
-    f_res = a_ref - a_ctrl
+    f_res = a_exp_base - a_final_ctrl
     return (f_total - f_res) / f_total
 
 
@@ -143,7 +143,7 @@ def retrieval_correctable_fractions(
     eps: float = 1e-6,
 ) -> List[Optional[float]]:
     """
-    Vectorized helper over (a_ref, a_post, a_ctrl) triples.
+    Vectorized helper over (a_exp_base, a_base, a_final_ctrl) triples.
 
     Args:
         triples: Iterable of accuracy triples per task.
@@ -152,7 +152,10 @@ def retrieval_correctable_fractions(
     Returns:
         List of retrieval-correctable fractions, one per input triple.
     """
-    return [retrieval_correctable_fraction(a_ref, a_post, a_ctrl, eps) for a_ref, a_post, a_ctrl in triples]
+    return [
+        retrieval_correctable_fraction(a_exp_base, a_base, a_final_ctrl, eps)
+        for a_exp_base, a_base, a_final_ctrl in triples
+    ]
 
 
 def mean_ignore_invalid(values: Iterable[Optional[float]]) -> Optional[float]:

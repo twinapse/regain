@@ -13,11 +13,11 @@ from typing import Any, Iterable, Optional
 
 from regain.analysis.utils import to_float
 from regain.analysis.utils import to_int
+from regain.constants import ANALYSIS_RHO_AVG
 from regain.constants import COLUMN_B
 from regain.constants import COLUMN_CONTROLLER_NAME
 from regain.constants import COLUMN_PERFORMANCE
 from regain.constants import COLUMN_TOTAL_COST
-from regain.constants import METRIC_RHO_MEAN_AVG
 
 
 def _sorted_unique(values: Iterable[Any]) -> list[Any]:
@@ -36,7 +36,7 @@ def plot_analysis_outputs(
     curve_rows: list[dict[str, Any]] | None = None,
     frontier_rows: list[dict[str, Any]] | None = None,
     analysis_out: str | Path | None = None,
-    perf_key: str = METRIC_RHO_MEAN_AVG,
+    perf_key: str = ANALYSIS_RHO_AVG,
     mode: str = 'show',
     save_dir: str | Path | None = None,
 ) -> list[Path]:
@@ -107,11 +107,12 @@ def plot_analysis_outputs(
 
     def std_key_for(perf: str) -> str:
         # Convention used by `regain.analysis.curves`:
-        #   rho_mean_avg <-> rho_mean_std
-        #   a_ctrl_mean_avg <-> a_ctrl_mean_std
+        #   analysis.*.avg <-> analysis.*.std
+        if perf.endswith('.avg'):
+            return perf[:-4] + '.std'
         if perf.endswith('_avg'):
             return perf[:-4] + '_std'
-        return perf + '_std'
+        return perf + '.std'
 
     # -----------------
     # 1) Recoverability curves (budget -> performance)

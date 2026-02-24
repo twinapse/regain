@@ -36,6 +36,7 @@ backbone:
 # Repair controller settings
 # ============================================================
 repair:
+  split_fraction: 0.2           # per-experience train split assigned to repair stream (500 * 0.2 = 100)
   budget_per_class: 100
   fit_schedule: per_experience
   num_epochs: 50

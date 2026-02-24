@@ -212,6 +212,9 @@ class TestEvaluationIntegrityPluginOwnership:
             fit_after_experience=False,
             repair_epochs=1,
             repair_batch_size=1,
+            budget_per_class=1,
+            max_repair_samples_per_class=1,
+            seed=1,
         )
         train_strategy = _DummyStrategy(
             model=_ToyModel(out_features=4),

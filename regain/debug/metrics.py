@@ -13,29 +13,29 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 
-from regain.constants import METRIC_DIAG_CE
-from regain.constants import METRIC_DIAG_ENTROPY
-from regain.constants import METRIC_DIAG_LOGIT_L2
-from regain.constants import METRIC_DIAG_N_SAMPLES
-from regain.constants import METRIC_DIAG_NUM_CLASSES
-from regain.constants import METRIC_DIAG_PRED_ENTROPY
-from regain.constants import METRIC_DIAG_PRED_HIST
-from regain.constants import METRIC_DIAG_PRED_MAX_FRAC
-from regain.constants import METRIC_DIAG_PRED_UNIQUE
-from regain.constants import METRIC_DIAG_TOP1
-from regain.constants import METRIC_HEALTH
-from regain.constants import METRIC_HEALTH_D_ACC
-from regain.constants import METRIC_HEALTH_D_ENT
-from regain.constants import METRIC_HEALTH_D_MAXFRAC
-from regain.constants import METRIC_HEALTH_D_PREDENT
-from regain.constants import METRIC_HEALTH_D_UNIQUE
-from regain.constants import METRIC_HEALTH_DELTA
-from regain.constants import METRIC_HEALTH_NEUTRAL
-from regain.constants import METRIC_HEALTH_R_CE
-from regain.constants import METRIC_HEALTH_R_NORM
-from regain.constants import METRIC_HEALTH_S1_PERF
-from regain.constants import METRIC_HEALTH_S2_CONF
-from regain.constants import METRIC_HEALTH_S3_DIV
+from regain.constants import _DEBUG_CE
+from regain.constants import _DEBUG_ENTROPY
+from regain.constants import _DEBUG_HEALTH
+from regain.constants import _DEBUG_HEALTH_D_ACC
+from regain.constants import _DEBUG_HEALTH_D_ENT
+from regain.constants import _DEBUG_HEALTH_D_MAXFRAC
+from regain.constants import _DEBUG_HEALTH_D_PREDENT
+from regain.constants import _DEBUG_HEALTH_D_UNIQUE
+from regain.constants import _DEBUG_HEALTH_DELTA
+from regain.constants import _DEBUG_HEALTH_NEUTRAL
+from regain.constants import _DEBUG_HEALTH_R_CE
+from regain.constants import _DEBUG_HEALTH_R_NORM
+from regain.constants import _DEBUG_HEALTH_S1_PERF
+from regain.constants import _DEBUG_HEALTH_S2_CONF
+from regain.constants import _DEBUG_HEALTH_S3_DIV
+from regain.constants import _DEBUG_LOGIT_L2
+from regain.constants import _DEBUG_N_SAMPLES
+from regain.constants import _DEBUG_NUM_CLASSES
+from regain.constants import _DEBUG_PRED_ENTROPY
+from regain.constants import _DEBUG_PRED_HIST
+from regain.constants import _DEBUG_PRED_MAX_FRAC
+from regain.constants import _DEBUG_PRED_UNIQUE
+from regain.constants import _DEBUG_TOP1
 from regain.models.controllers import RepairController
 from regain.models.controllers.repair.common import build_repair_dataloader
 from regain.utils import module_device
@@ -48,9 +48,9 @@ __all__ = [
     'compute_repair_health_score',
 ]
 
-_METRIC_DIAG_PRED_UNIQUE_FRAC = 'pred_unique_frac'
-_METRIC_HEALTH_UNIQUE_FRAC_POST = 'unique_frac_post'
-_METRIC_HEALTH_UNIQUE_FRAC_PRE = 'unique_frac_pre'
+_DEBUG_PRED_UNIQUE_FRAC = 'pred_unique_frac'
+_DEBUG_HEALTH_UNIQUE_FRAC_POST = 'unique_frac_post'
+_DEBUG_HEALTH_UNIQUE_FRAC_PRE = 'unique_frac_pre'
 
 
 _DEFAULT_EPS = 1e-12
@@ -311,17 +311,17 @@ def compute_repair_diagnostics(
     )
 
     return {
-        METRIC_DIAG_CE: float(mean_loss),
-        METRIC_DIAG_TOP1: float(mean_top1),
-        METRIC_DIAG_LOGIT_L2: float(mean_logit_l2),
-        METRIC_DIAG_ENTROPY: float(mean_entropy),
-        METRIC_DIAG_PRED_UNIQUE: float(pred_unique),
-        METRIC_DIAG_PRED_MAX_FRAC: float(pred_max_frac),
-        METRIC_DIAG_PRED_ENTROPY: float(pred_entropy),
-        _METRIC_DIAG_PRED_UNIQUE_FRAC: pred_unique_frac,
-        METRIC_DIAG_NUM_CLASSES: int(num_classes) if num_classes is not None else None,
-        METRIC_DIAG_N_SAMPLES: int(total_valid),
-        METRIC_DIAG_PRED_HIST: pred_hist or [],
+        _DEBUG_CE: float(mean_loss),
+        _DEBUG_TOP1: float(mean_top1),
+        _DEBUG_LOGIT_L2: float(mean_logit_l2),
+        _DEBUG_ENTROPY: float(mean_entropy),
+        _DEBUG_PRED_UNIQUE: float(pred_unique),
+        _DEBUG_PRED_MAX_FRAC: float(pred_max_frac),
+        _DEBUG_PRED_ENTROPY: float(pred_entropy),
+        _DEBUG_PRED_UNIQUE_FRAC: pred_unique_frac,
+        _DEBUG_NUM_CLASSES: int(num_classes) if num_classes is not None else None,
+        _DEBUG_N_SAMPLES: int(total_valid),
+        _DEBUG_PRED_HIST: pred_hist or [],
     }
 
 
@@ -358,27 +358,27 @@ def compute_repair_health_score(
     Returns:
         dict[str, float]: Health score and intermediate components.
     """
-    pre_num_classes = pre_metrics.get(METRIC_DIAG_NUM_CLASSES)
-    post_num_classes = post_metrics.get(METRIC_DIAG_NUM_CLASSES)
-    pre_samples = pre_metrics.get(METRIC_DIAG_N_SAMPLES)
-    post_samples = post_metrics.get(METRIC_DIAG_N_SAMPLES)
+    pre_num_classes = pre_metrics.get(_DEBUG_NUM_CLASSES)
+    post_num_classes = post_metrics.get(_DEBUG_NUM_CLASSES)
+    pre_samples = pre_metrics.get(_DEBUG_N_SAMPLES)
+    post_samples = post_metrics.get(_DEBUG_N_SAMPLES)
     if pre_num_classes != post_num_classes or pre_samples != post_samples:
         raise ValueError(
             'Repair health score requires matching num_classes and n_samples in pre/post diagnostics.'
         )
 
-    ce_pre = float(pre_metrics[METRIC_DIAG_CE])
-    ce_post = float(post_metrics[METRIC_DIAG_CE])
-    top1_pre = float(pre_metrics[METRIC_DIAG_TOP1])
-    top1_post = float(post_metrics[METRIC_DIAG_TOP1])
-    logit_l2_pre = float(pre_metrics[METRIC_DIAG_LOGIT_L2])
-    logit_l2_post = float(post_metrics[METRIC_DIAG_LOGIT_L2])
-    entropy_pre = float(pre_metrics[METRIC_DIAG_ENTROPY])
-    entropy_post = float(post_metrics[METRIC_DIAG_ENTROPY])
-    pred_unique_pre = float(pre_metrics[METRIC_DIAG_PRED_UNIQUE])
-    pred_unique_post = float(post_metrics[METRIC_DIAG_PRED_UNIQUE])
-    pred_max_frac_pre = float(pre_metrics[METRIC_DIAG_PRED_MAX_FRAC])
-    pred_max_frac_post = float(post_metrics[METRIC_DIAG_PRED_MAX_FRAC])
+    ce_pre = float(pre_metrics[_DEBUG_CE])
+    ce_post = float(post_metrics[_DEBUG_CE])
+    top1_pre = float(pre_metrics[_DEBUG_TOP1])
+    top1_post = float(post_metrics[_DEBUG_TOP1])
+    logit_l2_pre = float(pre_metrics[_DEBUG_LOGIT_L2])
+    logit_l2_post = float(post_metrics[_DEBUG_LOGIT_L2])
+    entropy_pre = float(pre_metrics[_DEBUG_ENTROPY])
+    entropy_post = float(post_metrics[_DEBUG_ENTROPY])
+    pred_unique_pre = float(pre_metrics[_DEBUG_PRED_UNIQUE])
+    pred_unique_post = float(post_metrics[_DEBUG_PRED_UNIQUE])
+    pred_max_frac_pre = float(pre_metrics[_DEBUG_PRED_MAX_FRAC])
+    pred_max_frac_post = float(post_metrics[_DEBUG_PRED_MAX_FRAC])
 
     num_classes = int(pre_num_classes or 0)
 
@@ -408,8 +408,8 @@ def compute_repair_health_score(
         d_unique = 0.0
         s_unique = 0.5
 
-    pred_entropy_pre = pre_metrics.get(METRIC_DIAG_PRED_ENTROPY)
-    pred_entropy_post = post_metrics.get(METRIC_DIAG_PRED_ENTROPY)
+    pred_entropy_pre = pre_metrics.get(_DEBUG_PRED_ENTROPY)
+    pred_entropy_post = post_metrics.get(_DEBUG_PRED_ENTROPY)
     use_pred_entropy = pred_entropy_pre is not None and pred_entropy_post is not None
     if use_pred_entropy:
         d_predent = float(pred_entropy_pre) - float(pred_entropy_post)
@@ -434,26 +434,26 @@ def compute_repair_health_score(
     health_delta = float(health) - float(health_neutral)
 
     payload = {
-        METRIC_HEALTH: float(health),
-        METRIC_HEALTH_NEUTRAL: float(health_neutral),
-        METRIC_HEALTH_DELTA: float(health_delta),
-        METRIC_HEALTH_S1_PERF: float(s1),
-        METRIC_HEALTH_S2_CONF: float(s2),
-        METRIC_HEALTH_S3_DIV: float(s3),
-        METRIC_HEALTH_R_CE: float(r_ce),
-        METRIC_HEALTH_D_ACC: float(d_acc),
-        METRIC_HEALTH_R_NORM: float(r_norm),
-        METRIC_HEALTH_D_ENT: float(d_ent),
-        METRIC_HEALTH_D_MAXFRAC: float(d_maxfrac),
+        _DEBUG_HEALTH: float(health),
+        _DEBUG_HEALTH_NEUTRAL: float(health_neutral),
+        _DEBUG_HEALTH_DELTA: float(health_delta),
+        _DEBUG_HEALTH_S1_PERF: float(s1),
+        _DEBUG_HEALTH_S2_CONF: float(s2),
+        _DEBUG_HEALTH_S3_DIV: float(s3),
+        _DEBUG_HEALTH_R_CE: float(r_ce),
+        _DEBUG_HEALTH_D_ACC: float(d_acc),
+        _DEBUG_HEALTH_R_NORM: float(r_norm),
+        _DEBUG_HEALTH_D_ENT: float(d_ent),
+        _DEBUG_HEALTH_D_MAXFRAC: float(d_maxfrac),
     }
 
     if num_classes > 0:
-        payload[METRIC_HEALTH_D_UNIQUE] = float(d_unique)
+        payload[_DEBUG_HEALTH_D_UNIQUE] = float(d_unique)
     if use_pred_entropy:
-        payload[METRIC_HEALTH_D_PREDENT] = float(d_predent)
+        payload[_DEBUG_HEALTH_D_PREDENT] = float(d_predent)
     if unique_frac_pre is not None:
-        payload[_METRIC_HEALTH_UNIQUE_FRAC_PRE] = float(unique_frac_pre)
+        payload[_DEBUG_HEALTH_UNIQUE_FRAC_PRE] = float(unique_frac_pre)
     if unique_frac_post is not None:
-        payload[_METRIC_HEALTH_UNIQUE_FRAC_POST] = float(unique_frac_post)
+        payload[_DEBUG_HEALTH_UNIQUE_FRAC_POST] = float(unique_frac_post)
 
     return payload

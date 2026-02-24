@@ -32,6 +32,7 @@ def _build_base_payload() -> dict[str, object]:
             },
         },
         'repair': {
+            'split_fraction': 0.0,
             'budget_per_class': 0,
             'fit_schedule': 'per_experience',
         },
@@ -111,4 +112,91 @@ class TestEvaluationConfigParsing:
         config_path = _write_payload(tmp_path=tmp_path, payload=payload)
 
         with pytest.raises(ValueError, match='keys should not override `evaluation`'):
+            load_experiment_config(config_path)
+
+
+class TestRepairConfigParsing:
+    def test_parses_repair_split_fraction_field(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['repair'] = {
+            'split_fraction': 0.25,
+            'budget_per_class': 2,
+            'fit_schedule': 'per_experience',
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        config = load_experiment_config(config_path)
+
+        assert config.repair.split_fraction == pytest.approx(0.25)
+        assert config.repair.budget_per_class == 2
+        assert config.repair.fit_schedule == 'per_experience'
+
+    def test_requires_repair_split_fraction_field(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['repair'] = {
+            'budget_per_class': 1,
+            'fit_schedule': 'per_experience',
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='repair.split_fraction'):
+            load_experiment_config(config_path)
+
+    def test_defaults_non_split_repair_fields_to_none_without_repair_runs(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['repair'] = {
+            'split_fraction': 0.2,
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        config = load_experiment_config(config_path)
+
+        assert config.repair.budget_per_class is None
+        assert config.repair.fit_schedule is None
+        assert config.repair.num_epochs is None
+        assert config.repair.batch_size is None
+
+    def test_requires_all_non_split_repair_fields_for_repair_runs(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['repair'] = {
+            'split_fraction': 0.2,
+        }
+        payload['runs'] = [
+            {
+                'name': 'repair_run',
+                'controller': {
+                    'name': 'logit_bias',
+                    'kwargs': {},
+                },
+            },
+        ]
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError) as exc_info:
+            load_experiment_config(config_path)
+
+        message = str(exc_info.value)
+        assert 'repair.budget_per_class' in message
+        assert 'repair.fit_schedule' in message
+        assert 'repair.num_epochs' in message
+        assert 'repair.batch_size' in message
+
+    def test_rejects_repair_split_fraction_out_of_range(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['repair'] = {
+            'split_fraction': 1.5,
+            'budget_per_class': 1,
+            'fit_schedule': 'per_experience',
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='repair.split_fraction'):
             load_experiment_config(config_path)

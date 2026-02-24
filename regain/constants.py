@@ -1,8 +1,74 @@
 """
 Project-wide constants.
+
+Naming conventions
+------------------
+
+**Constant prefixes:**
+- ``RUN_*``       — per-run metric keys logged to MLflow (prefixed with ``run.`` in string values).
+- ``ANALYSIS_*``  — cross-run aggregated metric keys (CSV columns, prefixed with ``analysis.``).
+- ``COLUMN_*``    — table metadata column keys (run ID, seed, controller name, …).
+- ``PARAM_*``     — MLflow run parameter paths.
+
+**Namespace hierarchy (dot-separated):**
+``run.<namespace>.[…dimensions…].<base|ctrl>``   for per-run metrics.
+``analysis.<namespace>.[…dimensions…].<base|ctrl>`` for cross-run aggregates.
+
+``base`` = without controller corrections; ``ctrl`` = with controller corrections.
+``base`` / ``ctrl`` is **always the last segment** of a metric key.
+
+**Temporal markers:**
+- ``exp``   — measured at end of each experience (reference accuracy).
+- ``final`` — measured at end of all training (post-sequence accuracy).
+
+**Aggregation suffixes:**
+- ``avg`` — average value.
+- ``std`` — standard deviation (cross-run only).
+
+**Avalanche native metrics** also carry the ``run.`` prefix via namespace constants
+(``NAMESPACE_TRAIN``, ``NAMESPACE_EVAL``).
 """
 
 __all__ = [
+    # ---- Namespace constants ----
+    'NAMESPACE_ANALYSIS',
+    'NAMESPACE_DEBUG',
+    'NAMESPACE_EVAL',
+    'NAMESPACE_RUN',
+    'NAMESPACE_SUMMARY',
+    'NAMESPACE_TRAIN',
+    'NS_SEP',
+    # ---- Per-run metric keys (MLflow) ----
+    'RUN_ACC_EXP',
+    'RUN_ACC_FINAL',
+    'RUN_ACC_FINAL_AVG_BASE',
+    'RUN_ACC_FINAL_AVG_CTRL',
+    'RUN_CALIB_AECE',
+    'RUN_CALIB_BRIER',
+    'RUN_CALIB_ECE',
+    'RUN_CALIB_MAX_ECE',
+    'RUN_CALIB_MCE',
+    'RUN_CALIB_NLL',
+    'RUN_DIAG_AVG_CONF',
+    'RUN_DIAG_AVG_ENTROPY',
+    'RUN_DIAG_LOGIT_AVG_DRIFT',
+    'RUN_DIAG_OUT_OF_TASK_RATE',
+    'RUN_EPS',
+    'RUN_LATENCY_MS_PER_SAMPLE_BASE',
+    'RUN_LATENCY_MS_PER_SAMPLE_CTRL',
+    'RUN_LATENCY_MS_RATIO',
+    'RUN_LATENCY_SAMPLES_PER_SEC_BASE',
+    'RUN_LATENCY_SAMPLES_PER_SEC_CTRL',
+    'RUN_REPAIR_SECONDS',
+    'RUN_REPAIR_STEPS',
+    'RUN_RHO',
+    'RUN_RHO_AVG',
+    # ---- Cross-run metric keys (CSV / analysis) ----
+    'ANALYSIS_ACC_FINAL_AVG_CTRL',
+    'ANALYSIS_RHO_AVG',
+    # ---- Diagnostic vector tuple ----
+    'DIAG_VECTOR_KEYS',
+    # ---- Table column keys ----
     'COLUMN_B',
     'COLUMN_CONTROLLER_MODEL_PARAM_COUNT',
     'COLUMN_CONTROLLER_NAME',
@@ -13,6 +79,9 @@ __all__ = [
     'COLUMN_PERFORMANCE',
     'COLUMN_REPAIR_BUDGET_PER_CLASS',
     'COLUMN_REPAIR_BUDGET_TOTAL',
+    'COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS',
+    'COLUMN_REPAIR_SET_TOTAL',
+    'COLUMN_REPAIR_SPLIT_FRACTION',
     'COLUMN_RUN_ID',
     'COLUMN_RUN_NAME',
     'COLUMN_SEED',
@@ -20,48 +89,7 @@ __all__ = [
     'COLUMN_STATUS',
     'COLUMN_TASK_AGE',
     'COLUMN_TOTAL_COST',
-    'EXPERIENCE_KEY_PREFIX',
-    'METRIC_A_CTRL',
-    'METRIC_A_CTRL_MEAN',
-    'METRIC_A_CTRL_MEAN_AVG',
-    'METRIC_A_POST',
-    'METRIC_A_POST_MEAN',
-    'METRIC_A_REF',
-    'METRIC_DIAG_CE',
-    'METRIC_DIAG_ENTROPY',
-    'METRIC_DIAG_LOGIT_L2',
-    'METRIC_DIAG_NUM_CLASSES',
-    'METRIC_DIAG_N_SAMPLES',
-    'METRIC_DIAG_PRED_ENTROPY',
-    'METRIC_DIAG_PRED_HIST',
-    'METRIC_DIAG_PRED_MAX_FRAC',
-    'METRIC_DIAG_PRED_UNIQUE',
-    'METRIC_DIAG_TOP1',
-    'METRIC_EPS',
-    'METRIC_HEALTH',
-    'METRIC_HEALTH_DELTA',
-    'METRIC_HEALTH_D_ACC',
-    'METRIC_HEALTH_D_ENT',
-    'METRIC_HEALTH_D_MAXFRAC',
-    'METRIC_HEALTH_D_PREDENT',
-    'METRIC_HEALTH_D_UNIQUE',
-    'METRIC_HEALTH_NEUTRAL',
-    'METRIC_HEALTH_R_CE',
-    'METRIC_HEALTH_R_NORM',
-    'METRIC_HEALTH_S1_PERF',
-    'METRIC_HEALTH_S2_CONF',
-    'METRIC_HEALTH_S3_DIV',
-    'METRIC_PREFIX_ANALYSIS',
-    'METRIC_PREFIX_SUMMARY',
-    'METRIC_RHO',
-    'METRIC_RHO_MEAN',
-    'METRIC_RHO_MEAN_AVG',
-    'MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR',
-    'MLFLOW_ARTIFACT_CONFIG_FILE',
-    'MLFLOW_ARTIFACT_SPLITS_FILE',
-    'NAMESPACE_EVAL',
-    'NAMESPACE_TRAIN',
-    'NS_SEP',
+    # ---- MLflow parameters ----
     'PARAM_AVALANCHE_VERSION',
     'PARAM_BACKBONE',
     'PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM',
@@ -69,12 +97,20 @@ __all__ = [
     'PARAM_CONTROLLER',
     'PARAM_CONTROLLER_MODEL_PARAM_COUNT',
     'PARAM_CONTROLLER_PATH',
+    'PARAM_CONTROLLER_TYPE',
     'PARAM_DEBUG_SKIP_REASON',
     'PARAM_NUM_CLASSES',
+    'PARAM_REPAIR_MAX_SAMPLES_PER_CLASS',
+    'PARAM_REPAIR_SPLIT_FRACTION',
     'PARAM_RUN_NAME',
     'PARAM_SCENARIO',
     'PARAM_SEED',
     'PARAM_TORCH_DETERMINISTIC_ALGORITHMS',
+    # ---- Misc ----
+    'EXPERIENCE_KEY_PREFIX',
+    'MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR',
+    'MLFLOW_ARTIFACT_CONFIG_FILE',
+    'MLFLOW_ARTIFACT_SPLITS_FILE',
     'RUN_NAME_BACKBONE',
     'STREAMS',
     'STREAM_REPAIR',
@@ -82,14 +118,18 @@ __all__ = [
     'STREAM_TRAIN',
 ]
 
-##############
-# Namespaces #
-##############
+###########################
+# Namespace hierarchy     #
+###########################
 
 NS_SEP = '.'  # Namespace separator
 
-NAMESPACE_EVAL = 'eval'
-NAMESPACE_TRAIN = 'train'
+NAMESPACE_RUN = 'run'
+NAMESPACE_ANALYSIS = 'analysis'
+NAMESPACE_TRAIN = f'{NAMESPACE_RUN}{NS_SEP}train'
+NAMESPACE_EVAL = f'{NAMESPACE_RUN}{NS_SEP}eval'
+NAMESPACE_SUMMARY = f'{NAMESPACE_RUN}{NS_SEP}summary'
+NAMESPACE_DEBUG = f'{NAMESPACE_RUN}{NS_SEP}debug'
 
 ########################
 # Predefined run names #
@@ -114,8 +154,11 @@ PARAM_BACKBONE_REPLAY_MEM_SIZE = f'{PARAM_BACKBONE}{NS_SEP}training{NS_SEP}strat
 PARAM_CONTROLLER = 'controller'
 PARAM_CONTROLLER_MODEL_PARAM_COUNT = f'{PARAM_CONTROLLER}{NS_SEP}model{NS_SEP}param_count'
 PARAM_CONTROLLER_PATH = f'{PARAM_CONTROLLER}{NS_SEP}path'
+PARAM_CONTROLLER_TYPE = f'{PARAM_CONTROLLER}{NS_SEP}type'
 PARAM_DEBUG_SKIP_REASON = f'debug{NS_SEP}skip_reason'
 PARAM_NUM_CLASSES = 'num_classes'
+PARAM_REPAIR_MAX_SAMPLES_PER_CLASS = 'repair.max_samples_per_class'
+PARAM_REPAIR_SPLIT_FRACTION = 'repair.split_fraction'
 PARAM_RUN_NAME = 'run_name'
 PARAM_SCENARIO = 'scenario'
 PARAM_SEED = 'seed'
@@ -140,6 +183,9 @@ COLUMN_NUM_CLASSES = PARAM_NUM_CLASSES
 COLUMN_PERFORMANCE = 'performance'
 COLUMN_REPAIR_BUDGET_PER_CLASS = 'repair_budget_per_class'
 COLUMN_REPAIR_BUDGET_TOTAL = 'repair_budget_total'
+COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS = 'repair_max_samples_per_class'
+COLUMN_REPAIR_SET_TOTAL = 'repair_set_total'
+COLUMN_REPAIR_SPLIT_FRACTION = 'repair_split_fraction'
 COLUMN_RUN_ID = 'run_id'
 COLUMN_RUN_NAME = PARAM_RUN_NAME
 COLUMN_SEED = PARAM_SEED
@@ -148,51 +194,104 @@ COLUMN_STATUS = 'status'
 COLUMN_TASK_AGE = 'task_age'
 COLUMN_TOTAL_COST = 'total_cost'
 
-##############################
-# Predefined metric key names #
-##############################
+#########################################
+# Per-run metric keys (logged to MLflow) #
+#########################################
+# All string values carry the ``run.`` prefix.
+# base/ctrl variant is always at the very end.
 
-METRIC_A_CTRL = 'a_ctrl'
-METRIC_A_CTRL_MEAN = 'a_ctrl_mean'
-METRIC_A_CTRL_MEAN_AVG = 'a_ctrl_mean_avg'
-METRIC_A_POST = 'a_post'
-METRIC_A_POST_MEAN = 'a_post_mean'
-METRIC_A_REF = 'a_ref'
-METRIC_PREFIX_ANALYSIS = f'analysis{NS_SEP}'
-METRIC_PREFIX_SUMMARY = f'summary{NS_SEP}'
-METRIC_RHO = 'rho'
-METRIC_RHO_MEAN = 'rho_mean'
-METRIC_RHO_MEAN_AVG = 'rho_mean_avg'
+_RUN = NAMESPACE_RUN  # shorthand for building metric strings
+
+# Accuracy vectors — per-experience, with base/ctrl suffix appended at log time
+RUN_ACC_EXP = f'{_RUN}{NS_SEP}accuracy{NS_SEP}exp'           # run.accuracy.exp  (+ .exp###.base)
+RUN_ACC_FINAL = f'{_RUN}{NS_SEP}accuracy{NS_SEP}final'       # run.accuracy.final (+ .exp###.base|ctrl)
+
+# Accuracy aggregates — per-run averages across experiences
+RUN_ACC_FINAL_AVG_BASE = f'{_RUN}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
+RUN_ACC_FINAL_AVG_CTRL = f'{_RUN}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
+
+# Rho (correctable fraction)
+RUN_RHO = f'{_RUN}{NS_SEP}repair{NS_SEP}rho'                          # run.repair.rho (+ .exp###)
+RUN_RHO_AVG = f'{_RUN}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'           # run.repair.rho.avg
+
+# Calibration
+RUN_CALIB_AECE = f'{_RUN}{NS_SEP}calibration{NS_SEP}aece'
+RUN_CALIB_BRIER = f'{_RUN}{NS_SEP}calibration{NS_SEP}brier'
+RUN_CALIB_ECE = f'{_RUN}{NS_SEP}calibration{NS_SEP}ece'
+RUN_CALIB_MAX_ECE = f'{_RUN}{NS_SEP}calibration{NS_SEP}max_ece'
+RUN_CALIB_MCE = f'{_RUN}{NS_SEP}calibration{NS_SEP}mce'
+RUN_CALIB_NLL = f'{_RUN}{NS_SEP}calibration{NS_SEP}nll'
+
+# Diagnostics
+RUN_DIAG_AVG_CONF = f'{_RUN}{NS_SEP}diagnostics{NS_SEP}avg_conf'
+RUN_DIAG_AVG_ENTROPY = f'{_RUN}{NS_SEP}diagnostics{NS_SEP}avg_entropy'
+RUN_DIAG_LOGIT_AVG_DRIFT = f'{_RUN}{NS_SEP}diagnostics{NS_SEP}logit_avg_drift'
+RUN_DIAG_OUT_OF_TASK_RATE = f'{_RUN}{NS_SEP}diagnostics{NS_SEP}out_of_task_rate'
+
+DIAG_VECTOR_KEYS = (
+    RUN_DIAG_OUT_OF_TASK_RATE,
+    RUN_DIAG_AVG_CONF,
+    RUN_DIAG_AVG_ENTROPY,
+    RUN_CALIB_ECE,
+    RUN_CALIB_AECE,
+    RUN_CALIB_NLL,
+    RUN_DIAG_LOGIT_AVG_DRIFT,
+)
+
+# Latency metrics
+RUN_LATENCY_MS_PER_SAMPLE_BASE = f'{_RUN}{NS_SEP}latency{NS_SEP}ms_per_sample{NS_SEP}base'
+RUN_LATENCY_MS_PER_SAMPLE_CTRL = f'{_RUN}{NS_SEP}latency{NS_SEP}ms_per_sample{NS_SEP}ctrl'
+RUN_LATENCY_MS_RATIO = f'{_RUN}{NS_SEP}latency{NS_SEP}ms_ratio'
+RUN_LATENCY_SAMPLES_PER_SEC_BASE = f'{_RUN}{NS_SEP}latency{NS_SEP}samples_per_sec{NS_SEP}base'
+RUN_LATENCY_SAMPLES_PER_SEC_CTRL = f'{_RUN}{NS_SEP}latency{NS_SEP}samples_per_sec{NS_SEP}ctrl'
+
+# Repair resources
+RUN_REPAIR_SECONDS = f'{_RUN}{NS_SEP}repair{NS_SEP}seconds'
+RUN_REPAIR_STEPS = f'{_RUN}{NS_SEP}repair{NS_SEP}steps'
+
+# Misc per-run
+RUN_EPS = f'{_RUN}{NS_SEP}eps'
+
+##############################################
+# Cross-run metric keys (CSV / analysis)     #
+##############################################
+# All string values carry the ``analysis.`` prefix.
+
+_ANA = NAMESPACE_ANALYSIS  # shorthand
+
+ANALYSIS_ACC_FINAL_AVG_CTRL = f'{_ANA}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
+ANALYSIS_RHO_AVG = f'{_ANA}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'
 
 ################################################
-# Avalanche/debug metric and payload key names #
+# Debug metric fragments (internal)            #
 ################################################
+# Name fragments used to build run.debug.repair.* keys.
+# Only consumed by regain/debug/; kept here for central reference.
 
-METRIC_DIAG_CE = 'ce'
-METRIC_DIAG_ENTROPY = 'entropy'
-METRIC_DIAG_LOGIT_L2 = 'logit_l2'
-METRIC_DIAG_NUM_CLASSES = 'num_classes'
-METRIC_DIAG_N_SAMPLES = 'n_samples'
-METRIC_DIAG_PRED_ENTROPY = 'pred_entropy'
-METRIC_DIAG_PRED_HIST = 'pred_hist'
-METRIC_DIAG_PRED_MAX_FRAC = 'pred_max_frac'
-METRIC_DIAG_PRED_UNIQUE = 'pred_unique'
-METRIC_DIAG_TOP1 = 'top1'
-METRIC_EPS = 'eps'
+_DEBUG_CE = 'ce'
+_DEBUG_ENTROPY = 'entropy'
+_DEBUG_LOGIT_L2 = 'logit_l2'
+_DEBUG_NUM_CLASSES = 'num_classes'
+_DEBUG_N_SAMPLES = 'n_samples'
+_DEBUG_PRED_ENTROPY = 'pred_entropy'
+_DEBUG_PRED_HIST = 'pred_hist'
+_DEBUG_PRED_MAX_FRAC = 'pred_max_frac'
+_DEBUG_PRED_UNIQUE = 'pred_unique'
+_DEBUG_TOP1 = 'top1'
 
-METRIC_HEALTH = 'health'
-METRIC_HEALTH_DELTA = 'health_delta'
-METRIC_HEALTH_D_ACC = 'd_acc'
-METRIC_HEALTH_D_ENT = 'd_ent'
-METRIC_HEALTH_D_MAXFRAC = 'd_maxfrac'
-METRIC_HEALTH_D_PREDENT = 'd_predent'
-METRIC_HEALTH_D_UNIQUE = 'd_unique'
-METRIC_HEALTH_NEUTRAL = 'health_neutral'
-METRIC_HEALTH_R_CE = 'r_ce'
-METRIC_HEALTH_R_NORM = 'r_norm'
-METRIC_HEALTH_S1_PERF = 's1_perf'
-METRIC_HEALTH_S2_CONF = 's2_conf'
-METRIC_HEALTH_S3_DIV = 's3_div'
+_DEBUG_HEALTH = 'health'
+_DEBUG_HEALTH_DELTA = 'health_delta'
+_DEBUG_HEALTH_D_ACC = 'd_acc'
+_DEBUG_HEALTH_D_ENT = 'd_ent'
+_DEBUG_HEALTH_D_MAXFRAC = 'd_maxfrac'
+_DEBUG_HEALTH_D_PREDENT = 'd_predent'
+_DEBUG_HEALTH_D_UNIQUE = 'd_unique'
+_DEBUG_HEALTH_NEUTRAL = 'health_neutral'
+_DEBUG_HEALTH_R_CE = 'r_ce'
+_DEBUG_HEALTH_R_NORM = 'r_norm'
+_DEBUG_HEALTH_S1_PERF = 's1_perf'
+_DEBUG_HEALTH_S2_CONF = 's2_conf'
+_DEBUG_HEALTH_S3_DIV = 's3_div'
 
 ####################
 # MLFlow artifacts #

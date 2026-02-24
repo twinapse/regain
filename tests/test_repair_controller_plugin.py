@@ -94,6 +94,25 @@ class _ScriptedRepairController(RepairController):
         self.eval_exp_end_kwargs = dict(kwargs)
 
 
+class _ToyRepairDataset(Dataset):
+    def __init__(self, *, targets: list[int], original_indices: list[int]) -> None:
+        self.targets = list(targets)
+        self.original_indices = list(original_indices)
+
+    def __len__(self) -> int:
+        return len(self.targets)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        return torch.tensor([float(idx)]), int(self.targets[idx])
+
+    def subset(self, indices: list[int]) -> '_ToyRepairDataset':
+        local_indices = [int(index) for index in indices]
+        return _ToyRepairDataset(
+            targets=[int(self.targets[index]) for index in local_indices],
+            original_indices=[int(self.original_indices[index]) for index in local_indices],
+        )
+
+
 def _make_plugin(
     *,
     corrected_outputs: torch.Tensor | None,
@@ -105,6 +124,9 @@ def _make_plugin(
         fit_after_experience=False,
         repair_epochs=1,
         repair_batch_size=1,
+        budget_per_class=1,
+        max_repair_samples_per_class=1,
+        seed=1,
     )
     experience = types.SimpleNamespace(
         classes_in_this_experience=seen_classes,
@@ -118,6 +140,92 @@ def _make_plugin(
     )
     plugin.before_training_exp(strategy)
     return plugin
+
+
+#################################
+# Budget selection + guard rules #
+#################################
+
+
+class TestRepairControllerPluginBudgetSelection:
+    def test_raises_when_budget_per_class_is_zero(self) -> None:
+        with pytest.raises(ValueError, match='must be positive'):
+            RepairControllerPlugin(
+                controller=_ScriptedRepairController(),
+                fit_after_experience=False,
+                repair_epochs=1,
+                repair_batch_size=1,
+                budget_per_class=0,
+                max_repair_samples_per_class=4,
+                seed=1,
+            )
+
+    def test_raises_when_budget_exceeds_repair_set(self) -> None:
+        with pytest.raises(
+            ValueError,
+            match='cannot exceed.*maximum_budget_per_class=2',
+        ):
+            RepairControllerPlugin(
+                controller=_ScriptedRepairController(),
+                fit_after_experience=False,
+                repair_epochs=1,
+                repair_batch_size=1,
+                budget_per_class=3,
+                max_repair_samples_per_class=2,
+                seed=7,
+            )
+
+    def test_selects_deterministic_nested_per_class_subsets(self) -> None:
+        dataset = _ToyRepairDataset(
+            targets=[0, 0, 0, 0, 1, 1, 1, 1],
+            original_indices=[10, 11, 12, 13, 20, 21, 22, 23],
+        )
+
+        plugin_b1 = RepairControllerPlugin(
+            controller=_ScriptedRepairController(),
+            fit_after_experience=False,
+            repair_epochs=1,
+            repair_batch_size=1,
+            budget_per_class=1,
+            max_repair_samples_per_class=4,
+            seed=42,
+        )
+        plugin_b2 = RepairControllerPlugin(
+            controller=_ScriptedRepairController(),
+            fit_after_experience=False,
+            repair_epochs=1,
+            repair_batch_size=1,
+            budget_per_class=2,
+            max_repair_samples_per_class=4,
+            seed=42,
+        )
+        plugin_b2_repeat = RepairControllerPlugin(
+            controller=_ScriptedRepairController(),
+            fit_after_experience=False,
+            repair_epochs=1,
+            repair_batch_size=1,
+            budget_per_class=2,
+            max_repair_samples_per_class=4,
+            seed=42,
+        )
+
+        selected_b1 = plugin_b1._select_budget_per_class(repair_dataset=dataset, exp_idx=0)
+        selected_b2 = plugin_b2._select_budget_per_class(repair_dataset=dataset, exp_idx=0)
+        selected_b2_repeat = plugin_b2_repeat._select_budget_per_class(
+            repair_dataset=dataset,
+            exp_idx=0,
+        )
+
+        assert selected_b1 is not None
+        assert selected_b2 is not None
+        assert selected_b2_repeat is not None
+
+        assert selected_b1.targets.count(0) == 1
+        assert selected_b1.targets.count(1) == 1
+        assert selected_b2.targets.count(0) == 2
+        assert selected_b2.targets.count(1) == 2
+        assert set(selected_b1.original_indices).issubset(set(selected_b2.original_indices))
+        assert selected_b2.original_indices == selected_b2_repeat.original_indices
 
 
 ###########################
@@ -224,6 +332,9 @@ class TestRepairControllerPluginEvalHooks:
             fit_after_experience=False,
             repair_epochs=1,
             repair_batch_size=1,
+            budget_per_class=1,
+            max_repair_samples_per_class=1,
+            seed=1,
         )
         strategy = _DummyStrategy(
             model=_IdentityModel(),

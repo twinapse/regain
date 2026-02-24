@@ -128,8 +128,11 @@ def export_analysis_to_json(
     frontier_dir = experiment_dir / 'frontier'
     recoverability_path = curves_dir / 'recoverability_curve.csv'
     task_age_path = curves_dir / 'task_age_rho.csv'
+    calibration_budget_path = curves_dir / 'calibration_vs_budget.csv'
+    latency_budget_path = curves_dir / 'latency_vs_budget.csv'
     frontier_points_path = frontier_dir / 'frontier_points.csv'
     frontier_pareto_path = frontier_dir / 'frontier_pareto.csv'
+    predictive_corr_path = experiment_dir / 'predictive' / 'predictive_correlations.csv'
 
     missing_sections: list[str] = []
     resolved_tracking_uri = resolve_tracking_uri(tracking_uri=tracking_uri)
@@ -167,10 +170,24 @@ def export_analysis_to_json(
                 'curves.recoverability_curve',
             ),
             'task_age_rho': _read_section(task_age_path, 'curves.task_age_rho'),
+            'calibration_vs_budget': _read_section(
+                calibration_budget_path,
+                'curves.calibration_vs_budget',
+            ),
+            'latency_vs_budget': _read_section(
+                latency_budget_path,
+                'curves.latency_vs_budget',
+            ),
         },
         'frontier': {
             'points': _read_section(frontier_points_path, 'frontier.points'),
             'pareto': _read_section(frontier_pareto_path, 'frontier.pareto'),
+        },
+        'predictive': {
+            'correlations': _read_section(
+                predictive_corr_path,
+                'predictive.correlations',
+            ),
         },
         'notes': {
             'plots_embedded': False,

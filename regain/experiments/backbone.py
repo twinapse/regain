@@ -10,15 +10,17 @@ from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
 import yaml
 
+from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
+from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
 from regain.avalanche_utils.plugins import RegainEvaluationPlugin
+from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
-from regain.constants import METRIC_A_POST
-from regain.constants import METRIC_A_REF
-from regain.constants import METRIC_PREFIX_ANALYSIS
-from regain.constants import METRIC_PREFIX_SUMMARY
 from regain.constants import MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR
+from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NS_SEP
 from regain.constants import PARAM_BACKBONE
+from regain.constants import RUN_ACC_EXP
+from regain.constants import RUN_ACC_FINAL
 from regain.constants import RUN_NAME_BACKBONE
 from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import StrategyConfig
@@ -51,7 +53,7 @@ def load_backbone_from_source_experiment(
     source_experiment: str,
     checkpoint_dir: Path,
     expected_num_experiences: int,
-) -> tuple[list[Path], dict[str, float], dict[str, list[float]], Run]:
+) -> tuple[list[Path], dict[str, float], dict[str, list[float | None]], Run]:
     """
     Resolve and load backbone artifacts from `backbone.source_experiment`.
 
@@ -62,7 +64,7 @@ def load_backbone_from_source_experiment(
         expected_num_experiences (int): Expected number of experiences.
 
     Returns:
-        tuple[list[Path], dict[str, float], dict[str, list[float]], Run]:
+        tuple[list[Path], dict[str, float], dict[str, list[float | None]], Run]:
             (checkpoint paths, summary metrics, baseline vectors, source run).
     """
     try:
@@ -379,11 +381,47 @@ def extract_required_float_vector(
     return values
 
 
+def extract_required_nullable_float_vector(
+    *,
+    payload: Mapping[str, object],
+    key: str,
+    expected_len: int,
+) -> list[float | None]:
+    """
+    Extract a required float vector (allowing missing entries) from a mapping.
+
+    Args:
+        payload (Mapping[str, object]): Source mapping.
+        key (str): Key to extract.
+        expected_len (int): Expected vector length.
+
+    Returns:
+        list[float | None]: Extracted vector.
+    """
+    raw_values = payload.get(key)
+    if not isinstance(raw_values, list):
+        raise RuntimeError(
+            f'Missing or invalid `{key}` vector in backbone analysis artifacts.'
+        )
+    values: list[float | None] = []
+    for value in raw_values:
+        if value is None:
+            values.append(None)
+            continue
+        values.append(float(value))
+    if len(values) != int(expected_len):
+        raise RuntimeError(
+            f'Backbone `{key}` length mismatch. '
+            f'expected={int(expected_len)}, observed={len(values)}'
+        )
+    return values
+
+
 def extract_backbone_analysis_baseline(
     *,
     strategy: BaseTemplate,
     expected_num_experiences: int,
-) -> dict[str, list[float]]:
+) -> dict[str, list[float | None]]:
     """
     Extract controller-off baseline vectors from the strategy evaluation plugin.
 
@@ -392,7 +430,7 @@ def extract_backbone_analysis_baseline(
         expected_num_experiences (int): Expected number of experiences.
 
     Returns:
-        dict[str, list[float]]: Baseline vectors keyed by `a_ref` and `a_post`.
+        dict[str, list[float | None]]: Baseline vectors keyed by artifact keys and diagnostic vectors.
     """
     plugins = getattr(strategy, 'plugins', [])
     evaluation_plugin = next(
@@ -409,18 +447,26 @@ def extract_backbone_analysis_baseline(
         raise RuntimeError('Backbone analysis artifacts are unavailable.')
 
     artifacts = evaluation_plugin.artifacts
-    return {
-        METRIC_A_REF: extract_required_float_vector(
+    baseline: dict[str, list[float | None]] = {
+        ARTIFACT_ACC_EXP_BASE: extract_required_float_vector(
             payload=artifacts,
-            key=METRIC_A_REF,
+            key=ARTIFACT_ACC_EXP_BASE,
             expected_len=expected_num_experiences,
         ),
-        METRIC_A_POST: extract_required_float_vector(
+        ARTIFACT_ACC_FINAL_BASE: extract_required_float_vector(
             payload=artifacts,
-            key=METRIC_A_POST,
+            key=ARTIFACT_ACC_FINAL_BASE,
             expected_len=expected_num_experiences,
         ),
     }
+    for diag_key in DIAG_VECTOR_KEYS:
+        vector = extract_required_nullable_float_vector(
+            payload=artifacts,
+            key=diag_key,
+            expected_len=expected_num_experiences,
+        )
+        baseline[diag_key] = vector
+    return baseline
 
 
 def find_backbone_runs(
@@ -496,7 +542,7 @@ def load_backbone_from_existing_run(
     checkpoint_dir: Path,
     expected_num_experiences: int,
     include_checkpoints_and_baseline: bool,
-) -> tuple[list[Path] | None, dict[str, float], dict[str, list[float]] | None]:
+) -> tuple[list[Path] | None, dict[str, float], dict[str, list[float | None]] | None]:
     """
     Load backbone outputs from an existing local `backbone` run.
 
@@ -508,7 +554,7 @@ def load_backbone_from_existing_run(
         include_checkpoints_and_baseline (bool): Whether to load checkpoints and analysis baseline vectors.
 
     Returns:
-        tuple[list[Path] | None, dict[str, float], dict[str, list[float]] | None]:
+        tuple[list[Path] | None, dict[str, float], dict[str, list[float | None]] | None]:
             (checkpoint paths, scalar evaluation metrics, backbone analysis baseline vectors).
     """
     eval_results = extract_summary_metrics_from_run(run=backbone_run)
@@ -626,7 +672,7 @@ def extract_backbone_analysis_baseline_from_metrics(
     expected_num_experiences: int,
 ) -> dict[str, list[float]] | None:
     """
-    Extract `a_ref`/`a_post` baseline vectors from run metrics.
+    Extract baseline vectors from run metrics.
 
     Args:
         metrics (Mapping[str, float]): Run metrics mapping.
@@ -636,12 +682,17 @@ def extract_backbone_analysis_baseline_from_metrics(
         dict[str, list[float]] | None: Baseline vectors when complete.
     """
     baseline: dict[str, list[float]] = {}
-    for key in (METRIC_A_REF, METRIC_A_POST):
+    key_to_prefix = {
+        ARTIFACT_ACC_EXP_BASE: RUN_ACC_EXP,
+        ARTIFACT_ACC_FINAL_BASE: RUN_ACC_FINAL,
+    }
+    for key, metric_prefix in key_to_prefix.items():
         values: list[float] = []
         for exp_idx in range(int(expected_num_experiences)):
             metric_key = (
-                f'{METRIC_PREFIX_ANALYSIS}{key}'
+                f'{metric_prefix}'
                 f'{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}'
+                f'{NS_SEP}base'
             )
             raw_value = metrics.get(metric_key)
             if raw_value is None:
@@ -656,9 +707,9 @@ def load_backbone_analysis_baseline_from_run(
     client: MlflowClient,
     run: Run,
     expected_num_experiences: int,
-) -> dict[str, list[float]]:
+) -> dict[str, list[float | None]]:
     """
-    Load backbone baseline vectors from metrics or analysis artifact.
+    Load backbone baseline vectors from analysis artifact.
 
     Args:
         client (MlflowClient): MLflow client.
@@ -666,16 +717,8 @@ def load_backbone_analysis_baseline_from_run(
         expected_num_experiences (int): Expected number of experiences.
 
     Returns:
-        dict[str, list[float]]: Baseline vectors keyed by `a_ref` and `a_post`.
+        dict[str, list[float | None]]: Baseline vectors keyed by artifact keys and diagnostic vectors.
     """
-    metrics_payload = dict(run.data.metrics or {})
-    metrics_baseline = extract_backbone_analysis_baseline_from_metrics(
-        metrics=metrics_payload,
-        expected_num_experiences=expected_num_experiences,
-    )
-    if metrics_baseline is not None:
-        return metrics_baseline
-
     run_id = str(run.info.run_id)
     artifacts_payload = download_json_artifact(
         client=client,
@@ -684,21 +727,30 @@ def load_backbone_analysis_baseline_from_run(
     )
     if not isinstance(artifacts_payload, Mapping):
         raise RuntimeError(
-            f'Backbone run `{run_id}` is missing `a_ref`/`a_post` baseline '
-            'metrics and `analysis_artifacts.json`.'
+            f'Backbone run `{run_id}` is missing required `analysis_artifacts.json`.'
         )
-    return {
-        METRIC_A_REF: extract_required_float_vector(
+
+    baseline: dict[str, list[float | None]] = {
+        ARTIFACT_ACC_EXP_BASE: extract_required_float_vector(
             payload=artifacts_payload,
-            key=METRIC_A_REF,
+            key=ARTIFACT_ACC_EXP_BASE,
             expected_len=expected_num_experiences,
         ),
-        METRIC_A_POST: extract_required_float_vector(
+        ARTIFACT_ACC_FINAL_BASE: extract_required_float_vector(
             payload=artifacts_payload,
-            key=METRIC_A_POST,
+            key=ARTIFACT_ACC_FINAL_BASE,
             expected_len=expected_num_experiences,
         ),
     }
+    for diag_key in DIAG_VECTOR_KEYS:
+        vector = extract_required_nullable_float_vector(
+            payload=artifacts_payload,
+            key=diag_key,
+            expected_len=expected_num_experiences,
+        )
+        baseline[diag_key] = vector
+
+    return baseline
 
 
 def extract_summary_metrics_from_run(*, run: Run) -> dict[str, float]:
@@ -712,7 +764,7 @@ def extract_summary_metrics_from_run(*, run: Run) -> dict[str, float]:
         dict[str, float]: Summary metrics without the summary namespace prefix.
     """
     metrics_payload = dict(run.data.metrics or {})
-    prefix = METRIC_PREFIX_SUMMARY
+    prefix = f'{NAMESPACE_SUMMARY}{NS_SEP}'
     summary_metrics: dict[str, float] = {}
     for key, value in metrics_payload.items():
         key_str = str(key)

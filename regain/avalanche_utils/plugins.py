@@ -2,7 +2,10 @@
 Avalanche plugins.
 """
 from dataclasses import dataclass
+import hashlib
+import math
 from pathlib import Path
+import time
 from typing import Mapping, Sequence
 
 from avalanche.benchmarks.scenarios import NCScenario
@@ -16,6 +19,7 @@ from avalanche.logging import InteractiveLogger
 from avalanche.training.plugins import EvaluationPlugin
 from avalanche.training.templates import BaseTemplate
 import mlflow
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import ConcatDataset
@@ -26,22 +30,44 @@ from regain.analysis import build_analysis_artifacts
 from regain.analysis import extract_top1_by_experience
 from regain.analysis import MetricContext
 from regain.analysis import ordered_accuracies
+from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
+from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
+from regain.analysis.artifacts import ARTIFACT_RHO
+from regain.analysis.artifacts import ARTIFACT_RHO_AVG
 from regain.analysis.metrics import MetricPhase
 from regain.avalanche_utils.logging import MLflowLogger
-from regain.avalanche_utils.scenarios import get_num_classes_from_experience
 from regain.constants import COLUMN_STATUS
+from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
-from regain.constants import METRIC_A_CTRL
-from regain.constants import METRIC_A_POST
-from regain.constants import METRIC_A_REF
-from regain.constants import METRIC_EPS
-from regain.constants import METRIC_PREFIX_ANALYSIS
-from regain.constants import METRIC_PREFIX_SUMMARY
-from regain.constants import METRIC_RHO
-from regain.constants import METRIC_RHO_MEAN
 from regain.constants import NAMESPACE_EVAL
+from regain.constants import NAMESPACE_RUN
+from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NAMESPACE_TRAIN
 from regain.constants import NS_SEP
+from regain.constants import RUN_ACC_EXP
+from regain.constants import RUN_ACC_FINAL
+from regain.constants import RUN_ACC_FINAL_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_AVG_CTRL
+from regain.constants import RUN_CALIB_AECE
+from regain.constants import RUN_CALIB_BRIER
+from regain.constants import RUN_CALIB_ECE
+from regain.constants import RUN_CALIB_MAX_ECE
+from regain.constants import RUN_CALIB_MCE
+from regain.constants import RUN_CALIB_NLL
+from regain.constants import RUN_DIAG_AVG_CONF
+from regain.constants import RUN_DIAG_AVG_ENTROPY
+from regain.constants import RUN_DIAG_LOGIT_AVG_DRIFT
+from regain.constants import RUN_DIAG_OUT_OF_TASK_RATE
+from regain.constants import RUN_EPS
+from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_BASE
+from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_CTRL
+from regain.constants import RUN_LATENCY_MS_RATIO
+from regain.constants import RUN_LATENCY_SAMPLES_PER_SEC_BASE
+from regain.constants import RUN_LATENCY_SAMPLES_PER_SEC_CTRL
+from regain.constants import RUN_REPAIR_SECONDS
+from regain.constants import RUN_REPAIR_STEPS
+from regain.constants import RUN_RHO
+from regain.constants import RUN_RHO_AVG
 from regain.constants import STREAM_REPAIR
 from regain.experiments.utils import extract_scalar_metrics
 from regain.models.controllers import BackboneControllerInterface
@@ -56,6 +82,7 @@ from regain.utils import RegainDataset
 __all__ = [
     'BackboneCheckpointLoaderPlugin',
     'BackboneCheckpointWriterPlugin',
+    'CalibrationDiagnosticsPlugin',
     'ControllerPlugin',
     'EvaluationIntegrityPlugin',
     'LRSchedulerPlugin',
@@ -67,12 +94,12 @@ __all__ = [
     'make_evaluation_plugin',
 ]
 
-_METRIC_FINAL_A_CTRL_MEAN = 'final_a_ctrl_mean'
-_METRIC_FINAL_A_POST_MEAN = 'final_a_post_mean'
-_METRIC_FINAL_RHO_MEAN = 'final_rho_mean'
-_METRIC_INCOMPLETE_A_REF = 'incomplete_a_ref'
-_NAMESPACE_ANALYSIS = 'analysis'
-_NAMESPACE_FINAL = 'final'
+_STATUS_INCOMPLETE_ACC_EXP_BASE = 'incomplete_acc_exp_base'
+_NAMESPACE_FINAL = f'{NAMESPACE_RUN}{NS_SEP}final'
+_SUMMARY_ACC_EXP_AVG_BASE = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}exp{NS_SEP}avg{NS_SEP}base'
+_SUMMARY_ACC_FINAL_AVG_BASE = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
+_SUMMARY_ACC_FINAL_AVG_CTRL = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
+_SUMMARY_RHO_AVG = f'{NAMESPACE_SUMMARY}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'
 
 
 class MetricContextPlugin(SupervisedPlugin):
@@ -85,10 +112,8 @@ class MetricContextPlugin(SupervisedPlugin):
         self.context = context
 
     @staticmethod
-    def _exp_idx(strategy: BaseTemplate, fallback: int = 0) -> int:
-        exp = getattr(strategy, 'experience', None)
-        idx = getattr(exp, 'current_experience', None)
-        return int(idx) if isinstance(idx, int) else int(fallback)
+    def _exp_idx(strategy: BaseTemplate) -> int:
+        return int(strategy.experience.current_experience)
 
     def before_training(self, strategy, **kwargs) -> None:
         self.context.set_phase(MetricPhase.TRAIN)
@@ -434,6 +459,9 @@ class RepairControllerPlugin(SupervisedPlugin):
         fit_after_experience: bool,
         repair_epochs: int,
         repair_batch_size: int,
+        budget_per_class: int = 0,
+        max_repair_samples_per_class: int = 0,
+        seed: int = 1,
     ) -> None:
         """
         Initialize the plugin with a repair controller.
@@ -443,9 +471,13 @@ class RepairControllerPlugin(SupervisedPlugin):
             fit_after_experience (bool): Whether to fit on repair data after each experience.
             repair_epochs (int): Number of epochs to use for repair fitting.
             repair_batch_size (int): Batch size to use for repair fitting.
+            budget_per_class (int): Repair budget `b` (per class) consumed from each fixed repair set.
+            max_repair_samples_per_class (int): Upper bound on per-class repair samples available in the scenario.
+            seed (int): Global seed used for deterministic budget sub-selection.
 
         Raises:
             TypeError: If the controller is not a RepairController.
+            ValueError: If budget/set values are invalid.
 
         Returns:
             None.
@@ -459,12 +491,32 @@ class RepairControllerPlugin(SupervisedPlugin):
             raise ValueError(f'{type(controller).__name__} requires per-experience fitting')
 
         self.controller: RepairController = controller
-        self.repair_epochs = repair_epochs
-        self.repair_batch_size = repair_batch_size
-        self.fit_after_experience = fit_after_experience
+        self.repair_epochs = int(repair_epochs)
+        self.repair_batch_size = int(repair_batch_size)
+        self.fit_after_experience = bool(fit_after_experience)
+        self.budget_per_class = int(budget_per_class)
+        self.max_repair_samples_per_class = int(max_repair_samples_per_class)
+        self.seed = int(seed)
+        if self.repair_batch_size <= 0:
+            raise ValueError('`repair_batch_size` must be positive.')
+        if self.repair_epochs < 0:
+            raise ValueError('`repair_epochs` must be non-negative.')
+        if self.budget_per_class <= 0:
+            raise ValueError('`budget_per_class` must be positive.')
+        if self.max_repair_samples_per_class < 0:
+            raise ValueError('`max_repair_samples_per_class` must be non-negative.')
+        if self.budget_per_class > self.max_repair_samples_per_class:
+            maximum_budget_per_class = int(self.max_repair_samples_per_class)
+            raise ValueError(
+                '`repair.budget_per_class` cannot exceed the maximum per-class repair budget: '
+                f'budget_per_class={self.budget_per_class}, '
+                f'maximum_budget_per_class={maximum_budget_per_class}.'
+            )
         self._repair_datasets: list[Dataset] = []
         self._seen_classes: set[int] = set()
         self._train_seen_classes: set[int] = set()
+        self._repair_seconds_total: float = 0.0
+        self._repair_steps_total: int = 0
 
     def initialize_parameters(self, *, model: nn.Module, dataset: Dataset | None) -> None:
         """
@@ -484,6 +536,234 @@ class RepairControllerPlugin(SupervisedPlugin):
             probe_inputs = None
         self.controller.initialize_parameters(model=model, sample_inputs=probe_inputs)
 
+    @staticmethod
+    def _sample_score(
+        *,
+        seed: int,
+        exp_idx: int,
+        class_id: int,
+        sample_id: int,
+    ) -> int:
+        """
+        Compute a deterministic score for a candidate repair sample.
+
+        Args:
+            seed (int): Global seed.
+            exp_idx (int): Experience index.
+            class_id (int): Class identifier.
+            sample_id (int): Stable sample identifier (preferably original index).
+
+        Returns:
+            int: Deterministic sortable score (lower is selected first).
+        """
+        payload = f'{int(seed)}:{int(exp_idx)}:{int(class_id)}:{int(sample_id)}'.encode('ascii')
+        digest = hashlib.blake2b(payload, digest_size=8).digest()
+        return int.from_bytes(digest, byteorder='big', signed=False)
+
+    @staticmethod
+    def _extract_original_indices(dataset: Dataset) -> list[int]:
+        """
+        Extract stable sample identifiers from the repair dataset.
+
+        Args:
+            dataset (Dataset): Dataset with `original_indices` attribute.
+
+        Returns:
+            list[int]: Original indices aligned with dataset rows.
+
+        Raises:
+            AttributeError: If the dataset lacks `original_indices`.
+            ValueError: If the length does not match the dataset.
+        """
+        original_indices = dataset.original_indices
+        values = [int(value) for value in list(original_indices)]
+        if len(values) != len(dataset):
+            raise ValueError(
+                f'original_indices length ({len(values)}) does not match '
+                f'dataset length ({len(dataset)}).'
+            )
+        return values
+
+    def _select_budget_per_class(
+        self,
+        *,
+        repair_dataset: Dataset,
+        exp_idx: int,
+    ) -> Dataset | None:
+        """
+        Select exactly `budget_per_class` samples per class from a fixed repair set.
+
+        Args:
+            repair_dataset (Dataset): Fixed repair set for one experience.
+            exp_idx (int): Experience index.
+
+        Returns:
+            Dataset | None: Deterministically selected per-class budget subset, or None when budget is zero.
+
+        Raises:
+            TypeError: If the repair dataset does not support subsetting.
+            ValueError: If a class has fewer than `budget_per_class` samples.
+        """
+        if self.budget_per_class <= 0:
+            return None
+        if not hasattr(repair_dataset, 'subset'):
+            raise TypeError('Repair dataset must expose a `subset` method.')
+
+        targets = extract_targets(repair_dataset)
+        if not targets:
+            return None
+        targets_arr = np.asarray(targets, dtype=np.int64)
+        original_indices = self._extract_original_indices(repair_dataset)
+
+        selected_indices: list[int] = []
+        for class_id in sorted(int(cls) for cls in np.unique(targets_arr)):
+            class_local_indices = np.where(targets_arr == class_id)[0].tolist()
+            n_class = int(len(class_local_indices))
+            if self.budget_per_class > n_class:
+                raise ValueError(
+                    'Repair budget exceeds fixed set for class. '
+                    f'exp_idx={exp_idx}, class_id={class_id}, '
+                    f'set_size={n_class}, budget={self.budget_per_class}.'
+                )
+
+            class_local_indices = sorted(
+                class_local_indices,
+                key=lambda local_idx: self._sample_score(
+                    seed=self.seed,
+                    exp_idx=exp_idx,
+                    class_id=class_id,
+                    sample_id=int(original_indices[local_idx]),
+                ),
+            )
+            selected_indices.extend(class_local_indices[:self.budget_per_class])
+
+        selected_indices = sorted(int(idx) for idx in selected_indices)
+        return repair_dataset.subset(selected_indices)
+
+    @staticmethod
+    def _repair_metric_step(exp_idx: int | None) -> int:
+        """
+        Build a stable step index for repair-resource metric logging.
+
+        Args:
+            exp_idx (int | None): Experience index being fitted, or None for final-only fitting.
+
+        Returns:
+            int: Metric step.
+        """
+        if exp_idx is None:
+            return 0
+        return int(exp_idx) + 1
+
+    def _log_repair_resource_metrics(
+        self,
+        *,
+        exp_idx: int | None,
+        elapsed_seconds: float,
+        repair_steps: int,
+    ) -> None:
+        """
+        Log per-fit and cumulative repair resource metrics.
+
+        Args:
+            exp_idx (int | None): Experience index, or None for final-only fitting.
+            elapsed_seconds (float): Wall-clock duration for this fit call in seconds.
+            repair_steps (int): Optimization step count for this fit call,
+                typically `epochs * ceil(n_repair / batch_size)`.
+        """
+        if mlflow.active_run() is None:
+            return
+
+        step = self._repair_metric_step(exp_idx)
+        mlflow.log_metric(
+            key=RUN_REPAIR_SECONDS,
+            value=float(self._repair_seconds_total),
+            step=step,
+        )
+        mlflow.log_metric(
+            key=RUN_REPAIR_STEPS,
+            value=float(self._repair_steps_total),
+            step=step,
+        )
+
+        suffix = (
+            f'{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}'
+            if exp_idx is not None
+            else f'{NS_SEP}final'
+        )
+        mlflow.log_metric(
+            key=f'{RUN_REPAIR_SECONDS}{suffix}',
+            value=float(elapsed_seconds),
+            step=step,
+        )
+        mlflow.log_metric(
+            key=f'{RUN_REPAIR_STEPS}{suffix}',
+            value=float(repair_steps),
+            step=step,
+        )
+
+    def _fit_controller_on_repair_dataset(
+        self,
+        *,
+        model: nn.Module,
+        repair_dataset: Dataset,
+        new_classes: list[int],
+        exp_idx: int | None,
+    ) -> None:
+        """
+        Fit the controller and record repair-time resource metrics.
+
+        Args:
+            model (nn.Module): Backbone model.
+            repair_dataset (Dataset): Dataset to fit on.
+            new_classes (list[int]): Newly observed classes.
+            exp_idx (int | None): Experience index, or None for final-only fitting.
+
+        Notes:
+            `repair_steps` is estimated as
+            `repair_epochs * ceil(len(repair_dataset) / repair_batch_size)`.
+        """
+        n_samples = int(len(repair_dataset))
+        repair_steps = int(self.repair_epochs * math.ceil(float(n_samples) / float(self.repair_batch_size)))
+        started_at = time.perf_counter()
+        self.controller.fit_on_repair_data(
+            model=model,
+            repair_dataset=repair_dataset,
+            new_classes=new_classes,
+            num_epochs=self.repair_epochs,
+            batch_size=self.repair_batch_size,
+        )
+        elapsed_seconds = float(time.perf_counter() - started_at)
+        self._repair_seconds_total += elapsed_seconds
+        self._repair_steps_total += repair_steps
+        self._log_repair_resource_metrics(
+            exp_idx=exp_idx,
+            elapsed_seconds=elapsed_seconds,
+            repair_steps=repair_steps,
+        )
+
+    def _ingest_repair_dataset(self, *, experience: object) -> Dataset | None:
+        """
+        Resolve and store the budget-filtered repair dataset for one experience.
+
+        Args:
+            experience (object): Avalanche experience.
+
+        Returns:
+            Dataset | None: Fixed repair set dataset for this experience.
+        """
+        repair_set_dataset = self._resolve_repair_dataset(experience)
+        if repair_set_dataset is None:
+            return None
+        exp_idx = int(experience.current_experience)
+        repair_used_dataset = self._select_budget_per_class(
+            repair_dataset=repair_set_dataset,
+            exp_idx=exp_idx,
+        )
+        if repair_used_dataset is not None:
+            self._repair_datasets.append(repair_used_dataset)
+        return repair_set_dataset
+
     def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
         # Track classes seen in the training stream for downstream anti-cheat checks.
         del kwargs
@@ -494,18 +774,20 @@ class RepairControllerPlugin(SupervisedPlugin):
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
         # Resolve training outputs for this experience.
+        del kwargs
         experience = strategy.experience
+        if experience is None:
+            return
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
+        exp_idx = int(experience.current_experience)
 
-        # Aggregate repair data exposed by the benchmark.
-        repair_ds = self._resolve_repair_dataset(experience)
-        if repair_ds is not None:
-            self._repair_datasets.append(repair_ds)
+        # Aggregate budget-filtered repair data exposed by the benchmark.
+        repair_set_ds = self._ingest_repair_dataset(experience=experience)
 
         # Track classes introduced at this experience boundary.
-        new_classes = self._resolve_new_classes(experience, repair_ds)
+        new_classes = self._resolve_new_classes(experience, repair_set_ds)
         self._seen_classes.update(new_classes)
 
         # Notify controller lifecycle hook.
@@ -516,16 +798,16 @@ class RepairControllerPlugin(SupervisedPlugin):
             combined_dataset = self._combined_repair_dataset()
             if combined_dataset is None:
                 return
-            self.controller.fit_on_repair_data(
+            self._fit_controller_on_repair_dataset(
                 model=model,
                 repair_dataset=combined_dataset,
                 new_classes=new_classes,
-                num_epochs=self.repair_epochs,
-                batch_size=self.repair_batch_size,
+                exp_idx=exp_idx,
             )
 
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
         # Resolve final model instance and close the training lifecycle.
+        del kwargs
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
@@ -538,12 +820,11 @@ class RepairControllerPlugin(SupervisedPlugin):
             combined_dataset = self._combined_repair_dataset()
             if combined_dataset is None:
                 return
-            self.controller.fit_on_repair_data(
+            self._fit_controller_on_repair_dataset(
                 model=model,
                 repair_dataset=combined_dataset,
                 new_classes=sorted(self._seen_classes),
-                num_epochs=self.repair_epochs,
-                batch_size=self.repair_batch_size,
+                exp_idx=None,
             )
 
     def before_eval(self, strategy: BaseTemplate, **kwargs) -> None:
@@ -566,28 +847,33 @@ class RepairControllerPlugin(SupervisedPlugin):
         # Anti-cheat: don't expose per-experience metadata to controllers.
         self.controller.on_eval_experience_end()
 
-    def after_eval_forward(self, strategy: BaseTemplate, **kwargs) -> None:
-        # Apply controller output correction while enforcing anti-cheat invariants.
-        model = strategy.model
-        if not isinstance(model, nn.Module):
-            raise TypeError('Strategy.model must be an nn.Module.')
+    def apply_repair_correction(
+        self,
+        *,
+        model: nn.Module,
+        inputs: object,
+        backbone_outputs: object,
+    ) -> object:
+        """
+        Apply controller correction while enforcing anti-cheat invariants.
 
-        # Run controller correction starting from backbone logits.
-        inputs = strategy.mb_x
-        backbone_outputs = strategy.mb_output
+        Args:
+            model (nn.Module): Backbone model.
+            inputs (object): Batch inputs.
+            backbone_outputs (object): Backbone outputs.
+
+        Returns:
+            object: Corrected outputs.
+        """
         corrected_outputs = self.controller.correct_outputs(
             outputs=backbone_outputs,
             model=model,
             inputs=inputs,
         )
-
-        # For non-logit or non-tensor outputs, forward controller output unchanged.
         if not (torch.is_tensor(backbone_outputs) and torch.is_tensor(corrected_outputs)):
-            strategy.mb_output = corrected_outputs
-            return
+            return corrected_outputs
         if backbone_outputs.ndim != 2 or corrected_outputs.ndim != 2:
-            strategy.mb_output = corrected_outputs
-            return
+            return corrected_outputs
 
         # Normalize device/dtype and validate batch compatibility.
         if int(corrected_outputs.shape[0]) != int(backbone_outputs.shape[0]):
@@ -631,8 +917,19 @@ class RepairControllerPlugin(SupervisedPlugin):
         )
         if seen_class_ids:
             merged_outputs[:, seen_class_ids] = corrected_outputs[:, seen_class_ids]
+        return merged_outputs
 
-        strategy.mb_output = merged_outputs
+    def after_eval_forward(self, strategy: BaseTemplate, **kwargs) -> None:
+        # Apply controller output correction while enforcing anti-cheat invariants.
+        del kwargs
+        model = strategy.model
+        if not isinstance(model, nn.Module):
+            raise TypeError('Strategy.model must be an nn.Module.')
+        strategy.mb_output = self.apply_repair_correction(
+            model=model,
+            inputs=strategy.mb_x,
+            backbone_outputs=strategy.mb_output,
+        )
 
     @staticmethod
     def _resolve_repair_dataset(experience: object) -> Dataset | None:
@@ -677,14 +974,8 @@ class RepairControllerPlugin(SupervisedPlugin):
         Returns:
             list[int]: Sorted class IDs introduced in the current experience.
         """
-        classes = getattr(experience, 'classes_in_this_experience', None)
-        if classes is not None:
-            try:
-                return sorted({int(c) for c in classes})
-            except Exception:
-                pass
-        targets = extract_targets(repair_dataset)
-        return sorted({int(t) for t in targets})
+        classes = experience.classes_in_this_experience
+        return sorted({int(c) for c in classes})
 
     @staticmethod
     def _resolve_training_classes(experience: object) -> list[int]:
@@ -697,21 +988,8 @@ class RepairControllerPlugin(SupervisedPlugin):
         Returns:
             list[int]: Sorted class IDs in the training experience.
         """
-        classes = getattr(experience, 'classes_in_this_experience', None)
-        if classes is not None:
-            try:
-                return sorted({int(c) for c in classes})
-            except Exception:
-                pass
-
-        dataset = None
-        if hasattr(experience, 'dataset'):
-            dataset = experience.dataset
-        elif hasattr(experience, '_dataset'):
-            dataset = experience._dataset
-
-        targets = extract_targets(dataset)
-        return sorted({int(t) for t in targets})
+        classes = experience.classes_in_this_experience
+        return sorted({int(c) for c in classes})
 
     def _combined_repair_dataset(self) -> Dataset | None:
         """
@@ -1236,6 +1514,422 @@ class SeenClassesMaskPlugin(SupervisedPlugin):
         strategy.mb_output = outputs
 
 
+class CalibrationDiagnosticsPlugin(SupervisedPlugin):
+    """
+    Collect per-task calibration and diagnostic metrics from evaluation minibatches.
+
+    Calibration metrics:
+        `calibration.nll`, `calibration.brier`, `calibration.ece`,
+        `calibration.aece`, `calibration.mce`, and pass-level
+        `calibration.max_ece`.
+
+    Diagnostic metrics:
+        `run.diagnostics.out_of_task_rate`, `run.diagnostics.avg_conf`,
+        `run.diagnostics.avg_entropy`, and
+        `run.diagnostics.logit_avg_drift` (L2 norm between exp and final-base
+        task-level mean logit vectors).
+    """
+
+    def __init__(self, *, num_bins: int = 15) -> None:
+        """
+        Initialize the plugin.
+
+        Args:
+            num_bins (int): Number of bins used for ECE/AECE/MCE.
+        """
+        super().__init__()
+        self.num_bins = int(num_bins)
+        if self.num_bins <= 0:
+            raise ValueError('`num_bins` must be positive.')
+
+        self._eval_tag: str = ''
+        self._current_eval_metrics: dict[int, dict[str, object]] = {}
+        self._current_exp_stats: dict[str, object] | None = None
+        self._current_exp_idx: int | None = None
+
+        self._latest_eval_metrics: dict[int, dict[str, object]] = {}
+        self._ref_logit_means: dict[int, np.ndarray] = {}
+        self._base_logit_means: dict[int, np.ndarray] = {}
+        self._base_diagnostics: dict[int, dict[str, float]] = {}
+
+    @staticmethod
+    def _resolve_log_step(*, strategy: BaseTemplate) -> int:
+        context = strategy._regain_metric_context
+        return int(context.log_step)
+
+    @staticmethod
+    def _log_metric(*, key: str, value: float, step: int) -> None:
+        if mlflow.active_run() is None:
+            return
+        mlflow.log_metric(key=key, value=float(value), step=int(step))
+
+    @staticmethod
+    def _exp_metric_key(*, base_key: str, exp_idx: int) -> str:
+        return f'{base_key}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}'
+
+    @staticmethod
+    def _ece_and_mce(
+        *,
+        confidences: np.ndarray,
+        correctness: np.ndarray,
+        num_bins: int,
+    ) -> tuple[float, float]:
+        """
+        Compute fixed-width expected and maximum calibration errors.
+
+        ECE is computed over equal-width confidence bins in `[0, 1]` as
+        `sum_b (|B_b|/n) * |acc(B_b) - conf(B_b)|`. MCE is
+        `max_b |acc(B_b) - conf(B_b)|`.
+
+        Args:
+            confidences (np.ndarray): Max predicted probabilities.
+            correctness (np.ndarray): Binary correctness indicators.
+            num_bins (int): Number of equal-width bins.
+
+        Returns:
+            tuple[float, float]: `(ece, mce)`.
+        """
+        if confidences.size == 0:
+            return 0.0, 0.0
+
+        ece = 0.0
+        mce = 0.0
+        n = float(confidences.size)
+        for bin_idx in range(int(num_bins)):
+            lower = float(bin_idx) / float(num_bins)
+            upper = float(bin_idx + 1) / float(num_bins)
+            if bin_idx == 0:
+                mask = (confidences >= lower) & (confidences <= upper)
+            else:
+                mask = (confidences > lower) & (confidences <= upper)
+            if not np.any(mask):
+                continue
+            bin_acc = float(np.mean(correctness[mask]))
+            bin_conf = float(np.mean(confidences[mask]))
+            gap = abs(bin_acc - bin_conf)
+            ece += (float(np.sum(mask)) / n) * gap
+            mce = max(mce, gap)
+        return float(ece), float(mce)
+
+    @staticmethod
+    def _adaptive_ece(
+        *,
+        confidences: np.ndarray,
+        correctness: np.ndarray,
+        num_bins: int,
+    ) -> float:
+        """
+        Compute adaptive ECE using approximately equal-count bins.
+
+        Args:
+            confidences (np.ndarray): Max predicted probabilities.
+            correctness (np.ndarray): Binary correctness indicators.
+            num_bins (int): Number of equal-count bins.
+
+        Returns:
+            float: Adaptive expected calibration error.
+        """
+        if confidences.size == 0:
+            return 0.0
+        order = np.argsort(confidences)
+        bins = np.array_split(order, int(num_bins))
+        n = float(confidences.size)
+        aece = 0.0
+        for idxs in bins:
+            if idxs.size == 0:
+                continue
+            bin_acc = float(np.mean(correctness[idxs]))
+            bin_conf = float(np.mean(confidences[idxs]))
+            aece += (float(idxs.size) / n) * abs(bin_acc - bin_conf)
+        return float(aece)
+
+    @staticmethod
+    def _empty_exp_stats(*, class_ids: set[int]) -> dict[str, object]:
+        return {
+            'class_ids': set(class_ids),
+            'n': 0,
+            'nll_sum': 0.0,
+            'brier_sum': 0.0,
+            'conf_sum': 0.0,
+            'entropy_sum': 0.0,
+            'in_task_sum': 0.0,
+            'conf_chunks': [],
+            'corr_chunks': [],
+            'logit_sum': None,
+        }
+
+    def before_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        self._eval_tag = str(getattr(strategy, '_regain_eval_tag', '') or '')
+        self._current_eval_metrics = {}
+        self._current_exp_stats = None
+        self._current_exp_idx = None
+
+    def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        experience = strategy.experience
+        exp_idx = int(experience.current_experience)
+        class_ids = {int(class_id) for class_id in experience.classes_in_this_experience}
+        self._current_exp_idx = exp_idx
+        self._current_exp_stats = self._empty_exp_stats(class_ids=class_ids)
+
+    def after_eval_iteration(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        if self._current_exp_stats is None:
+            return
+
+        logits = strategy.mb_output
+        targets = strategy.mb_y
+        if not torch.is_tensor(logits) or logits.ndim != 2:
+            return
+        if not torch.is_tensor(targets):
+            return
+
+        targets_vec = targets.reshape(-1).to(device=logits.device, dtype=torch.long)
+        if int(targets_vec.shape[0]) != int(logits.shape[0]):
+            return
+        if targets_vec.numel() == 0:
+            return
+
+        with torch.no_grad():
+            probs = torch.softmax(logits, dim=1)
+            conf, preds = torch.max(probs, dim=1)
+            corr = preds.eq(targets_vec).to(dtype=torch.float32)
+            p_true = probs.gather(1, targets_vec.unsqueeze(1)).squeeze(1).clamp(min=1e-12)
+            nll_sum = float(torch.sum(-torch.log(p_true)).item())
+            one_hot = torch.nn.functional.one_hot(
+                targets_vec,
+                num_classes=int(probs.shape[1]),
+            ).to(dtype=probs.dtype)
+            brier_sum = float(torch.sum(torch.sum((probs - one_hot) ** 2, dim=1)).item())
+            entropy = -torch.sum(probs * torch.log(probs.clamp(min=1e-12)), dim=1)
+
+            class_ids = self._current_exp_stats['class_ids']
+            in_task_sum = 0.0
+            if class_ids:
+                in_task_mask = torch.zeros_like(preds, dtype=torch.bool)
+                for class_id in class_ids:
+                    in_task_mask |= preds.eq(int(class_id))
+                in_task_sum = float(torch.sum(in_task_mask).item())
+
+            logit_sum_tensor = torch.sum(logits.detach(), dim=0).to(device='cpu', dtype=torch.float64)
+            existing_logit_sum = self._current_exp_stats['logit_sum']
+            if existing_logit_sum is None:
+                self._current_exp_stats['logit_sum'] = logit_sum_tensor
+            else:
+                self._current_exp_stats['logit_sum'] = existing_logit_sum + logit_sum_tensor
+
+            self._current_exp_stats['n'] += int(targets_vec.shape[0])
+            self._current_exp_stats['nll_sum'] += nll_sum
+            self._current_exp_stats['brier_sum'] += brier_sum
+            self._current_exp_stats['conf_sum'] += float(torch.sum(conf).item())
+            self._current_exp_stats['entropy_sum'] += float(torch.sum(entropy).item())
+            self._current_exp_stats['in_task_sum'] += in_task_sum
+            self._current_exp_stats['conf_chunks'].append(conf.detach().cpu())
+            self._current_exp_stats['corr_chunks'].append(corr.detach().cpu())
+
+    def after_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        if self._current_exp_stats is None or self._current_exp_idx is None:
+            return
+
+        n = int(self._current_exp_stats['n'])
+        if n <= 0:
+            return
+
+        conf_chunks = self._current_exp_stats['conf_chunks']
+        corr_chunks = self._current_exp_stats['corr_chunks']
+        confidences = torch.cat(conf_chunks).numpy() if conf_chunks else np.asarray([], dtype=np.float64)
+        correctness = torch.cat(corr_chunks).numpy() if corr_chunks else np.asarray([], dtype=np.float64)
+
+        ece, mce = self._ece_and_mce(
+            confidences=confidences,
+            correctness=correctness,
+            num_bins=self.num_bins,
+        )
+        aece = self._adaptive_ece(
+            confidences=confidences,
+            correctness=correctness,
+            num_bins=self.num_bins,
+        )
+
+        nll = float(self._current_exp_stats['nll_sum']) / float(n)
+        brier = float(self._current_exp_stats['brier_sum']) / float(n)
+        mean_conf = float(self._current_exp_stats['conf_sum']) / float(n)
+        mean_entropy = float(self._current_exp_stats['entropy_sum']) / float(n)
+        class_ids = self._current_exp_stats['class_ids']
+        out_of_task_rate = None
+        if class_ids:
+            out_of_task_rate = 1.0 - (float(self._current_exp_stats['in_task_sum']) / float(n))
+        logit_sum_tensor = self._current_exp_stats['logit_sum']
+        logit_mean = (
+            logit_sum_tensor / float(n)
+            if isinstance(logit_sum_tensor, torch.Tensor)
+            else None
+        )
+
+        exp_idx = int(self._current_exp_idx)
+        metrics_payload: dict[str, object] = {
+            RUN_CALIB_ECE: float(ece),
+            RUN_CALIB_AECE: float(aece),
+            RUN_CALIB_MCE: float(mce),
+            RUN_CALIB_NLL: float(nll),
+            RUN_CALIB_BRIER: float(brier),
+            RUN_DIAG_AVG_CONF: float(mean_conf),
+            RUN_DIAG_AVG_ENTROPY: float(mean_entropy),
+            'logit_mean': (
+                logit_mean.detach().cpu().numpy()
+                if isinstance(logit_mean, torch.Tensor)
+                else None
+            ),
+        }
+        if out_of_task_rate is not None:
+            metrics_payload[RUN_DIAG_OUT_OF_TASK_RATE] = float(out_of_task_rate)
+
+        self._current_eval_metrics[exp_idx] = metrics_payload
+
+        step = self._resolve_log_step(strategy=strategy)
+        for key in (
+            RUN_CALIB_ECE,
+            RUN_CALIB_AECE,
+            RUN_CALIB_MCE,
+            RUN_CALIB_NLL,
+            RUN_CALIB_BRIER,
+        ):
+            self._log_metric(
+                key=self._exp_metric_key(base_key=key, exp_idx=exp_idx),
+                value=float(metrics_payload[key]),
+                step=step,
+            )
+
+        if self._eval_tag == 'base':
+            for pred_key in (
+                RUN_DIAG_OUT_OF_TASK_RATE,
+                RUN_DIAG_AVG_CONF,
+                RUN_DIAG_AVG_ENTROPY,
+            ):
+                pred_value = metrics_payload.get(pred_key)
+                if pred_value is None:
+                    continue
+                self._log_metric(
+                    key=self._exp_metric_key(base_key=pred_key, exp_idx=exp_idx),
+                    value=float(pred_value),
+                    step=step,
+                )
+
+        if self._eval_tag == 'reference' and metrics_payload['logit_mean'] is not None:
+            self._ref_logit_means[exp_idx] = np.asarray(metrics_payload['logit_mean'], dtype=np.float64)
+        if self._eval_tag == 'base':
+            if metrics_payload['logit_mean'] is not None:
+                self._base_logit_means[exp_idx] = np.asarray(metrics_payload['logit_mean'], dtype=np.float64)
+            self._base_diagnostics[exp_idx] = {
+                RUN_DIAG_AVG_CONF: float(metrics_payload[RUN_DIAG_AVG_CONF]),
+                RUN_DIAG_AVG_ENTROPY: float(metrics_payload[RUN_DIAG_AVG_ENTROPY]),
+                RUN_CALIB_ECE: float(metrics_payload[RUN_CALIB_ECE]),
+                RUN_CALIB_AECE: float(metrics_payload[RUN_CALIB_AECE]),
+                RUN_CALIB_NLL: float(metrics_payload[RUN_CALIB_NLL]),
+            }
+            if RUN_DIAG_OUT_OF_TASK_RATE in metrics_payload:
+                self._base_diagnostics[exp_idx][RUN_DIAG_OUT_OF_TASK_RATE] = float(
+                    metrics_payload[RUN_DIAG_OUT_OF_TASK_RATE]
+                )
+
+    def after_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        self._latest_eval_metrics = {
+            int(exp_idx): dict(values)
+            for exp_idx, values in self._current_eval_metrics.items()
+        }
+        ece_values = [
+            float(values[RUN_CALIB_ECE])
+            for values in self._current_eval_metrics.values()
+            if RUN_CALIB_ECE in values
+        ]
+        if ece_values:
+            step = self._resolve_log_step(strategy=strategy)
+            self._log_metric(
+                key=RUN_CALIB_MAX_ECE,
+                value=float(max(ece_values)),
+                step=step,
+            )
+
+        if self._eval_tag == 'base':
+            step = self._resolve_log_step(strategy=strategy)
+            common_idxs = sorted(set(self._ref_logit_means).intersection(self._base_logit_means))
+            for exp_idx in common_idxs:
+                ref_mean = self._ref_logit_means[exp_idx]
+                base_mean = self._base_logit_means[exp_idx]
+                drift = float(np.linalg.norm(ref_mean - base_mean, ord=2))
+                self._base_diagnostics.setdefault(exp_idx, {})[RUN_DIAG_LOGIT_AVG_DRIFT] = drift
+                self._log_metric(
+                    key=self._exp_metric_key(base_key=RUN_DIAG_LOGIT_AVG_DRIFT, exp_idx=exp_idx),
+                    value=drift,
+                    step=step,
+                )
+
+    def base_diagnostic_vectors(self, *, expected_len: int) -> dict[str, list[float | None]]:
+        """
+        Build diagnostic vectors from controller-off final evaluation.
+
+        Args:
+            expected_len (int): Expected number of experiences.
+
+        Returns:
+            dict[str, list[float | None]]: Diagnostic vectors keyed by metric base
+                names. `run.diagnostics.logit_avg_drift` is the L2 drift
+                `||mu_exp - mu_base||_2` between task-level mean logit vectors.
+        """
+        keys = (
+            RUN_DIAG_OUT_OF_TASK_RATE,
+            RUN_DIAG_AVG_CONF,
+            RUN_DIAG_AVG_ENTROPY,
+            RUN_CALIB_ECE,
+            RUN_CALIB_AECE,
+            RUN_CALIB_NLL,
+            RUN_DIAG_LOGIT_AVG_DRIFT,
+        )
+        vectors: dict[str, list[float | None]] = {
+            key: [None for _ in range(int(expected_len))]
+            for key in keys
+        }
+
+        for exp_idx, payload in self._base_diagnostics.items():
+            if exp_idx < 0 or exp_idx >= int(expected_len):
+                continue
+            for key in keys:
+                value = payload.get(key)
+                vectors[key][exp_idx] = float(value) if value is not None else None
+
+        for exp_idx in range(int(expected_len)):
+            if vectors[RUN_DIAG_LOGIT_AVG_DRIFT][exp_idx] is not None:
+                continue
+            ref_mean = self._ref_logit_means.get(exp_idx)
+            base_mean = self._base_logit_means.get(exp_idx)
+            if ref_mean is None or base_mean is None:
+                continue
+            vectors[RUN_DIAG_LOGIT_AVG_DRIFT][exp_idx] = float(
+                np.linalg.norm(ref_mean - base_mean, ord=2)
+            )
+
+        return vectors
+
+    def latest_max_ece(self) -> float | None:
+        """
+        Return worst-task ECE from the latest completed evaluation pass.
+
+        Returns:
+            float | None: Maximum value over per-task
+                `run.calibration.ece.exp###` in the latest completed eval call.
+        """
+        ece_values = [
+            float(values[RUN_CALIB_ECE])
+            for values in self._latest_eval_metrics.values()
+            if RUN_CALIB_ECE in values
+        ]
+        if not ece_values:
+            return None
+        return float(max(ece_values))
+
 class RegainEvaluationPlugin(SupervisedPlugin):
     """
     Run reference/post/controller evaluations and log analysis artifacts.
@@ -1246,11 +1940,12 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         *,
         benchmark: NCScenario,
         controller_plugin: ControllerPlugin | None,
+        calibration_plugin: CalibrationDiagnosticsPlugin | None,
         repair_after_experience: bool,
         seen_mask_plugin: SeenClassesMaskPlugin,
         num_epochs_per_experience: int,
         context: MetricContext,
-        backbone_analysis_baseline: Mapping[str, Sequence[float]] | None = None,
+        backbone_analysis_baseline: Mapping[str, Sequence[float | None]] | None = None,
         eps: float = 1e-4,
     ) -> None:
         """
@@ -1259,12 +1954,14 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         Args:
             benchmark (NCScenario): Benchmark scenario used for analysis artifacts.
             controller_plugin (ControllerPlugin | None): Controller plugin attached to the strategy.
+            calibration_plugin (CalibrationDiagnosticsPlugin | None): Plugin that tracks calibration and
+                diagnostic metrics during evaluation.
             repair_after_experience (bool): Whether repair fitting occurs after each experience.
             seen_mask_plugin (SeenClassesMaskPlugin): Plugin used to mask unseen classes.
             num_epochs_per_experience (int): Number of epochs per experience.
             context (MetricContext): Metric context for logging.
-            backbone_analysis_baseline (Mapping[str, Sequence[float]] | None): Optional controller-off baseline vectors
-                from the reserved backbone run. When present, expected keys are `a_ref` and `a_post`.
+            backbone_analysis_baseline (Mapping[str, Sequence[float | None]] | None): Optional controller-off baseline vectors
+                from the reserved backbone run. When present, expected keys are `acc.exp.base` and `acc.final.base`.
             eps (float): Threshold for retrieval-correctable fraction calculations.
 
         Returns:
@@ -1273,43 +1970,58 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         super().__init__()
         self.benchmark = benchmark
         self.controller_plugin = controller_plugin
+        self.calibration_plugin = calibration_plugin
         self.repair_after_experience = bool(repair_after_experience)
         self.seen_mask_plugin = seen_mask_plugin
         self.num_epochs_per_experience = int(num_epochs_per_experience)
         self.context = context
         self.eps = eps
-        self.a_ref: list[float] = []
+        self.a_exp_base: list[float] = []
         self._num_experiences = len(self.benchmark.test_stream)
         self.artifacts: dict[str, object] | None = None
         self.last_posthoc_scalar_results: dict[str, float] | None = None
         self.last_base_eval_results: dict[str, object] | None = None
         self.last_ctrl_eval_results: dict[str, object] | None = None
         self.last_posthoc_exp_idx: int | None = None
-        self._backbone_a_ref: list[float] | None = None
-        self._backbone_a_post: list[float] | None = None
+        self._backbone_a_exp_base: list[float] | None = None
+        self._backbone_a_base: list[float] | None = None
+        self._backbone_diag_vectors: dict[str, list[float | None]] | None = None
         if backbone_analysis_baseline is not None:
-            self._backbone_a_ref = self._coerce_backbone_vector(
+            self._backbone_a_exp_base = self._coerce_backbone_vector(
                 baseline=backbone_analysis_baseline,
-                key=METRIC_A_REF,
+                key=ARTIFACT_ACC_EXP_BASE,
                 expected_len=self._num_experiences,
             )
-            self._backbone_a_post = self._coerce_backbone_vector(
+            self._backbone_a_base = self._coerce_backbone_vector(
                 baseline=backbone_analysis_baseline,
-                key=METRIC_A_POST,
+                key=ARTIFACT_ACC_FINAL_BASE,
                 expected_len=self._num_experiences,
             )
+            if isinstance(self.controller_plugin, RepairControllerPlugin):
+                diag_vectors: dict[str, list[float | None]] = {}
+                for diag_key in DIAG_VECTOR_KEYS:
+                    diag_vectors[diag_key] = self._coerce_required_nullable_backbone_vector(
+                        baseline=backbone_analysis_baseline,
+                        key=diag_key,
+                        expected_len=self._num_experiences,
+                    )
+                self._backbone_diag_vectors = diag_vectors
 
         if isinstance(self.controller_plugin, RepairControllerPlugin):
-            if self._backbone_a_ref is None or self._backbone_a_post is None:
+            if (
+                self._backbone_a_exp_base is None
+                or self._backbone_a_base is None
+                or self._backbone_diag_vectors is None
+            ):
                 raise ValueError(
                     'Repair-controller runs require `backbone_analysis_baseline` '
-                    'with `a_ref` and `a_post` vectors.'
+                    'with baseline accuracy and diagnostic vectors.'
                 )
 
     @staticmethod
     def _coerce_backbone_vector(
         *,
-        baseline: Mapping[str, Sequence[float]],
+        baseline: Mapping[str, Sequence[float | None]],
         key: str,
         expected_len: int,
     ) -> list[float]:
@@ -1317,7 +2029,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         Validate and coerce a backbone baseline vector.
 
         Args:
-            baseline (Mapping[str, Sequence[float]]): Baseline payload.
+            baseline (Mapping[str, Sequence[float | None]]): Baseline payload.
             key (str): Baseline key to read.
             expected_len (int): Expected vector length.
 
@@ -1336,19 +2048,61 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         return vector
 
     @staticmethod
-    def _log_analysis_metric(key: str, value: float, step: int, experience: int | None = None) -> None:
-        full_key = f'{METRIC_PREFIX_ANALYSIS}{key}'
+    def _coerce_required_nullable_backbone_vector(
+        *,
+        baseline: Mapping[str, Sequence[float | None]],
+        key: str,
+        expected_len: int,
+    ) -> list[float | None]:
+        """
+        Validate and coerce a required baseline vector that may include missing values.
+
+        Args:
+            baseline (Mapping[str, Sequence[float | None]]): Baseline payload.
+            key (str): Baseline key to read.
+            expected_len (int): Expected vector length.
+
+        Returns:
+            list[float | None]: Coerced vector.
+        """
+        values = baseline.get(key)
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            raise ValueError(f'Backbone baseline `{key}` must be a sequence.')
+        vector: list[float | None] = []
+        for value in values:
+            if value is None:
+                vector.append(None)
+                continue
+            vector.append(float(value))
+        if len(vector) != int(expected_len):
+            raise ValueError(
+                f'Backbone baseline `{key}` length mismatch. '
+                f'expected={int(expected_len)}, observed={len(vector)}'
+            )
+        return vector
+
+    @staticmethod
+    def _log_analysis_metric(
+        *,
+        key: str,
+        value: float,
+        step: int,
+        experience: int | None = None,
+        variant: str | None = None,
+    ) -> None:
+        full_key = str(key)
         if experience is not None:
             full_key += f'{NS_SEP}{EXPERIENCE_KEY_PREFIX}{experience:03d}'
-
-        mlflow.log_metric(key=full_key, value=value, step=step)
+        if variant is not None:
+            full_key += f'{NS_SEP}{variant}'
+        mlflow.log_metric(key=full_key, value=float(value), step=int(step))
 
     @staticmethod
     def _log_summary_metric(key: str, value: float, step: int) -> None:
         mlflow.log_metric(
-            key=f'{METRIC_PREFIX_SUMMARY}{key}',
-            value=value,
-            step=step,
+            key=str(key),
+            value=float(value),
+            step=int(step),
         )
 
     def _toggle_mask(self, enable: bool) -> bool:
@@ -1365,18 +2119,26 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         stream: Sequence[object],
         *,
         mask_enabled: bool,
+        eval_tag: str,
     ) -> dict[str, object]:
         prev_mask_state = self._toggle_mask(mask_enabled)
         prev_phase = self.context.phase
         prev_log_namespace = self.context.log_namespace
         prev_log_step = self.context.log_step
         prev_log_enabled = self.context.log_enabled
+        prev_eval_tag = getattr(strategy, '_regain_eval_tag', None)
         try:
+            setattr(strategy, '_regain_eval_tag', str(eval_tag))
             self.context.set_phase(MetricPhase.EVAL)
-            self.context.set_log_namespace(_NAMESPACE_ANALYSIS)
+            self.context.set_log_namespace(NAMESPACE_EVAL)
             self.context.set_log_enabled(False)
             return strategy.eval(stream)
         finally:
+            if prev_eval_tag is None:
+                if hasattr(strategy, '_regain_eval_tag'):
+                    delattr(strategy, '_regain_eval_tag')
+            else:
+                setattr(strategy, '_regain_eval_tag', prev_eval_tag)
             self.context.set_phase(prev_phase)
             self.context.set_log_namespace(prev_log_namespace)
             self.context.set_log_step(prev_log_step)
@@ -1391,6 +2153,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         mask_enabled: bool,
         log_namespace: str,
         log_step: int,
+        eval_tag: str,
     ) -> dict[str, object]:
         """
         Run evaluation with toggled mask state and metric logging enabled.
@@ -1410,13 +2173,20 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         prev_log_namespace = self.context.log_namespace
         prev_log_step = self.context.log_step
         prev_log_enabled = self.context.log_enabled
+        prev_eval_tag = getattr(strategy, '_regain_eval_tag', None)
         try:
+            setattr(strategy, '_regain_eval_tag', str(eval_tag))
             self.context.set_phase(MetricPhase.EVAL)
             self.context.set_log_namespace(log_namespace)
             self.context.set_log_step(int(log_step))
             self.context.set_log_enabled(True)
             return strategy.eval(stream)
         finally:
+            if prev_eval_tag is None:
+                if hasattr(strategy, '_regain_eval_tag'):
+                    delattr(strategy, '_regain_eval_tag')
+            else:
+                setattr(strategy, '_regain_eval_tag', prev_eval_tag)
             self.context.set_phase(prev_phase)
             self.context.set_log_namespace(prev_log_namespace)
             self.context.set_log_step(prev_log_step)
@@ -1458,6 +2228,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             mask_enabled=False,
             log_namespace=log_namespace,
             log_step=log_step,
+            eval_tag=('ctrl' if has_controller else 'base'),
         )
         scalar_results = extract_scalar_metrics(eval_results)
         self.last_posthoc_scalar_results = scalar_results
@@ -1496,11 +2267,11 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             strategy=strategy,
             exp_idx=exp_idx,
             log_step=log_step,
-            log_namespace=f'{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}',
+            log_namespace=f'{NAMESPACE_RUN}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}',
         )
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
-        # Collect reference accuracy right after each training experience.
+        # Collect end-of-experience base accuracy right after each training experience.
         experience = strategy.experience
         if experience is None or not hasattr(experience, 'current_experience'):
             raise ValueError('Strategy experience is required to compute analysis metrics.')
@@ -1508,34 +2279,280 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         if exp_idx_raw is None:
             raise ValueError('Strategy experience index is missing.')
         exp_idx = int(exp_idx_raw)
-        # Select backbone-only reference values for repair runs; otherwise compute live.
+        # Select backbone baseline values for repair runs; otherwise compute live.
         if isinstance(self.controller_plugin, RepairControllerPlugin):
-            # Repair runs inherit controller-off reference baselines from the reserved backbone run.
-            if self._backbone_a_ref is None:
-                raise RuntimeError('Missing backbone `a_ref` baseline for repair-controller run.')
-            self.a_ref.append(float(self._backbone_a_ref[exp_idx]))
+            # Repair runs inherit end-of-experience base accuracies from the reserved backbone run.
+            if self._backbone_a_exp_base is None:
+                raise RuntimeError('Missing backbone `acc.exp.base` baseline for repair-controller run.')
+            self.a_exp_base.append(float(self._backbone_a_exp_base[exp_idx]))
         else:
             ref_results = self._run_eval_with_state(
                 strategy,
                 [self.benchmark.test_stream[exp_idx]],
                 mask_enabled=True,
+                eval_tag='reference',
             )
             acc_map = extract_top1_by_experience(ref_results, self._num_experiences)
             if exp_idx not in acc_map:
                 raise ValueError(f'Missing reference accuracy for experience {exp_idx}.')
-            self.a_ref.append(acc_map[exp_idx])
+            self.a_exp_base.append(acc_map[exp_idx])
         self._log_analysis_metric(
-            key=METRIC_A_REF,
-            value=float(self.a_ref[-1]),
+            key=RUN_ACC_EXP,
+            value=float(self.a_exp_base[-1]),
             step=int((exp_idx + 1) * self.num_epochs_per_experience),
             experience=exp_idx,
+            variant='base',
         )
         self._run_posthoc_eval_after_experience(strategy=strategy, exp_idx=exp_idx)
 
+    @staticmethod
+    def _extract_batch_inputs(batch: object) -> torch.Tensor | None:
+        """
+        Extract input tensors from an evaluation DataLoader batch.
+
+        Args:
+            batch (object): Batch returned by the DataLoader.
+
+        Returns:
+            torch.Tensor | None: Input tensor if available.
+        """
+        if torch.is_tensor(batch):
+            return batch
+        if isinstance(batch, (tuple, list)) and batch:
+            first = batch[0]
+            if torch.is_tensor(first):
+                return first
+        return None
+
+    def _measure_latency_stats(
+        self,
+        *,
+        strategy: BaseTemplate,
+        controller_on: bool,
+        warmup_iters: int = 5,
+        timed_iters: int = 20,
+    ) -> tuple[float, float] | None:
+        """
+        Measure latency and throughput on a fixed evaluation stream.
+
+        The function returns:
+            - `ms_per_sample`: mean wall-clock latency (milliseconds/sample)
+            - `samples_per_sec`: throughput (samples/second)
+
+        Timing uses warm-up iterations followed by timed iterations.
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy.
+            controller_on (bool): Whether to include controller output correction.
+            warmup_iters (int): Number of warmup iterations (not timed).
+            timed_iters (int): Number of timed iterations.
+
+        Returns:
+            tuple[float, float] | None: `(ms_per_sample, samples_per_sec)` when measurable.
+        """
+        if len(self.benchmark.test_stream) <= 0:
+            return None
+        exp0 = self.benchmark.test_stream[0]
+        dataset = exp0.dataset
+
+        model = strategy.model
+        if not isinstance(model, nn.Module):
+            raise TypeError('Strategy.model must be an nn.Module.')
+        batch_size = int(strategy.eval_mb_size)
+        if batch_size <= 0:
+            return None
+
+        loader = DataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=False,
+        )
+        if len(loader) == 0:
+            return None
+
+        device = module_device(model, 'cpu')
+        was_training = bool(model.training)
+        model.eval()
+        total_samples = 0
+        elapsed_seconds = 0.0
+        iterator = iter(loader)
+        total_iters = int(warmup_iters) + int(timed_iters)
+        try:
+            with torch.no_grad():
+                for i in range(total_iters):
+                    try:
+                        batch = next(iterator)
+                    except StopIteration:
+                        iterator = iter(loader)
+                        batch = next(iterator)
+
+                    inputs = self._extract_batch_inputs(batch)
+                    if inputs is None:
+                        return None
+                    inputs = inputs.to(device=device)
+
+                    if device.type == 'cuda':
+                        torch.cuda.synchronize(device)
+                    started_at = time.perf_counter()
+
+                    outputs = model(inputs)
+                    if controller_on and isinstance(self.controller_plugin, RepairControllerPlugin):
+                        outputs = self.controller_plugin.apply_repair_correction(
+                            model=model,
+                            inputs=inputs,
+                            backbone_outputs=outputs,
+                        )
+                    del outputs
+
+                    if device.type == 'cuda':
+                        torch.cuda.synchronize(device)
+                    if i >= int(warmup_iters):
+                        elapsed_seconds += float(time.perf_counter() - started_at)
+                        total_samples += int(inputs.shape[0])
+        finally:
+            model.train(was_training)
+
+        if total_samples <= 0 or elapsed_seconds <= 0.0:
+            return None
+        ms_per_sample = 1000.0 * float(elapsed_seconds) / float(total_samples)
+        samples_per_sec = float(total_samples) / float(elapsed_seconds)
+        return ms_per_sample, samples_per_sec
+
+    def _log_latency_overhead(self, *, strategy: BaseTemplate, step: int) -> None:
+        """
+        Log controller-off/controller-on latency metrics.
+
+        Logged keys:
+            - `run.latency.ms_per_sample.base`
+            - `run.latency.samples_per_sec.base`
+            - `run.latency.ms_per_sample.ctrl` (controller runs)
+            - `run.latency.samples_per_sec.ctrl` (controller runs)
+            - `run.latency.ms_ratio = ctrl_ms_per_sample / base_ms_per_sample`
+              (controller runs)
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy.
+            step (int): MLflow metric step.
+        """
+        if mlflow.active_run() is None:
+            return
+
+        off_stats = self._measure_latency_stats(strategy=strategy, controller_on=False)
+        if off_stats is None:
+            return
+        off_ms, off_sps = off_stats
+        mlflow.log_metric(key=RUN_LATENCY_MS_PER_SAMPLE_BASE, value=float(off_ms), step=int(step))
+        mlflow.log_metric(key=RUN_LATENCY_SAMPLES_PER_SEC_BASE, value=float(off_sps), step=int(step))
+
+        if self.controller_plugin is None:
+            return
+
+        on_stats = self._measure_latency_stats(strategy=strategy, controller_on=True)
+        if on_stats is None:
+            return
+        on_ms, on_sps = on_stats
+        mlflow.log_metric(key=RUN_LATENCY_MS_PER_SAMPLE_CTRL, value=float(on_ms), step=int(step))
+        mlflow.log_metric(key=RUN_LATENCY_SAMPLES_PER_SEC_CTRL, value=float(on_sps), step=int(step))
+        if off_ms > 0.0:
+            mlflow.log_metric(
+                key=RUN_LATENCY_MS_RATIO,
+                value=float(on_ms / off_ms),
+                step=int(step),
+            )
+
+    def _diagnostic_vectors_for_artifacts(self) -> dict[str, list[float | None]]:
+        """
+        Resolve diagnostic vectors to persist in `analysis_artifacts.json`.
+
+        Returns:
+            dict[str, list[float | None]]: Diagnostic vectors.
+        """
+        if isinstance(self.controller_plugin, RepairControllerPlugin):
+            if self._backbone_diag_vectors is None:
+                raise RuntimeError(
+                    'Repair-controller runs require backbone diagnostic vectors '
+                    'for analysis artifacts.'
+                )
+            return {
+                key: [value for value in vector]
+                for key, vector in self._backbone_diag_vectors.items()
+            }
+        if self.calibration_plugin is None:
+            raise RuntimeError(
+                'CalibrationDiagnosticsPlugin is required to produce diagnostic vectors.'
+            )
+        return self.calibration_plugin.base_diagnostic_vectors(
+            expected_len=self._num_experiences
+        )
+
+    @staticmethod
+    def _max_optional_vector(
+        values: Sequence[float | None] | None,
+    ) -> float | None:
+        """
+        Compute the maximum finite value from an optional vector with missing entries.
+
+        Args:
+            values (Sequence[float | None] | None): Optional vector of scalar values.
+
+        Returns:
+            float | None: Maximum finite value when present.
+        """
+        if values is None:
+            return None
+        finite_values: list[float] = []
+        for value in values:
+            if value is None:
+                continue
+            value_float = float(value)
+            if not math.isfinite(value_float):
+                continue
+            finite_values.append(value_float)
+        if not finite_values:
+            return None
+        return float(max(finite_values))
+
+    def _calibration_max_ece_for_artifacts(self) -> float:
+        """
+        Resolve `calib.max_ece` value for `analysis_artifacts.json`.
+
+        Policy:
+            - Repair-controller runs are baseline-only and use inherited backbone
+              controller-off `calib.ece` vectors.
+            - Non-repair runs use the latest completed evaluation-pass max ECE.
+
+        Returns:
+            float: Scalar value to persist.
+        """
+        if isinstance(self.controller_plugin, RepairControllerPlugin):
+            if self._backbone_diag_vectors is None:
+                raise RuntimeError(
+                    'Repair-controller runs require backbone calibration vectors '
+                    'to compute `calib.max_ece`.'
+                )
+            max_ece = self._max_optional_vector(
+                self._backbone_diag_vectors.get(RUN_CALIB_ECE)
+            )
+            if max_ece is None:
+                raise RuntimeError(
+                    'Repair-controller runs require finite `calib.ece` values '
+                    'to compute `calib.max_ece`.'
+                )
+            return float(max_ece)
+        if self.calibration_plugin is None:
+            raise RuntimeError(
+                'CalibrationDiagnosticsPlugin is required to compute `calib.max_ece`.'
+            )
+        max_ece = self.calibration_plugin.latest_max_ece()
+        if max_ece is None:
+            raise RuntimeError('Missing `calib.max_ece` from the latest evaluation pass.')
+        return float(max_ece)
+
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
-        # Finalize posthoc evaluation state and validate reference completeness.
+        # Finalize posthoc evaluation state and validate baseline completeness.
+        del kwargs
         expected = int(self._num_experiences)
-        have = int(len(self.a_ref))
+        have = int(len(self.a_exp_base))
         final_step = int(self._num_experiences * self.num_epochs_per_experience)
         should_run_final = (
             self.last_posthoc_scalar_results is None
@@ -1552,105 +2569,140 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         # Emit an incomplete artifact payload when reference points are missing.
         if have != expected:
             self.artifacts = {
-                COLUMN_STATUS: _METRIC_INCOMPLETE_A_REF,
+                COLUMN_STATUS: _STATUS_INCOMPLETE_ACC_EXP_BASE,
                 'expected_num_experiences': expected,
-                'observed_num_reference_points': have,
-                METRIC_EPS: self.eps,
-                METRIC_A_REF: [float(value) for value in self.a_ref],
+                'observed_num_exp_points': have,
+                RUN_EPS: self.eps,
+                ARTIFACT_ACC_EXP_BASE: [float(value) for value in self.a_exp_base],
             }
-            self._log_analysis_metric(key=_METRIC_INCOMPLETE_A_REF, value=1.0, step=final_step)
+            self._log_analysis_metric(
+                key=f'{NAMESPACE_RUN}{NS_SEP}status{NS_SEP}{_STATUS_INCOMPLETE_ACC_EXP_BASE}',
+                value=1.0,
+                step=final_step,
+            )
             mlflow.log_dict(self.artifacts, 'analysis_artifacts.json')
             return
 
-        # Build post-training baseline (`a_post`) from inherited or current evaluations.
+        # Build final base accuracies from inherited or current evaluations.
         if isinstance(self.controller_plugin, RepairControllerPlugin):
-            # Repair runs inherit controller-off post-sequence baselines from the reserved backbone run.
-            if self._backbone_a_post is None:
-                raise RuntimeError('Missing backbone `a_post` baseline for repair-controller run.')
-            a_post = [float(value) for value in self._backbone_a_post]
+            # Repair runs inherit final base baselines from the reserved backbone run.
+            if self._backbone_a_base is None:
+                raise RuntimeError('Missing backbone `acc.final.base` baseline for repair-controller run.')
+            a_base = [float(value) for value in self._backbone_a_base]
         else:
-            a_post_results = self.last_base_eval_results
-            if a_post_results is None and self.controller_plugin is not None:
+            a_base_results = self.last_base_eval_results
+            if a_base_results is None and self.controller_plugin is not None:
                 if not isinstance(self.controller_plugin, RepairControllerPlugin):
-                    a_post_results = self.last_ctrl_eval_results
-            if a_post_results is None:
-                a_post_results = self._run_eval_with_state(
+                    a_base_results = self.last_ctrl_eval_results
+            if a_base_results is None:
+                a_base_results = self._run_eval_with_state(
                     strategy,
                     self.benchmark.test_stream,
                     mask_enabled=False,
+                    eval_tag='base',
                 )
-            a_post = ordered_accuracies(a_post_results, self._num_experiences)
+            a_base = ordered_accuracies(a_base_results, self._num_experiences)
 
-        # Build controller-aware (`a_ctrl`) outputs for downstream analysis.
+        # Build final ctrl accuracies for downstream analysis.
         if self.controller_plugin is None:
-            a_ctrl = list(a_post)
+            a_final_ctrl = list(a_base)
         else:
-            a_ctrl_results = self.last_ctrl_eval_results
-            if a_ctrl_results is None:
-                a_ctrl_results = self._run_eval_with_state(
+            a_final_ctrl_results = self.last_ctrl_eval_results
+            if a_final_ctrl_results is None:
+                a_final_ctrl_results = self._run_eval_with_state(
                     strategy,
                     self.benchmark.test_stream,
                     mask_enabled=False,
+                    eval_tag='ctrl',
                 )
-            a_ctrl = ordered_accuracies(a_ctrl_results, self._num_experiences)
+            a_final_ctrl = ordered_accuracies(a_final_ctrl_results, self._num_experiences)
 
         # Compute and persist full analysis artifact payload.
+        diagnostic_vectors = self._diagnostic_vectors_for_artifacts()
+        max_ece = self._calibration_max_ece_for_artifacts()
+        extra_scalars: dict[str, float] = {RUN_CALIB_MAX_ECE: float(max_ece)}
+
         artifacts = build_analysis_artifacts(
-            a_ref=self.a_ref,
-            a_post=a_post,
-            a_ctrl=a_ctrl,
+            a_exp_base=self.a_exp_base,
+            a_base=a_base,
+            a_final_ctrl=a_final_ctrl,
             eps=self.eps,
+            extra_vectors=diagnostic_vectors,
+            extra_scalars=extra_scalars,
         )
 
         self.artifacts = artifacts
         log_ctrl_metrics = isinstance(self.controller_plugin, RepairControllerPlugin)
         final_step = int(self._num_experiences * self.num_epochs_per_experience)
-        # Log per-experience analysis vectors.
-        for i, value in enumerate(a_post):
+        # Log per-experience final base vectors.
+        for i, value in enumerate(a_base):
             self._log_analysis_metric(
-                key=METRIC_A_POST,
+                key=RUN_ACC_FINAL,
                 value=float(value),
                 step=final_step,
                 experience=i,
+                variant='base',
             )
+        self._log_analysis_metric(
+            key=RUN_ACC_FINAL_AVG_BASE,
+            value=float(sum(a_base) / max(1, len(a_base))),
+            step=final_step,
+        )
+        self._log_summary_metric(
+            key=_SUMMARY_ACC_FINAL_AVG_BASE,
+            value=float(sum(a_base) / max(1, len(a_base))),
+            step=final_step,
+        )
+        self._log_summary_metric(
+            key=_SUMMARY_ACC_EXP_AVG_BASE,
+            value=float(sum(self.a_exp_base) / max(1, len(self.a_exp_base))),
+            step=final_step,
+        )
+
         if log_ctrl_metrics:
-            for i, value in enumerate(a_ctrl):
+            for i, value in enumerate(a_final_ctrl):
                 self._log_analysis_metric(
-                    key=METRIC_A_CTRL,
+                    key=RUN_ACC_FINAL,
                     value=float(value),
                     step=final_step,
                     experience=i,
+                    variant='ctrl',
                 )
-            for i, value in enumerate(artifacts[METRIC_RHO]):
+            for i, value in enumerate(artifacts[ARTIFACT_RHO]):
                 if value is None:
                     continue
                 self._log_analysis_metric(
-                    key=METRIC_RHO,
+                    key=RUN_RHO,
                     value=float(value),
                     step=final_step,
                     experience=i,
                 )
 
         # Log aggregate controller summary metrics.
-        rho_mean = artifacts.get(METRIC_RHO_MEAN, None)
-        if rho_mean is not None and log_ctrl_metrics:
-            self._log_analysis_metric(key=METRIC_RHO_MEAN, value=float(rho_mean), step=final_step)
-            self._log_summary_metric(key=_METRIC_FINAL_RHO_MEAN, value=float(rho_mean), step=final_step)
-
-        def _mean(values: list[float]) -> float:
-            return float(sum(values) / max(1, len(values)))
-
-        self._log_summary_metric(
-            key=_METRIC_FINAL_A_POST_MEAN,
-            value=_mean([float(value) for value in a_post]),
-            step=final_step,
-        )
-        if log_ctrl_metrics:
-            self._log_summary_metric(
-                key=_METRIC_FINAL_A_CTRL_MEAN,
-                value=_mean([float(value) for value in a_ctrl]),
+        rho_avg = artifacts.get(ARTIFACT_RHO_AVG)
+        if rho_avg is not None and log_ctrl_metrics:
+            self._log_analysis_metric(
+                key=RUN_RHO_AVG,
+                value=float(rho_avg),
                 step=final_step,
             )
+            self._log_summary_metric(
+                key=_SUMMARY_RHO_AVG,
+                value=float(rho_avg),
+                step=final_step,
+            )
+            self._log_analysis_metric(
+                key=RUN_ACC_FINAL_AVG_CTRL,
+                value=float(sum(a_final_ctrl) / max(1, len(a_final_ctrl))),
+                step=final_step,
+            )
+            self._log_summary_metric(
+                key=_SUMMARY_ACC_FINAL_AVG_CTRL,
+                value=float(sum(a_final_ctrl) / max(1, len(a_final_ctrl))),
+                step=final_step,
+            )
+
+        self._log_latency_overhead(strategy=strategy, step=final_step)
 
 
 def make_evaluation_plugin(

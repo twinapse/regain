@@ -19,6 +19,7 @@ import yaml
 from regain.analysis.metrics import MetricContext
 from regain.avalanche_utils.plugins import BackboneCheckpointLoaderPlugin
 from regain.avalanche_utils.plugins import BackboneCheckpointWriterPlugin
+from regain.avalanche_utils.plugins import CalibrationDiagnosticsPlugin
 from regain.avalanche_utils.plugins import ControllerPlugin
 from regain.avalanche_utils.plugins import EvaluationIntegrityPlugin
 from regain.avalanche_utils.plugins import make_evaluation_plugin
@@ -32,6 +33,8 @@ from regain.constants import NS_SEP
 from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
 from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
+from regain.constants import PARAM_CONTROLLER_TYPE
+from regain.constants import PARAM_REPAIR_MAX_SAMPLES_PER_CLASS
 from regain.constants import RUN_NAME_BACKBONE
 from regain.experiments.backbone import extract_backbone_analysis_baseline
 from regain.experiments.backbone import extract_backbone_name_from_run
@@ -64,6 +67,7 @@ from regain.mlflow_utils import set_tracking_uri
 from regain.models.controllers import Controller
 from regain.models.controllers import PreventionController
 from regain.models.controllers import RepairController
+from regain.utils import extract_targets
 from regain.utils import get_logger
 
 __all__ = [
@@ -85,16 +89,54 @@ class _InternalRunConfig:
     controller: ControllerConfig | None = None
 
 
+def _resolve_max_repair_samples_per_class(*, benchmark: NCScenario) -> int:
+    """
+    Resolve the maximum per-class repair sample count available across repair experiences.
+
+    Args:
+        benchmark (NCScenario): Scenario that may include `repair_stream`.
+
+    Returns:
+        int: Maximum per-class repair samples available, or 0 when the repair stream is missing/empty.
+    """
+    repair_stream = getattr(benchmark, 'repair_stream', None)
+    if repair_stream is None:
+        return 0
+
+    min_set_size: int | None = None
+    for experience in repair_stream:
+        dataset = experience.dataset
+        targets = extract_targets(dataset)
+        if not targets:
+            return 0
+
+        per_class_counts: dict[int, int] = {}
+        for target in targets:
+            class_id = int(target)
+            per_class_counts[class_id] = per_class_counts.get(class_id, 0) + 1
+        if not per_class_counts:
+            return 0
+
+        experience_min = min(per_class_counts.values())
+        if min_set_size is None:
+            min_set_size = int(experience_min)
+        else:
+            min_set_size = min(int(min_set_size), int(experience_min))
+        if min_set_size == 0:
+            return 0
+    return int(min_set_size) if min_set_size is not None else 0
+
+
 # TODO: This function is too long and does too many things. Divide it into smaller functions.
 def _train_and_evaluate_strategy(
     experiment_config: ExperimentConfig,
     run_config: RunConfig | _InternalRunConfig,
     *,
     backbone_checkpoint_paths: Sequence[Path] | None = None,
-    backbone_analysis_baseline: Mapping[str, Sequence[float]] | None = None,
+    backbone_analysis_baseline: Mapping[str, Sequence[float | None]] | None = None,
     checkpoint_dir: Path | None = None,
     log_checkpoint_artifacts: bool = False,
-    budget_per_class_override: int | None = None,
+    repair_split_fraction_override: float | None = None,
     backbone_source_experiment_id: str | None = None,
     backbone_source_experiment_name: str | None = None,
 ) -> tuple[BaseTemplate, NCScenario, dict[str, float], list[Path] | None]:
@@ -108,7 +150,7 @@ def _train_and_evaluate_strategy(
         backbone_analysis_baseline: Optional controller-off baseline vectors from the reserved backbone run.
         checkpoint_dir: Optional output directory for one checkpoint per experience.
         log_checkpoint_artifacts: Whether to log checkpoints to MLflow artifacts.
-        budget_per_class_override: Optional per-class repair budget override for scenario creation.
+        repair_split_fraction_override: Optional repair split-fraction override for scenario creation.
         backbone_source_experiment_id: Optional source experiment id to log for controller runs.
         backbone_source_experiment_name: Optional source experiment name snapshot to log for controller runs.
 
@@ -190,17 +232,28 @@ def _train_and_evaluate_strategy(
                     )
                 # Add additional validations here if needed
 
-            # Get the per-class repair budget
-            if budget_per_class_override is not None:
-                budget_per_class = int(budget_per_class_override)
+            # Resolve repair split settings for scenario creation.
+            if repair_split_fraction_override is not None:
+                repair_split_fraction = float(repair_split_fraction_override)
             else:
-                budget_per_class = experiment_config.repair.budget_per_class
+                repair_split_fraction = float(experiment_config.repair.split_fraction)
+            repair_budget_per_class = experiment_config.repair.budget_per_class
+            repair_budget_per_class_value = (
+                int(repair_budget_per_class)
+                if repair_budget_per_class is not None
+                else 0
+            )
+            repair_fit_after_experience = (
+                experiment_config.repair.fit_schedule == 'per_experience'
+            )
 
             # Build the benchmark scenario
             benchmark = build_benchmark(
                 experiment_config=experiment_config,
-                budget_per_class=budget_per_class,
+                repair_split_fraction=repair_split_fraction,
+                repair_budget_per_class=repair_budget_per_class_value,
             )
+            max_repair_samples_per_class = _resolve_max_repair_samples_per_class(benchmark=benchmark)
 
             # Initialize the metric context and build its plugin
             context = MetricContext()
@@ -220,15 +273,17 @@ def _train_and_evaluate_strategy(
             # Build the seen classes mask plugin
             seen_mask_plugin = SeenClassesMaskPlugin()
 
+            # Build the calibration metric plugin
+            calibration_plugin = CalibrationDiagnosticsPlugin(num_bins=15)
+
             # Build the controller plugin
             if controller_config is not None:
                 repair_num_epochs = experiment_config.repair.num_epochs
                 repair_batch_size = experiment_config.repair.batch_size
-                fit_after_experience = experiment_config.repair.fit_schedule == 'per_experience'
 
                 controller_plugin: ControllerPlugin = build_controller_plugin(
                     controller=controller,
-                    fit_after_experience=fit_after_experience,
+                    fit_after_experience=repair_fit_after_experience,
                     num_epochs=(
                         int(repair_num_epochs)
                         if repair_num_epochs is not None
@@ -239,6 +294,9 @@ def _train_and_evaluate_strategy(
                         if repair_batch_size is not None
                         else int(backbone_training.batch_size)
                     ),
+                    budget_per_class=repair_budget_per_class_value,
+                    max_repair_samples_per_class=int(max_repair_samples_per_class),
+                    seed=int(experiment_config.seed),
                     debug=experiment_config.debug,
                     debug_epochs=backbone_training.num_epochs,
                     debug_experiences=experiment_config.num_experiences,
@@ -251,7 +309,8 @@ def _train_and_evaluate_strategy(
             regain_evaluation_plugin = RegainEvaluationPlugin(
                 benchmark=benchmark,
                 controller_plugin=controller_plugin,
-                repair_after_experience=experiment_config.repair.fit_schedule == 'per_experience',
+                calibration_plugin=calibration_plugin,
+                repair_after_experience=repair_fit_after_experience,
                 seen_mask_plugin=seen_mask_plugin,
                 num_epochs_per_experience=backbone_training.num_epochs,
                 context=context,
@@ -276,6 +335,7 @@ def _train_and_evaluate_strategy(
                 )
             if controller_plugin is not None:
                 strategy_plugins.append(controller_plugin)
+            strategy_plugins.append(calibration_plugin)
             strategy_plugins.append(regain_evaluation_plugin)
             strategy_plugins.append(eval_integrity_plugin)
 
@@ -355,6 +415,13 @@ def _train_and_evaluate_strategy(
                 num_classes=benchmark.n_classes,
                 debug_skip_reason=debug_skip_reason,
             )
+            controller_type = 'none'
+            if isinstance(controller, RepairController):
+                controller_type = 'repair'
+            elif isinstance(controller, PreventionController):
+                controller_type = 'prevention'
+            mlflow.log_param(PARAM_CONTROLLER_TYPE, controller_type)
+            mlflow.log_param(PARAM_REPAIR_MAX_SAMPLES_PER_CLASS, int(max_repair_samples_per_class))
 
             # Train and evaluate the strategy
             strategy.train(
@@ -420,7 +487,7 @@ def _run_backbone_pretraining_run(
     *,
     experiment_config: ExperimentConfig,
     checkpoint_dir: Path,
-) -> tuple[list[Path], dict[str, float], dict[str, list[float]]]:
+) -> tuple[list[Path], dict[str, float], dict[str, list[float | None]]]:
     """
     Execute the dedicated backbone pretraining run.
 
@@ -429,7 +496,7 @@ def _run_backbone_pretraining_run(
         checkpoint_dir (Path): Directory where one checkpoint per experience will be saved.
 
     Returns:
-        tuple[list[Path], dict[str, float], dict[str, list[float]]]:
+        tuple[list[Path], dict[str, float], dict[str, list[float | None]]]:
             (checkpoint paths, scalar evaluation metrics, backbone analysis baseline vectors).
     """
     # Internal-only run: this is the single controller-off run in the pipeline.
@@ -439,7 +506,7 @@ def _run_backbone_pretraining_run(
         run_config=backbone_run_config,
         checkpoint_dir=checkpoint_dir,
         log_checkpoint_artifacts=bool(experiment_config.checkpoints_enabled),
-        budget_per_class_override=experiment_config.repair.budget_per_class,
+        repair_split_fraction_override=experiment_config.repair.split_fraction,
     )
     if checkpoint_paths is None:
         raise RuntimeError('Backbone run did not produce checkpoints.')
@@ -494,6 +561,23 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
         run_entries.append((run_config, controller_type))
         has_repair_runs = has_repair_runs or controller_type == 'repair'
 
+    if has_repair_runs:
+        missing_fields: list[str] = []
+        if experiment_config.repair.budget_per_class is None:
+            missing_fields.append('repair.budget_per_class')
+        if experiment_config.repair.fit_schedule is None:
+            missing_fields.append('repair.fit_schedule')
+        if experiment_config.repair.num_epochs is None:
+            missing_fields.append('repair.num_epochs')
+        if experiment_config.repair.batch_size is None:
+            missing_fields.append('repair.batch_size')
+        if missing_fields:
+            missing_str = ', '.join(missing_fields)
+            raise ValueError(
+                'Repair-controller runs require explicit repair settings. '
+                f'Missing: {missing_str}.'
+            )
+
     set_tracking_uri(tracking_uri=experiment_config.mlflow_tracking_uri)
     mlflow_client = MlflowClient()
 
@@ -528,7 +612,7 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
     backbone_checkpoint_dir = Path(tempfile.mkdtemp(prefix='regain_backbone_'))
     backbone_checkpoint_paths: list[Path] | None = None
     backbone_eval_results: dict[str, float] | None = None
-    backbone_analysis_baseline: dict[str, list[float]] | None = None
+    backbone_analysis_baseline: dict[str, list[float | None]] | None = None
     local_backbone_name: str | None = None
     local_backbone_training: TrainingConfig | None = None
     try:

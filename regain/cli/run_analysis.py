@@ -6,7 +6,7 @@ It consumes metrics logged by `regain/cli/run_experiment.py`.
 Examples:
   python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results
   python -m regain.cli.run_analysis curves --experiment experiment_1 --output-dir ./analysis_results
-  python -m regain.cli.run_analysis frontier --experiment experiment_1 --output-dir ./analysis_results --perf-key rho_mean_avg
+  python -m regain.cli.run_analysis frontier --experiment experiment_1 --output-dir ./analysis_results --perf-key analysis.repair.rho.avg
 """
 
 import argparse
@@ -19,7 +19,8 @@ from regain.analysis.curves import write_recoverability_curves
 from regain.analysis.exports import export_analysis_to_json
 from regain.analysis.frontier import write_efficiency_frontiers
 from regain.analysis.plotting import plot_analysis_outputs
-from regain.constants import METRIC_RHO_MEAN_AVG
+from regain.analysis.predictive import write_predictive_correlations
+from regain.constants import ANALYSIS_RHO_AVG
 from regain.utils import get_logger
 
 __all__ = [
@@ -118,13 +119,14 @@ def main() -> None:
     p.add_argument('--default-num-classes', type=int, default=None, help='Fallback num classes when not logged.')
     p.add_argument('--show-plots', action='store_true', help='Show plots.')
     p.add_argument('--save-plots', action='store_true', help='Save plots.')
-    p.add_argument('--perf-key', type=str, default=METRIC_RHO_MEAN_AVG, help='Performance key to maximize.')
+    p.add_argument('--perf-key', type=str, default=ANALYSIS_RHO_AVG, help='Performance key to maximize.')
 
     sub = p.add_subparsers(dest='cmd', required=True)
     sub.add_parser('collect', help='Collect MLflow runs into tidy tables.')
     sub.add_parser('curves', help='Compute recoverability curves.')
     sub.add_parser('frontier', help='Compute efficiency frontier.')
-    sub.add_parser('all', help='Run collect + curves + frontier.')
+    sub.add_parser('predictive', help='Compute predictive correlations.')
+    sub.add_parser('all', help='Run collect + curves + frontier + predictive.')
 
     args = p.parse_args()
 
@@ -143,7 +145,7 @@ def main() -> None:
     experiences_table: list[dict[str, Any]] = []
 
     # Collect (always required for downstream steps).
-    if args.cmd in ['collect', 'all', 'curves', 'frontier']:
+    if args.cmd in ['collect', 'all', 'curves', 'frontier', 'predictive']:
         tables_dir = experiment_dir / 'tables'
         runs_table, experiences_table = collect_experiment_tables(
             experiment=str(args.experiment),
@@ -160,12 +162,12 @@ def main() -> None:
     # Recoverability curves.
     if args.cmd in ['curves', 'all']:
         curves_dir = experiment_dir / 'curves'
-        curve_path, task_path = write_recoverability_curves(
+        curve_path, task_path, calib_path, latency_path = write_recoverability_curves(
             runs_table=runs_table,
             experiences_table=experiences_table,
             out_dir=curves_dir,
         )
-        logger.info(f'Curves written: {curve_path}, {task_path}')
+        logger.info(f'Curves written: {curve_path}, {task_path}, {calib_path}, {latency_path}')
 
     # Efficiency frontier.
     if args.cmd in ['frontier', 'all']:
@@ -178,14 +180,23 @@ def main() -> None:
         points_path, pareto_path = write_efficiency_frontiers(
             curve_rows=curve_rows,
             out_dir=frontier_dir,
-            perf_key=str(getattr(args, 'perf_key', METRIC_RHO_MEAN_AVG)),
+            perf_key=str(getattr(args, 'perf_key', ANALYSIS_RHO_AVG)),
         )
         logger.info(f'Frontier written: {points_path}, {pareto_path}')
+
+    # Predictive associations.
+    if args.cmd in ['predictive', 'all']:
+        predictive_dir = experiment_dir / 'predictive'
+        predictive_path = write_predictive_correlations(
+            experiences_table=experiences_table,
+            out_dir=predictive_dir,
+        )
+        logger.info(f'Predictive correlations written: {predictive_path}')
 
     # Optional visualization / plot export.
     mode = _plot_mode(show=bool(args.show_plots), save=bool(args.save_plots))
     if mode != 'none' and args.cmd in ['curves', 'frontier', 'all']:
-        plot_perf_key = str(getattr(args, 'perf_key', METRIC_RHO_MEAN_AVG))
+        plot_perf_key = str(getattr(args, 'perf_key', ANALYSIS_RHO_AVG))
         saved = plot_analysis_outputs(
             analysis_out=experiment_dir,
             perf_key=plot_perf_key,
