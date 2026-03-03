@@ -13,7 +13,7 @@ import argparse
 from pathlib import Path
 
 from regain.analysis.plotting import plot_analysis_outputs
-from regain.constants import METRIC_RHO_MEAN_AVG
+from regain.constants import ANALYSIS_RHO_AVG
 from regain.utils import get_logger
 
 __all__ = [
@@ -58,7 +58,7 @@ def main() -> None:
     p.add_argument(
         '--perf-key',
         type=str,
-        default=METRIC_RHO_MEAN_AVG,
+        default=ANALYSIS_RHO_AVG,
         help='Which performance key to plot for the recoverability curve.',
     )
     p.add_argument(

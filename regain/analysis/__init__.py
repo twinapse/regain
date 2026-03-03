@@ -10,6 +10,7 @@ from regain.analysis.metrics import MetricContext
 from regain.analysis.metrics import MetricPhase
 from regain.analysis.metrics import retrieval_correctable_fraction
 from regain.analysis.metrics import retrieval_correctable_fractions
+from regain.analysis.predictive import write_predictive_correlations
 
 __all__ = [
     'MetricContext',
@@ -20,4 +21,5 @@ __all__ = [
     'mean_ignore_invalid',
     'retrieval_correctable_fraction',
     'retrieval_correctable_fractions',
+    'write_predictive_correlations',
 ]

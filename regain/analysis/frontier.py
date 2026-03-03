@@ -4,7 +4,7 @@ Efficiency frontier automation.
 Computes Pareto frontiers over:
   - data cost (b = shots per class),
   - parameter cost (controller_model_param_count),
-  - performance (rho_mean or a_ctrl_mean).
+  - performance (rho avg or final ctrl acc avg).
 
 Also emits an optional scalar total-cost view when repair_budget_total is known:
   total_cost = repair_budget_total + controller_model_param_count
@@ -16,6 +16,8 @@ from typing import Any
 from regain.analysis.utils import to_float
 from regain.analysis.utils import to_int
 from regain.analysis.utils import write_csv
+from regain.constants import ANALYSIS_ACC_FINAL_AVG_CTRL
+from regain.constants import ANALYSIS_RHO_AVG
 from regain.constants import COLUMN_B
 from regain.constants import COLUMN_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import COLUMN_CONTROLLER_NAME
@@ -24,8 +26,6 @@ from regain.constants import COLUMN_PERFORMANCE
 from regain.constants import COLUMN_REPAIR_BUDGET_PER_CLASS
 from regain.constants import COLUMN_REPAIR_BUDGET_TOTAL
 from regain.constants import COLUMN_TOTAL_COST
-from regain.constants import METRIC_A_CTRL_MEAN_AVG
-from regain.constants import METRIC_RHO_MEAN_AVG
 from regain.utils import get_logger
 
 __all__ = [
@@ -93,7 +93,7 @@ def write_efficiency_frontiers(
     *,
     curve_rows: list[dict[str, Any]],
     out_dir: str | Path,
-    perf_key: str = METRIC_RHO_MEAN_AVG,
+    perf_key: str = ANALYSIS_RHO_AVG,
 ) -> tuple[Path, Path]:
     """
     Compute and write frontier tables from aggregated curve points.
@@ -129,8 +129,8 @@ def write_efficiency_frontiers(
             COLUMN_CONTROLLER_MODEL_PARAM_COUNT: pc,
             COLUMN_PERFORMANCE: perf,
             _COLUMN_PERFORMANCE_KEY: perf_key,
-            METRIC_RHO_MEAN_AVG: r.get(METRIC_RHO_MEAN_AVG),
-            METRIC_A_CTRL_MEAN_AVG: r.get(METRIC_A_CTRL_MEAN_AVG),
+            ANALYSIS_RHO_AVG: r.get(ANALYSIS_RHO_AVG),
+            ANALYSIS_ACC_FINAL_AVG_CTRL: r.get(ANALYSIS_ACC_FINAL_AVG_CTRL),
         })
 
     if missing_param_count_controllers:

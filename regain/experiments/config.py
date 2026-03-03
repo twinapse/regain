@@ -13,6 +13,7 @@ from regain.constants import PARAM_BACKBONE
 from regain.constants import PARAM_CONTROLLER
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import PARAM_CONTROLLER_PATH
+from regain.constants import PARAM_CONTROLLER_TYPE
 from regain.constants import PARAM_DEBUG_SKIP_REASON
 from regain.constants import PARAM_NUM_CLASSES
 from regain.constants import PARAM_SCENARIO
@@ -48,6 +49,7 @@ _CONFIG_PARAM_OVERRIDE_MAP: list[tuple[str, list[str]]] = [
     ('avalanche_schedule', ['avalanche_schedule', 'eval_schedule', 'eval_every']),
     ('device', ['device']),
     ('budget_per_class', ['budget_per_class']),
+    ('split_fraction', ['split_fraction']),
     ('fit_schedule', ['fit_schedule']),
     ('checkpoints_enabled', ['checkpoints_enabled']),
 ]
@@ -56,6 +58,7 @@ _RESERVED_LOG_PARAMS: set[str] = {
     PARAM_AVALANCHE_VERSION,
     PARAM_CONTROLLER_MODEL_PARAM_COUNT,
     PARAM_CONTROLLER_PATH,
+    PARAM_CONTROLLER_TYPE,
     PARAM_DEBUG_SKIP_REASON,
     PARAM_TORCH_DETERMINISTIC_ALGORITHMS,
 }
@@ -162,14 +165,16 @@ class RepairConfig:
     Config shared by all repair controllers.
 
     Attributes:
-        budget_per_class: Number of repair examples per class (per experience).
+        split_fraction: Fraction of each experience training dataset carved out for the repair stream in `[0, 1)`.
+        budget_per_class: Repair budget (`b`) number of examples per class used from the fixed set.
         fit_schedule: Repair fitting schedule (`per_experience` or `final_only`).
         num_epochs: Number of epochs used by all repair controllers.
         batch_size: Batch size used by all repair controllers. If omitted, the backbone training batch size is used.
     """
 
-    budget_per_class: int = 0
-    fit_schedule: Literal['per_experience', 'final_only'] = 'per_experience'
+    split_fraction: float
+    budget_per_class: int | None = None
+    fit_schedule: Literal['per_experience', 'final_only'] | None = None
     num_epochs: int | None = None
     batch_size: int | None = None
 
@@ -617,23 +622,95 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
 
 
 def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
+    """
+    Parse the shared repair configuration block.
+
+    Args:
+        config (dict[str, Any]): Raw experiment config payload.
+
+    Returns:
+        RepairConfig: Parsed repair settings.
+    """
     repair_config = config.get('repair')
     if repair_config is None:
         raise ValueError(
             'Experiment config must include a `repair` section to define data splitting. '
-            'Use `budget_per_class: 0` if using the full dataset (no repair).'
+            'Use `split_fraction: 0.0` if using the full dataset (no repair split).'
         )
     if not isinstance(repair_config, dict):
         raise ValueError('`repair` must be a mapping when provided.')
-    fit_schedule = repair_config.get('fit_schedule', 'per_experience')
-    if fit_schedule not in {'per_experience', 'final_only'}:
+
+    if 'split_fraction' not in repair_config:
+        raise ValueError('`repair.split_fraction` is required.')
+    split_fraction = float(repair_config.get('split_fraction'))
+    if not (0.0 <= split_fraction < 1.0):
+        raise ValueError('`repair.split_fraction` must be in the range [0, 1).')
+
+    budget_raw = repair_config.get('budget_per_class')
+    budget_per_class: int | None = None
+    if budget_raw is not None:
+        budget_per_class = int(budget_raw)
+        if budget_per_class < 0:
+            raise ValueError('`repair.budget_per_class` must be a non-negative integer.')
+
+    fit_schedule_raw = repair_config.get('fit_schedule')
+    fit_schedule: Literal['per_experience', 'final_only'] | None = None
+    if fit_schedule_raw is not None:
+        fit_schedule = str(fit_schedule_raw)
+    if fit_schedule is not None and fit_schedule not in {'per_experience', 'final_only'}:
         raise ValueError('`repair.fit_schedule` must be one of: `per_experience`, `final_only`.')
     return RepairConfig(
-        budget_per_class=repair_config.get('budget_per_class', 0),
+        split_fraction=split_fraction,
+        budget_per_class=budget_per_class,
         fit_schedule=fit_schedule,
         num_epochs=repair_config.get('num_epochs'),
         batch_size=repair_config.get('batch_size'),
     )
+
+
+def _validate_repair_config_for_runs(
+    *,
+    repair: RepairConfig,
+    runs: list[RunConfig] | None,
+) -> None:
+    """
+    Validate that repair-only settings are present when repair controllers are configured.
+
+    Args:
+        repair (RepairConfig): Parsed repair configuration.
+        runs (list[RunConfig] | None): Parsed run configurations.
+
+    Raises:
+        ValueError: If repair controllers are configured and required repair fields are missing.
+    """
+    if not runs:
+        return
+
+    has_repair_runs = False
+    for run_config in runs:
+        controller_name = run_config.controller.name
+        controller_path = get_controller_path(controller_name)
+        if '.repair.' in controller_path:
+            has_repair_runs = True
+            break
+    if not has_repair_runs:
+        return
+
+    missing_fields: list[str] = []
+    if repair.budget_per_class is None:
+        missing_fields.append('repair.budget_per_class')
+    if repair.fit_schedule is None:
+        missing_fields.append('repair.fit_schedule')
+    if repair.num_epochs is None:
+        missing_fields.append('repair.num_epochs')
+    if repair.batch_size is None:
+        missing_fields.append('repair.batch_size')
+    if missing_fields:
+        missing_str = ', '.join(missing_fields)
+        raise ValueError(
+            'Repair-controller runs require explicit repair settings. '
+            f'Missing: {missing_str}.'
+        )
 
 
 def _parse_evaluation_config(payload: dict[str, Any]) -> EvaluationConfig:
@@ -728,14 +805,19 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
     dataset_path_value = payload.get('dataset_path')
     dataset_path = Path(dataset_path_value) if dataset_path_value is not None else None
 
+    parsed_backbone = _parse_backbone_config(payload)
+    parsed_repair = _parse_repair_config(payload)
+    parsed_runs = _parse_runs(payload)
+    _validate_repair_config_for_runs(repair=parsed_repair, runs=parsed_runs)
+
     # Build the experiment config instance
     return ExperimentConfig(
         experiment_name=payload['experiment_name'],
         scenario=payload[PARAM_SCENARIO],
         num_experiences=payload['num_experiences'],
-        backbone=_parse_backbone_config(payload),
-        repair=_parse_repair_config(payload),
-        runs=_parse_runs(payload),
+        backbone=parsed_backbone,
+        repair=parsed_repair,
+        runs=parsed_runs,
         evaluation=_parse_evaluation_config(payload),
         checkpoints_enabled=payload.get('checkpoints_enabled', False),
         device=_resolve_device(payload.get('device')),

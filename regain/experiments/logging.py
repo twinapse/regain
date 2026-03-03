@@ -15,8 +15,8 @@ import mlflow
 
 from regain.avalanche_utils.logging import normalize_metric_name
 from regain.constants import EXPERIENCE_KEY_PREFIX
-from regain.constants import METRIC_PREFIX_SUMMARY
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
+from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NS_SEP
 from regain.constants import PARAM_AVALANCHE_VERSION
 from regain.constants import PARAM_BACKBONE
@@ -314,7 +314,7 @@ def log_summary_metrics(
     for metric_name, value in summary_metrics.items():
         safe_name = normalize_metric_name(metric_name)
         mlflow.log_metric(
-            f'{METRIC_PREFIX_SUMMARY}{safe_name}',
+            f'{NAMESPACE_SUMMARY}{NS_SEP}{safe_name}',
             float(value),
             step=int(step),
         )

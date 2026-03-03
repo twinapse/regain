@@ -45,6 +45,7 @@ class ScenarioBuilder(ABC):
         *,
         num_experiences: int,
         return_task_id: bool,
+        repair_split_fraction: float,
         repair_budget_per_class: int = 0,
         dataset_path: str | Path | None = None,
         seed: int = 1,
@@ -53,15 +54,18 @@ class ScenarioBuilder(ABC):
         Create an Avalanche `NCScenario` for class-incremental or task-incremental learning.
 
         This method orchestrates the scenario creation workflow:
-        1. Validates common arguments.
-        2. Calls `_build_scenario` (implemented by subclasses).
-        3. Injects `original_indices` data attribute in all experience datasets
-           with the index of each example w.r.t. the original dataset.
-        4. Optionally adds repair stream (`repair_stream`) if `repair_budget_per_class > 0`.
-        5. Validates benchmark split integrity:
-           - class IDs contiguous in `[0, n_classes-1]`
-           - experience datasets expose `original_indices`
-           - experiences are disjoint within each stream
+            1. Validates common arguments.
+            2. Calls `_build_scenario` (implemented by subclasses).
+            3. Injects `original_indices` data attribute in all experience datasets
+               with the index of each example w.r.t. the original dataset.
+            4. Optionally adds repair stream (`repair_stream`) if `repair_split_fraction > 0`.
+               The repair stream size per experience is `floor(repair_split_fraction * n_exp_total)`.
+               When `repair_budget_per_class > 0`, guards ensure:
+               `repair_budget_per_class * n_classes_exp <= floor(repair_split_fraction * n_exp_total)`.
+            5. Validates benchmark split integrity:
+               - class IDs contiguous in `[0, n_classes-1]`
+               - experience datasets expose `original_indices`
+               - experiences are disjoint within each stream
            - streams that share the same origin are disjoint
            - per-origin-group union covers exactly the full origin dataset length
 
@@ -70,9 +74,10 @@ class ScenarioBuilder(ABC):
         Args:
             num_experiences (int): Number of experiences to split the classes into.
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
-            repair_budget_per_class (int): Number of repair samples per class to allocate to repair data.
-                                           If greater than 0, each experience will have a repair stream entry.
-                                           This dataset will be disjoint from the training dataset.
+            repair_split_fraction (float): Fraction in `[0, 1)` of each training experience excluded from
+                backbone training and assigned to the repair stream.
+            repair_budget_per_class (int): Per-class repair budget used by repair controllers.
+                This is validated against the total repair set size induced by `repair_split_fraction`.
             dataset_path (str | Path | None): Optional root directory for storing the dataset.
             seed (int): Random seed controlling the split and dataloader shuffling.
 
@@ -80,12 +85,15 @@ class ScenarioBuilder(ABC):
             NCScenario: A new Avalanche `NCScenario`.
 
         Raises:
-            ValueError: If `num_experiences` is not a positive integer or if `repair_budget_per_class` is negative.
+            ValueError: If `num_experiences` is not a positive integer, repair-split arguments are invalid,
+                or split guards fail.
             RuntimeError: If scenario validations fail
         """
         # Validate arguments
         if not isinstance(num_experiences, int) or num_experiences <= 0:
             raise ValueError('`num_experiences` must be a positive integer.')
+        if not (0.0 <= float(repair_split_fraction) < 1.0):
+            raise ValueError('`repair_split_fraction` must be in the range [0, 1).')
         if int(repair_budget_per_class) < 0:
             raise ValueError('`repair_budget_per_class` must be non-negative.')
 
@@ -101,8 +109,13 @@ class ScenarioBuilder(ABC):
         self._inject_original_indices(benchmark)
 
         # Add repair stream (if requested)
-        if repair_budget_per_class > 0:
-            self._add_repair_stream(benchmark, repair_budget_per_class=repair_budget_per_class, seed=seed)
+        if float(repair_split_fraction) > 0.0:
+            self._add_repair_stream(
+                benchmark,
+                repair_split_fraction=repair_split_fraction,
+                repair_budget_per_class=repair_budget_per_class,
+                seed=seed,
+            )
 
         # Validate scenario integrity
         self._validate_scenario(benchmark)
@@ -231,6 +244,7 @@ class ScenarioBuilder(ABC):
     def _add_repair_stream(
         self,
         benchmark: NCScenario,
+        repair_split_fraction: float,
         repair_budget_per_class: int,
         seed: int = 1,
     ):
@@ -249,9 +263,16 @@ class ScenarioBuilder(ABC):
         - For each training experience in `benchmark.train_stream`, splits its dataset
           into two disjoint subsets:
             * a reduced training subset
-            * a repair subset
-          The split is class-balanced: for each class, it assigns
-          `min(repair_budget_per_class, n_class - 1)` samples to repair, clamped to `[1, n-1]`.
+            * a fixed repair subset
+          The total repair set size is deterministic and equal to
+          `floor(repair_split_fraction * n_exp_total)`, where `n_exp_total` is the size of the
+          experience training dataset.
+          When `repair_budget_per_class > 0`, guards enforce:
+            * `repair_budget_per_class * n_classes_exp <= floor(repair_split_fraction * n_exp_total)`
+            * `repair_budget_per_class <= n_c - 1` for every class `c`
+          where `n_classes_exp` is the class count in that experience.
+          Remaining repair set slots (if any) are filled deterministically from all classes
+          while preserving at least one training sample per class.
         - Replaces the underlying datasets for the existing "train" stream with the
           reduced training subsets.
         - Creates a new "repair" stream with the repair subsets, registers it in
@@ -266,22 +287,29 @@ class ScenarioBuilder(ABC):
 
         Args:
             benchmark (NCScenario): The scenario to augment.
-            repair_budget_per_class (int): Number of examples per class to allocate to the
-                repair stream for each experience.
+            repair_split_fraction (float): Fraction in `[0, 1)` used to allocate a total
+                repair set size in each experience.
+            repair_budget_per_class (int): Per-class repair budget used for feasibility guards.
             seed (int): Random seed used to deterministically split per-class indices.
 
         Raises:
-            ValueError: If `repair_budget_per_class` is negative.
+            ValueError: If repair set inputs are invalid or guard constraints are violated.
         """
-        if int(repair_budget_per_class) <= 0:
-            return benchmark
+        if not (0.0 <= float(repair_split_fraction) < 1.0):
+            raise ValueError('`repair_split_fraction` must be in the range [0, 1).')
+        if int(repair_budget_per_class) < 0:
+            raise ValueError('`repair_budget_per_class` must be non-negative.')
 
-        rng = np.random.default_rng(seed)
+        split_fraction = float(repair_split_fraction)
+        budget_per_class = int(repair_budget_per_class)
+        if split_fraction == 0.0:
+            return
 
         new_train_exps = []
         repair_exps = []
 
         for exp in benchmark.train_stream:
+            exp_idx = int(getattr(exp, 'current_experience', len(new_train_exps)))
             # Get the dataset from the experience
             if hasattr(exp, 'dataset'):
                 dataset = exp.dataset
@@ -290,25 +318,76 @@ class ScenarioBuilder(ABC):
             else:
                 dataset = None
             if dataset is None:
-                continue
+                raise RuntimeError(
+                    f'Missing training dataset while building repair stream (exp_idx={exp_idx}).'
+                )
 
             # Extract targets
             targets = dataset.targets if hasattr(dataset, 'targets') else None
             if targets is None:
                 # Fallback to iterating dataset to infer targets
                 targets = [int(y) for _, y, *rest in dataset]
-            targets_arr = np.asarray(targets)
+            targets_arr = np.asarray(targets, dtype=np.int64)
+            exp_rng = np.random.default_rng(int(seed) + int(exp_idx))
 
-            # Split indices into training and repair subsets
-            train_indices: list[int] = []
+            class_ids = sorted(int(x) for x in np.unique(targets_arr))
+            n_exp_total = int(targets_arr.size)
+            n_classes_exp = int(len(class_ids))
+            set_size = int(np.floor(float(split_fraction) * float(n_exp_total)))
+
+            if budget_per_class > 0:
+                required_set_size = int(budget_per_class * n_classes_exp)
+                if required_set_size > set_size:
+                    raise ValueError(
+                        'Repair set guard failed: budgeted per-class repair usage exceeds total split set size. '
+                        f'exp_idx={exp_idx}, n_exp={n_exp_total}, classes_exp={n_classes_exp}, '
+                        f'split_fraction={split_fraction}, set_size={set_size}, '
+                        f'budget_per_class={budget_per_class}, required_set_size={required_set_size}.'
+                    )
+
+            # Build repair subset under total-set and per-class non-empty-training guards.
             repair_indices: list[int] = []
-            for class_id in np.unique(targets_arr):
+            extra_candidate_indices: list[int] = []
+            for class_id in class_ids:
                 class_indices = np.where(targets_arr == class_id)[0]
-                n = class_indices.size
-                n_rep = max(1, min(int(repair_budget_per_class), n - 1))
-                permuted = rng.permutation(class_indices)
-                repair_indices.extend(permuted[:n_rep].tolist())
-                train_indices.extend(permuted[n_rep:].tolist())
+                n_class = int(class_indices.size)
+                if budget_per_class > (n_class - 1):
+                    raise ValueError(
+                        'Repair set guard failed: per-class budget leaves no training sample. '
+                        f'exp_idx={exp_idx}, class_id={class_id}, n_c={n_class}, '
+                        f'budget_per_class={budget_per_class}.'
+                    )
+
+                permuted = exp_rng.permutation(class_indices)
+                repair_indices.extend(permuted[:budget_per_class].tolist())
+
+                remaining_after_budget = permuted[budget_per_class:]
+                if remaining_after_budget.size > 0:
+                    # Keep at least one sample per class in training.
+                    extra_candidate_indices.extend(remaining_after_budget[:-1].tolist())
+
+            remaining_slots = int(set_size - len(repair_indices))
+            if remaining_slots < 0:
+                raise ValueError(
+                    'Repair set guard failed: mandatory per-class budget already exceeds set size. '
+                    f'exp_idx={exp_idx}, set_size={set_size}, selected_mandatory={len(repair_indices)}.'
+                )
+            if remaining_slots > len(extra_candidate_indices):
+                raise ValueError(
+                    'Repair set guard failed: split fraction too large '
+                    'while preserving at least one sample per class. '
+                    f'exp_idx={exp_idx}, set_size={set_size}, selected_mandatory={len(repair_indices)}, '
+                    f'remaining_slots={remaining_slots}, available_extra={len(extra_candidate_indices)}.'
+                )
+            if remaining_slots > 0:
+                permuted_extra = exp_rng.permutation(np.asarray(extra_candidate_indices, dtype=np.int64))
+                repair_indices.extend(permuted_extra[:remaining_slots].tolist())
+
+            repair_indices = sorted(int(idx) for idx in repair_indices)
+            repair_mask = np.zeros(n_exp_total, dtype=bool)
+            if repair_indices:
+                repair_mask[np.asarray(repair_indices, dtype=np.int64)] = True
+            train_indices = np.where(~repair_mask)[0].astype(np.int64).tolist()
 
             # Create and save training and repair subsets
             train_subset = dataset.subset(train_indices)
