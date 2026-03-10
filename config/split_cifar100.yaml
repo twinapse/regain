@@ -10,6 +10,7 @@ num_experiences: 20
 # ============================================================
 backbone:
   name: resnet18
+  kwargs: {}
   training:
     num_epochs: 50
     # We use balanced batches: each training mini-batch contains 64 stream + 64 buffer = 128 total

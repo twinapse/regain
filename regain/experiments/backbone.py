@@ -35,6 +35,7 @@ __all__ = [
     'download_backbone_checkpoints_from_run',
     'extract_backbone_analysis_baseline',
     'extract_backbone_analysis_baseline_from_metrics',
+    'extract_backbone_kwargs_from_run',
     'extract_backbone_name_from_run',
     'extract_backbone_training_config_from_run',
     'extract_required_float_vector',
@@ -284,6 +285,35 @@ def extract_backbone_name_from_run(*, run: Run) -> str:
     key = f'{PARAM_BACKBONE}{NS_SEP}name'
     params_payload = dict(run.data.params or {})
     return _extract_required_run_param_str(params=params_payload, run_id=run_id, key=key)
+
+
+def extract_backbone_kwargs_from_run(*, run: Run) -> dict[str, object]:
+    """
+    Extract logged backbone constructor kwargs from a reserved `backbone` run.
+
+    Args:
+        run (Run): Source backbone run.
+
+    Returns:
+        dict[str, object]: Backbone constructor kwargs reconstructed from `backbone.*` params.
+    """
+    params_payload = dict(run.data.params or {})
+    backbone_prefix = f'{PARAM_BACKBONE}{NS_SEP}'
+    training_prefix = f'training{NS_SEP}'
+    source_prefix = f'source_experiment{NS_SEP}'
+    kwargs: dict[str, object] = {}
+    for key, raw_value in params_payload.items():
+        if not key.startswith(backbone_prefix):
+            continue
+        suffix = key.removeprefix(backbone_prefix).strip()
+        if suffix == '' or suffix == 'name':
+            continue
+        if suffix.startswith(training_prefix):
+            continue
+        if suffix == 'source_experiment' or suffix.startswith(source_prefix):
+            continue
+        kwargs[suffix] = _deserialize_mlflow_param_value(raw_value=str(raw_value))
+    return kwargs
 
 
 def extract_backbone_training_config_from_run(*, run: Run) -> TrainingConfig:

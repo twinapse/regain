@@ -168,6 +168,8 @@ def get_scenario_builder_path(scenario: str) -> str:
 _BACKBONES: Mapping[str, str] = MappingProxyType(
     {
         'resnet18': 'regain.models.classifiers.ResNet18Classifier',
+        'vit_small': 'regain.models.classifiers.ViTSmallClassifier',
+        'vit_tiny': 'regain.models.classifiers.ViTTinyClassifier',
     }
 )
 
