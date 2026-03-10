@@ -3,7 +3,9 @@ Tests for experiment builders.
 """
 
 import pytest
+import torch
 
+from regain.experiments.builders import build_backbone
 from regain.experiments.builders import build_controller
 from regain.experiments.config import ControllerConfig
 from regain.models.controllers import PreventionController
@@ -37,3 +39,22 @@ class TestBuildControllerReplayRequirements:
         )
 
         assert isinstance(controller, PreventionController)
+
+
+class TestBuildBackbone:
+    def test_builds_vit_backbone_with_constructor_kwargs(self) -> None:
+        backbone = build_backbone(
+            name='vit_small',
+            num_classes=11,
+            backbone_kwargs={
+                'image_size': 32,
+                'patch_size': 4,
+                'dropout': 0.1,
+            },
+        )
+        x = torch.randn(2, 3, 32, 32)
+
+        logits = backbone(x)
+
+        assert isinstance(backbone, torch.nn.Module)
+        assert logits.shape == (2, 11)

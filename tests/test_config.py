@@ -200,3 +200,62 @@ class TestRepairConfigParsing:
 
         with pytest.raises(ValueError, match='repair.split_fraction'):
             load_experiment_config(config_path)
+
+
+class TestBackboneConfigParsing:
+    def test_accepts_registered_vit_backbone_name(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['name'] = 'vit_small'
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        config = load_experiment_config(config_path)
+
+        assert config.backbone is not None
+        assert config.backbone.name == 'vit_small'
+
+    def test_parses_backbone_kwargs_mapping(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['name'] = 'vit_small'
+        payload['backbone']['kwargs'] = {
+            'image_size': 32,
+            'patch_size': 4,
+            'dropout': 0.1,
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        config = load_experiment_config(config_path)
+
+        assert config.backbone is not None
+        assert config.backbone.kwargs == {
+            'image_size': 32,
+            'patch_size': 4,
+            'dropout': 0.1,
+        }
+
+    def test_rejects_non_mapping_backbone_kwargs(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['kwargs'] = ['invalid']
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='Backbone config `kwargs` must be a mapping'):
+            load_experiment_config(config_path)
+
+    def test_rejects_backbone_kwargs_with_source_experiment(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone'] = {
+            'source_experiment': 'other_experiment',
+            'kwargs': {
+                'patch_size': 4,
+            },
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(
+            ValueError,
+            match='must be the only field under `backbone`',
+        ):
+            load_experiment_config(config_path)

@@ -149,12 +149,14 @@ class BackboneConfig:
         name: Optional backbone registry name used to resolve the model class.
               It may be `None` when a source experiment is configured, in which
               case the name is resolved from the source `backbone` run.
+        kwargs: Optional keyword arguments forwarded to the backbone constructor.
         training: Optional backbone training configuration for learning from scratch.
         source_experiment: Optional source experiment id/name from which to load the reserved `backbone` run
                            checkpoints and baseline artifacts.
     """
 
     name: str | None = None
+    kwargs: dict[str, object] = field(default_factory=dict)
     training: TrainingConfig | None = None
     source_experiment: str | None = None
 
@@ -597,6 +599,12 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
         raise ValueError('Backbone config `name` must be a string.')
     backbone_name = backbone_name.strip()
     get_backbone_path(backbone_name)
+    backbone_kwargs_payload = backbone_config.get('kwargs')
+    if backbone_kwargs_payload is None:
+        backbone_kwargs_payload = {}
+    if not isinstance(backbone_kwargs_payload, Mapping):
+        raise ValueError('Backbone config `kwargs` must be a mapping when provided.')
+    backbone_kwargs = dict(backbone_kwargs_payload)
 
     training_config = backbone_config.get('training')
     if training_config is None:
@@ -616,6 +624,7 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
 
     return BackboneConfig(
         name=backbone_name,
+        kwargs=backbone_kwargs,
         training=training,
         source_experiment=None,
     )

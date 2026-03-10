@@ -2,6 +2,7 @@
 Builder utilities for experiment benchmarks, models, strategies, and controllers.
 """
 
+from collections.abc import Mapping
 from collections.abc import Sequence
 import inspect
 
@@ -102,13 +103,19 @@ def build_benchmark(
 #############
 
 
-def build_backbone(*, name: str, num_classes: int) -> torch.nn.Module:
+def build_backbone(
+    *,
+    name: str,
+    num_classes: int,
+    backbone_kwargs: Mapping[str, object] | None = None,
+) -> torch.nn.Module:
     """
     Build the backbone model.
 
     Args:
         name (str): Backbone registry name.
         num_classes (int): Total number of target classes.
+        backbone_kwargs (Mapping[str, object] | None): Optional constructor kwargs for the selected backbone.
 
     Returns:
         torch.nn.Module: Instantiated backbone model.
@@ -118,16 +125,38 @@ def build_backbone(*, name: str, num_classes: int) -> torch.nn.Module:
     if not inspect.isclass(model_cls):
         raise TypeError(f'Backbone symbol is not a class: {backbone_path}')
 
+    constructor_kwargs: dict[str, object] = (
+        dict(backbone_kwargs)
+        if backbone_kwargs is not None
+        else {}
+    )
     model_cls_sig = inspect.signature(model_cls.__init__)
     if 'n_classes' in model_cls_sig.parameters:
-        backbone = model_cls(**{'n_classes': int(num_classes)})
+        if 'n_classes' in constructor_kwargs or PARAM_NUM_CLASSES in constructor_kwargs:
+            raise ValueError(
+                f'Backbone `{backbone_path}` constructor kwargs must not include '
+                '`n_classes` or `num_classes`.'
+            )
+        constructor_kwargs['n_classes'] = int(num_classes)
     elif PARAM_NUM_CLASSES in model_cls_sig.parameters:
-        backbone = model_cls(**{PARAM_NUM_CLASSES: int(num_classes)})
+        if 'n_classes' in constructor_kwargs or PARAM_NUM_CLASSES in constructor_kwargs:
+            raise ValueError(
+                f'Backbone `{backbone_path}` constructor kwargs must not include '
+                '`n_classes` or `num_classes`.'
+            )
+        constructor_kwargs[PARAM_NUM_CLASSES] = int(num_classes)
     else:
         raise ValueError(
             f'Backbone `{backbone_path}` must accept either `n_classes` or '
             '`num_classes`.'
         )
+    try:
+        backbone = model_cls(**constructor_kwargs)
+    except TypeError as exc:
+        raise ValueError(
+            f'Backbone `{backbone_path}` could not be initialized with kwargs: '
+            f'{sorted(constructor_kwargs.keys())}.'
+        ) from exc
 
     if not isinstance(backbone, torch.nn.Module):
         raise TypeError(f'Backbone `{backbone_path}` did not produce a torch.nn.Module.')

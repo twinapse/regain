@@ -17,13 +17,21 @@ from regain.constants import RUN_DIAG_AVG_CONF
 from regain.constants import RUN_DIAG_AVG_ENTROPY
 from regain.constants import RUN_DIAG_LOGIT_AVG_DRIFT
 from regain.constants import RUN_DIAG_OUT_OF_TASK_RATE
+from regain.experiments.backbone import extract_backbone_kwargs_from_run
 from regain.experiments.backbone import load_backbone_analysis_baseline_from_run
 
 
-def _make_run(*, metrics: dict[str, float]) -> SimpleNamespace:
+def _make_run(
+    *,
+    metrics: dict[str, float],
+    params: dict[str, str] | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         info=SimpleNamespace(run_id='run_1'),
-        data=SimpleNamespace(metrics=metrics),
+        data=SimpleNamespace(
+            metrics=metrics,
+            params=(params if params is not None else {}),
+        ),
     )
 
 
@@ -103,3 +111,27 @@ class TestLoadBackboneAnalysisBaselineFromRun:
         assert baseline[ARTIFACT_ACC_EXP_BASE] == pytest.approx([0.80])
         assert baseline[ARTIFACT_ACC_FINAL_BASE] == pytest.approx([0.55])
         assert baseline[RUN_DIAG_OUT_OF_TASK_RATE] == pytest.approx([0.20])
+
+
+class TestExtractBackboneKwargsFromRun:
+    def test_extracts_non_training_backbone_params(self) -> None:
+        run = _make_run(
+            metrics={},
+            params={
+                'backbone.name': 'vit_small',
+                'backbone.patch_size': '4',
+                'backbone.image_size': '32',
+                'backbone.dropout': '0.1',
+                'backbone.training.num_epochs': '50',
+                'backbone.training.strategy.name': 'replay',
+                'backbone.source_experiment.id': '123',
+            },
+        )
+
+        kwargs = extract_backbone_kwargs_from_run(run=run)
+
+        assert kwargs == {
+            'patch_size': 4,
+            'image_size': 32,
+            'dropout': 0.1,
+        }

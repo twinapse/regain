@@ -37,6 +37,7 @@ from regain.constants import PARAM_CONTROLLER_TYPE
 from regain.constants import PARAM_REPAIR_MAX_SAMPLES_PER_CLASS
 from regain.constants import RUN_NAME_BACKBONE
 from regain.experiments.backbone import extract_backbone_analysis_baseline
+from regain.experiments.backbone import extract_backbone_kwargs_from_run
 from regain.experiments.backbone import extract_backbone_name_from_run
 from regain.experiments.backbone import extract_backbone_training_config_from_run
 from regain.experiments.backbone import load_backbone_from_existing_run
@@ -349,9 +350,15 @@ def _train_and_evaluate_strategy(
                 raise RuntimeError(
                     'Backbone name must be resolved before strategy construction.'
                 )
+            backbone_kwargs = (
+                experiment_config.backbone.kwargs
+                if experiment_config.backbone is not None
+                else {}
+            )
             backbone = build_backbone(
                 name=backbone_name,
                 num_classes=benchmark.n_classes,
+                backbone_kwargs=backbone_kwargs,
             )
             backbone.to(experiment_config.device)
 
@@ -614,6 +621,7 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
     backbone_eval_results: dict[str, float] | None = None
     backbone_analysis_baseline: dict[str, list[float | None]] | None = None
     local_backbone_name: str | None = None
+    local_backbone_kwargs: dict[str, object] | None = None
     local_backbone_training: TrainingConfig | None = None
     try:
         if source_experiment:
@@ -654,6 +662,9 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
             local_backbone_name = extract_backbone_name_from_run(
                 run=source_backbone_run
             )
+            local_backbone_kwargs = extract_backbone_kwargs_from_run(
+                run=source_backbone_run
+            )
             source_experiment_id_for_logging = str(source_backbone_run.info.experiment_id)
             source_experiment_entity = mlflow_client.get_experiment(
                 experiment_id=source_experiment_id_for_logging
@@ -675,6 +686,7 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
                 )
         elif backbone_config is None:
             local_backbone_name = extract_backbone_name_from_run(run=local_backbone_run)
+            local_backbone_kwargs = extract_backbone_kwargs_from_run(run=local_backbone_run)
             if non_repair_run_names:
                 local_backbone_training = extract_backbone_training_config_from_run(
                     run=local_backbone_run
@@ -723,6 +735,11 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
             if experiment_config.backbone is None:
                 experiment_config.backbone = BackboneConfig(
                     name=local_backbone_name,
+                    kwargs=(
+                        local_backbone_kwargs
+                        if local_backbone_kwargs is not None
+                        else {}
+                    ),
                     training=(
                         local_backbone_training
                         if local_backbone_training is not None
@@ -731,6 +748,11 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
                 )
             else:
                 experiment_config.backbone.name = local_backbone_name
+                experiment_config.backbone.kwargs = (
+                    local_backbone_kwargs
+                    if local_backbone_kwargs is not None
+                    else {}
+                )
 
         resolved_backbone_name = (
             experiment_config.backbone.name
