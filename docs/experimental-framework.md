@@ -149,7 +149,8 @@ This codebase distinguishes when a controller acts and how evaluation is execute
 - After each training experience, the repair stream provides that experience’s fixed repair set.
 - Controller fitting uses a deterministic per-class subset (`repair.budget_per_class`) of that set.
 - Fitting schedule:
-  - If `repair.fit_schedule=per_experience` (default), fit after each experience.
+  - For repair-controller runs, `repair.fit_schedule` must be set explicitly.
+  - If `repair.fit_schedule=per_experience`, fit after each experience.
   - If `repair.fit_schedule=final_only`, fit once after the full training sequence.
   - Controllers that require per-experience fitting (`requires_per_experience_fitting()`) will error when set to
     `final_only`.
@@ -209,6 +210,12 @@ When one or more configured controller runs are present:
 - If `checkpoints_enabled: true`, shared checkpoints are also logged to MLflow artifacts.
 
 ### 3.5 Run Configuration Constraints
+- Required top-level fields:
+  - `experiment_name`
+  - `scenario`
+  - `num_experiences`
+  - `repair` (mapping)
+  - `evaluation` (mapping; defaults are applied only within this mapping)
 - `backbone` configuration must define exactly one of:
   - `backbone.training` (train from scratch in the current experiment), or
   - `backbone.source_experiment` (reuse a reserved `backbone` run from another experiment).
@@ -216,10 +223,16 @@ When one or more configured controller runs are present:
 - `backbone.source_experiment` must be different from `experiment_name` (same-experiment reuse is rejected).
 - `repair` configuration is mandatory. All runs in an experiment (backbone, prevention controllers, repair controllers)
   share the exact same repair split defined by:
-  - `repair.split_fraction` (fraction of each training experience excluded from backbone training).
+  - required `repair.split_fraction` (float in `[0, 1)`) as the fraction of each training experience excluded from
+    backbone training.
 - `repair.budget_per_class` is the per-class fitting budget consumed from each fixed repair set.
   For each experience with `n_exp` samples and `k_exp` classes, it must satisfy:
   `repair.budget_per_class * k_exp <= floor(repair.split_fraction * n_exp)`.
+- If any run in `runs` is a repair controller, the following fields are required explicitly:
+  - `repair.budget_per_class` (non-negative integer)
+  - `repair.fit_schedule` (`per_experience` or `final_only`)
+  - `repair.num_epochs`
+  - `repair.batch_size`
 - Every user-configured run in `runs` must define a controller.
 - Run-specific config blocks are not allowed to override experiment-level training/runtime parameters
   (for example epochs, batch sizes, replay memory size, device, eval frequency, repair budget/fit schedule,
