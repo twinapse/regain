@@ -6,10 +6,9 @@ import contextlib
 from datetime import datetime
 from datetime import timezone
 import json
-import os
 from pathlib import Path
 import tempfile
-from typing import Final, Iterator, Sequence
+from typing import Iterator, Sequence
 from urllib.parse import urlparse
 
 import mlflow
@@ -42,30 +41,9 @@ __all__ = [
 ]
 
 
-_DEFAULT_SQLITE_DB_NAME: Final[str] = 'mlflow.db'
-
-
 ##########################
 # URI/path normalization #
 ##########################
-
-
-def _path_to_sqlite_uri(path: Path) -> str:
-    """
-    Convert a filesystem path into a SQLite tracking URI.
-
-    Args:
-        path (Path): SQLite database path.
-
-    Returns:
-        str: SQLite tracking URI.
-    """
-    resolved = path.expanduser()
-    if resolved.exists() and resolved.is_dir():
-        raise ValueError(
-            f'MLflow tracking URI must point to a SQLite database file, not a directory: {resolved}'
-        )
-    return f'sqlite:///{resolved.as_posix()}'
 
 
 def _normalize_artifact_uri(raw_uri: str) -> str:
@@ -112,37 +90,17 @@ def resolve_tracking_uri(
     tracking_uri: str | None,
 ) -> str:
     """
-    Normalize a tracking URI to a SQLite backend.
-
-    Falls back to `MLFLOW_TRACKING_URI` (if set) or `./mlflow.db` when no URI is provided.
+    Resolve a tracking URI using MLflow-native semantics.
 
     Args:
-        tracking_uri (str | None): Tracking URI or filesystem path supplied by the user.
+        tracking_uri (str | None): Tracking URI supplied by the user.
 
     Returns:
-        str: SQLite tracking URI.
-
-    Raises:
-        ValueError: If the tracking URI uses a non-SQLite scheme.
+        str: Effective tracking URI.
     """
-    raw_uri = str(tracking_uri).strip() if tracking_uri is not None else ''
-    if not raw_uri:
-        env_uri = os.environ.get('MLFLOW_TRACKING_URI', '').strip()
-        raw_uri = env_uri
-    if not raw_uri:
-        return _path_to_sqlite_uri(Path.cwd() / _DEFAULT_SQLITE_DB_NAME)
-    parsed = urlparse(raw_uri)
-    if parsed.scheme:
-        if parsed.scheme != 'sqlite':
-            if len(parsed.scheme) == 1 and raw_uri[1:3] in {':\\', ':/'}:
-                return _path_to_sqlite_uri(Path(raw_uri))
-            raise ValueError(
-                'MLflow tracking URI must use a SQLite backend '
-                f"(e.g., 'sqlite:///path/to/mlflow.db'). Got: {raw_uri}"
-            )
-        return raw_uri
-
-    return _path_to_sqlite_uri(Path(raw_uri))
+    if tracking_uri is not None:
+        return tracking_uri
+    return mlflow.get_tracking_uri()
 
 
 def set_tracking_uri(
@@ -150,17 +108,16 @@ def set_tracking_uri(
     tracking_uri: str | None,
 ) -> str:
     """
-    Resolve and set the MLflow tracking URI, forcing SQLite as the backend.
+    Set the MLflow tracking URI using MLflow-native semantics.
 
     Args:
-        tracking_uri (str | None): Tracking URI or filesystem path supplied by the user.
+        tracking_uri (str | None): Tracking URI supplied by the user.
 
     Returns:
-        str: Normalized SQLite tracking URI.
+        str: Effective tracking URI.
     """
-    resolved = resolve_tracking_uri(tracking_uri=tracking_uri)
-    mlflow.set_tracking_uri(resolved)
-    return resolved
+    mlflow.set_tracking_uri(tracking_uri)
+    return mlflow.get_tracking_uri()
 
 
 ####################################
@@ -219,7 +176,7 @@ def init_mlflow(
     Args:
         experiment_name: Name of the MLflow experiment.
         run_name: Optional run name.
-        tracking_uri: Optional tracking URI or filesystem path (SQLite only).
+        tracking_uri: Optional tracking URI.
         artifact_uri: Optional artifact URI or filesystem path.
 
     Yields:

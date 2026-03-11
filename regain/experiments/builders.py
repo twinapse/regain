@@ -2,8 +2,7 @@
 Builder utilities for experiment benchmarks, models, strategies, and controllers.
 """
 
-from collections.abc import Mapping
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import inspect
 
 from avalanche.benchmarks.scenarios import NCScenario

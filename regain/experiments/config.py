@@ -230,7 +230,7 @@ class ExperimentConfig:
         device: Device identifier for training.
         seed: Random seed.
         deterministic: Whether to enforce deterministic PyTorch behavior.
-        mlflow_tracking_uri: Optional MLflow tracking URI or filesystem path (SQLite only).
+        mlflow_tracking_uri: Optional MLflow tracking URI.
         mlflow_artifact_uri: Optional MLflow artifact URI or filesystem path.
         dataset_path: Optional dataset root to pass to the scenario builder.
         debug: Whether to enable debug instrumentation for repair controllers.
