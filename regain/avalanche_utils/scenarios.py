@@ -10,14 +10,24 @@ from pathlib import Path
 # We therefore use the matching deprecated LazyDatasetSequence / ClassificationStream types here.  #
 ####################################################################################################
 from avalanche.benchmarks import SplitCIFAR100
+from avalanche.benchmarks import SplitTinyImageNet
 from avalanche.benchmarks.scenarios.deprecated.classification_scenario import ClassificationStream
 from avalanche.benchmarks.scenarios.deprecated.dataset_scenario import StreamDef
+from avalanche.benchmarks.scenarios.deprecated.generators import nc_benchmark
 from avalanche.benchmarks.scenarios.deprecated.lazy_dataset_sequence import LazyDatasetSequence
 from avalanche.benchmarks.scenarios.deprecated.new_classes.nc_scenario import NCExperience
 from avalanche.benchmarks.scenarios.deprecated.new_classes.nc_scenario import NCScenario
 ####################################################################################################
 from avalanche.benchmarks.utils.data_attribute import DataAttribute
 import numpy as np
+from torch.utils.data import Dataset
+from torchvision.datasets import ImageFolder
+from torchvision.datasets.utils import download_and_extract_archive
+from torchvision.transforms import CenterCrop
+from torchvision.transforms import Compose
+from torchvision.transforms import Normalize
+from torchvision.transforms import Resize
+from torchvision.transforms import ToTensor
 
 from regain.constants import STREAM_REPAIR
 from regain.constants import STREAM_TRAIN
@@ -928,6 +938,531 @@ class SplitCIFAR100ScenarioBuilder(ScenarioBuilder):
             class_ids_from_zero_from_first_exp=True,
             dataset_root=dataset_path,
         )
+
+
+class SplitTinyImageNetScenarioBuilder(ScenarioBuilder):
+    """
+    Scenario builder for Split Tiny-ImageNet.
+    """
+
+    def _build_scenario(
+        self,
+        *,
+        num_experiences: int,
+        return_task_id: bool,
+        dataset_path: str | Path | None = None,
+        seed: int = 1,
+    ) -> NCScenario:
+        """
+        Build the standard Split Tiny-ImageNet class-incremental scenario.
+
+        Args:
+            num_experiences (int): Number of experiences to split the 200 classes into.
+            return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
+            dataset_path (str | Path | None): Optional root directory for storing the Tiny-ImageNet dataset.
+            seed (int): Random seed controlling the split and dataloader shuffling.
+
+        Returns:
+            NCScenario: Avalanche scenario configured for class-incremental learning.
+        """
+        return SplitTinyImageNet(
+            n_experiences=num_experiences,
+            return_task_id=return_task_id,
+            seed=seed,
+            class_ids_from_zero_from_first_exp=True,
+            dataset_root=dataset_path,
+        )
+
+
+class _ImageNetRSubsetRawDataset(Dataset):
+    """
+    Fixed split view over a shared `ImageFolder` with split-specific dataset identity.
+
+    This wrapper avoids origin-key collisions during scenario validation by exposing a
+    split marker (`split='train'` or `split='test'`) while still reading samples from
+    the same underlying raw ImageNet-R folder.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_dataset: ImageFolder,
+        indices: list[int],
+        split: str,
+    ) -> None:
+        """
+        Initialize the split dataset wrapper.
+
+        Args:
+            base_dataset (ImageFolder): Source raw ImageFolder dataset.
+            indices (list[int]): Selected sample indices in `base_dataset`.
+            split (str): Split label (`train` or `test`) used for origin identity.
+        """
+        self._base_dataset = base_dataset
+        self._indices = [int(idx) for idx in indices]
+        self.classes = list(base_dataset.classes)
+        self.class_to_idx = dict(base_dataset.class_to_idx)
+        self.root = str(base_dataset.root)
+        self.split = str(split)
+        self.targets = [int(base_dataset.targets[idx]) for idx in self._indices]
+        self.samples = [base_dataset.samples[idx] for idx in self._indices]
+
+    def __len__(self) -> int:
+        """
+        Return the split size.
+
+        Returns:
+            int: Number of samples in the split.
+        """
+        return len(self._indices)
+
+    def __getitem__(self, index: int) -> tuple[object, int]:
+        """
+        Fetch one sample from the split.
+
+        Args:
+            index (int): Split-local sample index.
+
+        Returns:
+            tuple[object, int]: `(sample, class_id)` from the underlying raw dataset.
+        """
+        base_index = int(self._indices[int(index)])
+        sample, target = self._base_dataset[base_index]
+        return sample, int(target)
+
+
+class SplitImageNetRScenarioBuilder(ScenarioBuilder):
+    """
+    Scenario builder for Split ImageNet-R.
+
+    Auto-download ImageNet-R to a default data root and
+    build a deterministic class-incremental benchmark from local folders.
+
+    Supported dataset layouts under the resolved root:
+      1. Explicit split layout:
+         - `train/<class_name>/*.jpg`
+         - `test/<class_name>/*.jpg`
+      2. Single-root class folder layout:
+         - `<class_name>/*.jpg`
+         In this case, a deterministic per-class holdout split is created using `seed`.
+    """
+
+    _TRAIN_DIR_NAME = 'train'
+    _TEST_DIR_NAME = 'test'
+    _HOLDOUT_FRACTION = 0.2
+    _ARCHIVE_URL = 'https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar'
+    _ARCHIVE_FILENAME = 'imagenet-r.tar'
+    _DEFAULT_DATA_ROOT = Path.home() / '.avalanche' / 'data'
+    _EXTRACTED_DIR_CANDIDATES = (
+        'imagenet-r',
+        'imagenet-r/imagenet-r',
+    )
+
+    def _build_scenario(
+        self,
+        *,
+        num_experiences: int,
+        return_task_id: bool,
+        dataset_path: str | Path | None = None,
+        seed: int = 1,
+    ) -> NCScenario:
+        """
+        Build a class-incremental ImageNet-R scenario from local folder datasets.
+
+        Args:
+            num_experiences (int): Number of experiences used to split classes.
+            return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
+            dataset_path (str | Path | None): Root path that contains ImageNet-R images.
+            seed (int): Random seed controlling class order and deterministic holdout splitting.
+
+        Returns:
+            NCScenario: Avalanche scenario configured for class-incremental learning.
+        """
+
+        train_dataset, test_dataset = self._resolve_datasets(
+            dataset_path=dataset_path,
+            seed=seed,
+        )
+        train_transform, eval_transform = self._build_default_transforms()
+        benchmark = self._build_nc_benchmark(
+            train_dataset=train_dataset,
+            test_dataset=test_dataset,
+            num_experiences=num_experiences,
+            return_task_id=return_task_id,
+            seed=seed,
+            train_transform=train_transform,
+            eval_transform=eval_transform,
+        )
+        return benchmark
+
+    @classmethod
+    def _resolve_datasets(
+        cls,
+        *,
+        dataset_path: str | Path | None,
+        seed: int,
+    ) -> tuple[object, object]:
+        """
+        Resolve ImageNet-R train/test datasets from `dataset_path`.
+
+        Args:
+            dataset_path (str | Path | None): Root path of the dataset.
+            seed (int): Random seed used for deterministic holdout splitting when needed.
+
+        Returns:
+            tuple[object, object]: Train and test datasets compatible with Avalanche generators.
+
+        Raises:
+            ValueError: If dataset resolution fails or folders are incompatible.
+        """
+        root_hint = cls._resolve_download_root(dataset_path=dataset_path)
+        root = cls._ensure_imagenet_r_available(root_hint=root_hint)
+
+        train_dir = root / cls._TRAIN_DIR_NAME
+        test_dir = root / cls._TEST_DIR_NAME
+
+        has_train_dir = train_dir.is_dir()
+        has_test_dir = test_dir is not None and test_dir.is_dir()
+        if has_train_dir != has_test_dir:
+            raise ValueError(
+                'ImageNet-R split layout must define both train and test directories. '
+                f'Found train={has_train_dir}, test={has_test_dir} under: {root}.'
+            )
+
+        if has_train_dir and has_test_dir and test_dir is not None:
+            train_dataset = ImageFolder(root=str(train_dir))
+            test_dataset = ImageFolder(root=str(test_dir))
+            cls._validate_class_mappings(
+                train_class_to_idx=train_dataset.class_to_idx,
+                test_class_to_idx=test_dataset.class_to_idx,
+                dataset_root=root,
+            )
+            return train_dataset, test_dataset
+
+        # No explicit split directories: create deterministic per-class holdout from a single root.
+        full_dataset = ImageFolder(root=str(root))
+        if not full_dataset.targets:
+            raise ValueError(
+                'ImageNet-R root has no class samples. '
+                f'Expected class folders under: {root}.'
+            )
+
+        train_indices, test_indices = cls._make_per_class_holdout_indices(
+            targets=[int(target) for target in full_dataset.targets],
+            test_fraction=cls._HOLDOUT_FRACTION,
+            seed=seed,
+        )
+        train_dataset = _ImageNetRSubsetRawDataset(
+            base_dataset=full_dataset,
+            indices=train_indices,
+            split='train',
+        )
+        test_dataset = _ImageNetRSubsetRawDataset(
+            base_dataset=full_dataset,
+            indices=test_indices,
+            split='test',
+        )
+        return train_dataset, test_dataset
+
+    @classmethod
+    def _resolve_download_root(cls, *, dataset_path: str | Path | None) -> Path:
+        """
+        Resolve the root directory used for ImageNet-R storage.
+
+        Args:
+            dataset_path (str | Path | None): Optional user-provided path.
+
+        Returns:
+            Path: Resolved local root path.
+        """
+        if dataset_path is None:
+            return cls._DEFAULT_DATA_ROOT
+        return Path(dataset_path)
+
+    @classmethod
+    def _ensure_imagenet_r_available(cls, *, root_hint: Path) -> Path:
+        """
+        Ensure ImageNet-R data is available locally, downloading it when needed.
+
+        Args:
+            root_hint (Path): Preferred local storage root.
+
+        Returns:
+            Path: Directory that contains ImageNet-R class folders (or split folders).
+
+        Raises:
+            ValueError: If the dataset cannot be located after download.
+        """
+        if root_hint.exists() and not root_hint.is_dir():
+            raise ValueError(f'ImageNet-R dataset path must be a directory: {root_hint}')
+
+        candidates = cls._candidate_roots(root_hint=root_hint)
+        for candidate in candidates:
+            if cls._is_usable_dataset_root(root=candidate):
+                return candidate
+
+        root_hint.mkdir(parents=True, exist_ok=True)
+        download_and_extract_archive(
+            url=cls._ARCHIVE_URL,
+            download_root=str(root_hint),
+            filename=cls._ARCHIVE_FILENAME,
+            remove_finished=False,
+        )
+
+        candidates = cls._candidate_roots(root_hint=root_hint)
+        for candidate in candidates:
+            if cls._is_usable_dataset_root(root=candidate):
+                return candidate
+
+        raise ValueError(
+            'ImageNet-R dataset not found after auto-download. '
+            f'Checked roots: {[str(candidate) for candidate in candidates]}'
+        )
+
+    @classmethod
+    def _candidate_roots(cls, *, root_hint: Path) -> list[Path]:
+        """
+        Generate candidate dataset roots from a user/default root hint.
+
+        Args:
+            root_hint (Path): Base path used to probe dataset locations.
+
+        Returns:
+            list[Path]: Candidate root directories to inspect.
+        """
+        candidates = [root_hint]
+        for relative_dir in cls._EXTRACTED_DIR_CANDIDATES:
+            candidates.append(root_hint / relative_dir)
+
+        deduped: list[Path] = []
+        seen: set[Path] = set()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            deduped.append(candidate)
+        return deduped
+
+    @classmethod
+    def _is_usable_dataset_root(cls, *, root: Path) -> bool:
+        """
+        Check whether a root directory can be used to build ImageNet-R datasets.
+
+        Args:
+            root (Path): Candidate root directory.
+
+        Returns:
+            bool: `True` when the root has explicit split folders or class folders.
+        """
+        if not root.is_dir():
+            return False
+
+        train_dir = root / cls._TRAIN_DIR_NAME
+        test_dir = root / cls._TEST_DIR_NAME
+        has_train_dir = train_dir.is_dir()
+        has_test_dir = test_dir is not None and test_dir.is_dir()
+        if has_train_dir and has_test_dir:
+            return True
+
+        return cls._is_class_folder_root(root=root)
+
+    @staticmethod
+    def _is_class_folder_root(*, root: Path) -> bool:
+        """
+        Heuristically detect a class-folder dataset root.
+
+        Args:
+            root (Path): Candidate dataset root.
+
+        Returns:
+            bool: `True` when the root appears to contain class subdirectories with image files.
+        """
+        if not root.is_dir():
+            return False
+
+        class_dirs = [child for child in root.iterdir() if child.is_dir()]
+        if not class_dirs:
+            return False
+
+        image_suffixes = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+        probe_dirs = class_dirs[:10]
+        for class_dir in probe_dirs:
+            try:
+                for child in class_dir.iterdir():
+                    if child.is_file() and child.suffix.lower() in image_suffixes:
+                        return True
+            except OSError:
+                continue
+        return False
+
+    @staticmethod
+    def _validate_class_mappings(
+        *,
+        train_class_to_idx: dict[str, int],
+        test_class_to_idx: dict[str, int],
+        dataset_root: Path,
+    ) -> None:
+        """
+        Validate that train/test class mappings are identical.
+
+        Args:
+            train_class_to_idx (dict[str, int]): Class mapping from the train dataset.
+            test_class_to_idx (dict[str, int]): Class mapping from the test dataset.
+            dataset_root (Path): Dataset root used for error context.
+
+        Raises:
+            ValueError: If train/test class mappings do not match.
+        """
+        if train_class_to_idx == test_class_to_idx:
+            return
+
+        train_classes = set(train_class_to_idx.keys())
+        test_classes = set(test_class_to_idx.keys())
+        missing_in_test = sorted(train_classes - test_classes)
+        missing_in_train = sorted(test_classes - train_classes)
+        raise ValueError(
+            'ImageNet-R train/test class folders must match exactly. '
+            f'dataset_root={dataset_root} '
+            f'missing_in_test={missing_in_test[:20]}{"..." if len(missing_in_test) > 20 else ""} '
+            f'missing_in_train={missing_in_train[:20]}{"..." if len(missing_in_train) > 20 else ""}.'
+        )
+
+    @staticmethod
+    def _make_per_class_holdout_indices(
+        *,
+        targets: list[int],
+        test_fraction: float,
+        seed: int,
+    ) -> tuple[list[int], list[int]]:
+        """
+        Deterministically split sample indices into per-class train/test partitions.
+
+        Args:
+            targets (list[int]): Dataset class targets ordered by sample index.
+            test_fraction (float): Per-class fraction assigned to the test split.
+            seed (int): Random seed controlling per-class permutations.
+
+        Returns:
+            tuple[list[int], list[int]]: Sorted train indices and sorted test indices.
+
+        Raises:
+            ValueError: If split parameters are invalid or a class has too few samples.
+        """
+        if not targets:
+            raise ValueError('ImageNet-R split requires a non-empty target list.')
+        if not (0.0 < float(test_fraction) < 1.0):
+            raise ValueError('ImageNet-R split `test_fraction` must be in the open range (0, 1).')
+
+        class_to_indices: dict[int, list[int]] = {}
+        for sample_idx, class_id in enumerate(targets):
+            key = int(class_id)
+            class_to_indices.setdefault(key, []).append(int(sample_idx))
+
+        rng = np.random.RandomState(seed)
+        train_indices: list[int] = []
+        test_indices: list[int] = []
+        for class_id in sorted(class_to_indices):
+            class_indices = np.asarray(class_to_indices[class_id], dtype=np.int64)
+            if class_indices.size < 2:
+                raise ValueError(
+                    'ImageNet-R per-class holdout split requires at least 2 samples per class. '
+                    f'Class {class_id} has {int(class_indices.size)} sample(s).'
+                )
+
+            permuted = rng.permutation(class_indices)
+            n_test = int(np.floor(float(class_indices.size) * float(test_fraction)))
+            n_test = max(1, min(int(class_indices.size) - 1, n_test))
+
+            test_indices.extend(permuted[:n_test].astype(np.int64).tolist())
+            train_indices.extend(permuted[n_test:].astype(np.int64).tolist())
+
+        return sorted(train_indices), sorted(test_indices)
+
+    @staticmethod
+    def _build_default_transforms() -> tuple[Compose, Compose]:
+        """
+        Build default ImageNet-style transforms for train/eval streams.
+
+        Returns:
+            tuple[Compose, Compose]: `(train_transform, eval_transform)` transforms.
+        """
+        mean = (0.485, 0.456, 0.406)
+        std = (0.229, 0.224, 0.225)
+        train_transform = Compose([
+            Resize(256),
+            CenterCrop(224),
+            ToTensor(),
+            Normalize(mean=mean, std=std),
+        ])
+        eval_transform = Compose([
+            Resize(256),
+            CenterCrop(224),
+            ToTensor(),
+            Normalize(mean=mean, std=std),
+        ])
+        return train_transform, eval_transform
+
+    @staticmethod
+    def _build_nc_benchmark(
+        *,
+        train_dataset: object,
+        test_dataset: object,
+        num_experiences: int,
+        return_task_id: bool,
+        seed: int,
+        train_transform: Compose,
+        eval_transform: Compose,
+    ) -> NCScenario:
+        """
+        Build an Avalanche NC benchmark from train/test datasets with API compatibility guards.
+
+        Args:
+            train_dataset (object): Training dataset.
+            test_dataset (object): Test dataset.
+            num_experiences (int): Number of class-incremental experiences.
+            return_task_id (bool): Whether task labels should be emitted.
+            seed (int): Random seed controlling class order.
+            train_transform (Compose): Training transform pipeline.
+            eval_transform (Compose): Evaluation transform pipeline.
+
+        Returns:
+            NCScenario: Built Avalanche NC scenario.
+
+        Raises:
+            RuntimeError: If the installed Avalanche `nc_benchmark` signature is incompatible.
+        """
+        signature = inspect.signature(nc_benchmark)
+        parameters = signature.parameters
+        required_params = ('train_dataset', 'test_dataset', 'n_experiences')
+        missing_params = [name for name in required_params if name not in parameters]
+        if missing_params:
+            raise RuntimeError(
+                'Incompatible Avalanche `nc_benchmark` signature. '
+                f'Missing expected parameters: {missing_params}.'
+            )
+
+        kwargs: dict[str, object] = {
+            'train_dataset': train_dataset,
+            'test_dataset': test_dataset,
+            'n_experiences': num_experiences,
+        }
+        if 'task_labels' in parameters:
+            kwargs['task_labels'] = return_task_id
+        if 'shuffle' in parameters:
+            kwargs['shuffle'] = True
+        if 'seed' in parameters:
+            kwargs['seed'] = seed
+        if 'train_transform' in parameters:
+            kwargs['train_transform'] = train_transform
+        if 'eval_transform' in parameters:
+            kwargs['eval_transform'] = eval_transform
+        if 'class_ids_from_zero_from_first_exp' in parameters:
+            kwargs['class_ids_from_zero_from_first_exp'] = True
+        if 'class_ids_from_zero_in_each_exp' in parameters:
+            kwargs['class_ids_from_zero_in_each_exp'] = False
+
+        return nc_benchmark(**kwargs)
 
 
 def get_scenario_builder(*, scenario: str) -> ScenarioBuilder:
