@@ -31,6 +31,7 @@ __all__ = [
     'ensure_experiment',
     'format_timestamp_ms',
     'init_mlflow',
+    'normalize_tracking_uri',
     'resolve_artifact_uri',
     'resolve_experiment_id',
     'resolve_mlflow_run_name',
@@ -101,6 +102,22 @@ def resolve_tracking_uri(
     if tracking_uri is not None:
         return tracking_uri
     return mlflow.get_tracking_uri()
+
+
+def normalize_tracking_uri(*, tracking_uri: str | None) -> str | None:
+    """
+    Normalize a tracking URI value for equality checks.
+
+    Args:
+        tracking_uri (str | None): Raw tracking URI.
+
+    Returns:
+        str | None: Stripped URI or None when unset/blank.
+    """
+    if tracking_uri is None:
+        return None
+    normalized = str(tracking_uri).strip()
+    return normalized if normalized else None
 
 
 def set_tracking_uri(

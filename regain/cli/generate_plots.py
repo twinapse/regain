@@ -11,8 +11,16 @@ Examples:
 """
 import argparse
 from pathlib import Path
+import sys
+import tempfile
 
 from regain.analysis.plotting import plot_analysis_outputs
+from regain.cli._utils._output_helpers import add_failure
+from regain.cli._utils._output_helpers import CliFailure
+from regain.cli._utils._output_helpers import finalize_staged_outputs
+from regain.cli._utils._output_helpers import print_failure_summary
+from regain.cli._utils._output_helpers import resolve_exit_code
+from regain.cli._utils._output_helpers import StagedOutput
 from regain.constants import ANALYSIS_RHO_AVG
 from regain.utils import get_logger
 
@@ -67,24 +75,77 @@ def main() -> None:
         default=None,
         help='Optional directory to write plot PNGs (defaults to <analysis-dir>/plots when saving).',
     )
+    p.add_argument(
+        '--allow-partial',
+        action='store_true',
+        help='Allow partial outputs when plotting fails.',
+    )
+    p.add_argument(
+        '--overwrite',
+        action='store_true',
+        help='Overwrite existing target outputs.',
+    )
     args = p.parse_args()
 
     analysis_out = Path(args.analysis_dir)
-    if not analysis_out.exists():
-        raise FileNotFoundError(f'analysis_dir does not exist: {analysis_out}')
-
     mode = _mode_from_flags(show=bool(args.show), save=bool(args.save))
+    failures: list[CliFailure] = []
+    staged_outputs: list[StagedOutput] = []
+    destination_dir = Path(args.save_dir) if args.save_dir is not None else (analysis_out / 'plots')
 
-    saved = plot_analysis_outputs(
-        analysis_out=analysis_out,
-        perf_key=str(args.perf_key),
-        mode=mode,
-        save_dir=args.save_dir,
+    with tempfile.TemporaryDirectory() as temp_dir:
+        staged_save_dir = Path(temp_dir) / 'plots'
+        if not analysis_out.exists():
+            add_failure(
+                failures=failures,
+                scope=f'analysis_dir={analysis_out}',
+                error=f'analysis_dir does not exist: {analysis_out}',
+            )
+        else:
+            try:
+                save_dir = staged_save_dir if mode in ['save', 'both'] else None
+                saved = plot_analysis_outputs(
+                    analysis_out=analysis_out,
+                    perf_key=str(args.perf_key),
+                    mode=mode,
+                    save_dir=save_dir,
+                )
+                if saved and mode in ['save', 'both']:
+                    staged_outputs.append(
+                        StagedOutput(
+                            scope=f'analysis_dir={analysis_out}',
+                            source=staged_save_dir,
+                            destination=destination_dir,
+                        )
+                    )
+            except Exception as exc:
+                add_failure(
+                    failures=failures,
+                    scope=f'analysis_dir={analysis_out}',
+                    error=exc,
+                )
+
+        published_count = finalize_staged_outputs(
+            outputs=staged_outputs,
+            failures=failures,
+            allow_partial=bool(args.allow_partial),
+            overwrite=bool(args.overwrite),
+        )
+
+    if published_count > 0:
+        logger.warning(f'Plots written under: {destination_dir}')
+
+    print_failure_summary(
+        command_name='regain-generate-plots',
+        failures=failures,
     )
-
-    if saved:
-        out_dir = Path(args.save_dir) if args.save_dir is not None else (analysis_out / 'plots')
-        logger.warning(f'Plots written under: {out_dir}')
+    sys.exit(
+        resolve_exit_code(
+            failures=failures,
+            allow_partial=bool(args.allow_partial),
+            published_count=published_count,
+        )
+    )
 
 
 if __name__ == '__main__':
