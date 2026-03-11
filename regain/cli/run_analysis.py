@@ -105,7 +105,7 @@ def main() -> None:
         '--tracking-uri',
         type=str,
         default=None,
-        help='MLflow tracking URI or filesystem path (SQLite only).',
+        help='MLflow tracking URI.',
     )
     p.add_argument(
         '--artifact-uri',

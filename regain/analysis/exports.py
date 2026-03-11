@@ -107,7 +107,7 @@ def export_analysis_to_json(
         experiment (str): MLflow experiment name or id.
         experiment_dir (Path): Analysis output directory for a single experiment.
         export_path (Path): Output JSON path.
-        tracking_uri (str | None): Optional MLflow tracking URI or filesystem path (SQLite only).
+        tracking_uri (str | None): Optional MLflow tracking URI.
         artifact_uri (str | None): Optional MLflow artifact URI or filesystem path.
         runs_table (list[dict[str, Any]]): Table rows for runs.
         experiences_table (list[dict[str, Any]]): Table rows for experiences.
@@ -122,7 +122,7 @@ def export_analysis_to_json(
 
     Raises:
         OSError: If writing the export file fails.
-        ValueError: If the tracking URI is not SQLite or the export payload cannot be serialized.
+        ValueError: If the export payload cannot be serialized.
     """
     curves_dir = experiment_dir / 'curves'
     frontier_dir = experiment_dir / 'frontier'

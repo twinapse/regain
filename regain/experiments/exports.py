@@ -42,14 +42,14 @@ def export_runs_to_csvs(
         metadata_path (Path): Output CSV path for metadata.
         params_path (Path): Output CSV path for params.
         metrics_path (Path): Output CSV path for metrics.
-        tracking_uri (str | None): Optional MLflow tracking URI or filesystem path (SQLite only).
+        tracking_uri (str | None): Optional MLflow tracking URI.
 
     Returns:
         None
 
     Raises:
         OSError: If writing a CSV fails.
-        ValueError: If the tracking URI is not SQLite or the experiment cannot be resolved.
+        ValueError: If the experiment cannot be resolved.
     """
     set_tracking_uri(tracking_uri=tracking_uri)
 

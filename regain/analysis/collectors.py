@@ -444,7 +444,7 @@ def collect_experiment_tables(
     Args:
         experiment: MLflow experiment name or id.
         out_dir: Optional directory to also write 'runs_table.jsonl' and 'experiences_table.jsonl'.
-        tracking_uri: Optional MLflow tracking URI or filesystem path (SQLite only).
+        tracking_uri: Optional MLflow tracking URI.
         include_controllers: Optional allowlist of controller_name values.
         exclude_controllers: Optional denylist of controller_name values.
         max_runs: Optional limit on number of runs to load.

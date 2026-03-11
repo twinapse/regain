@@ -339,9 +339,6 @@ This section describes **how metrics are organized in MLflow** and **what we rep
 
 >ℹ️ Evaluation cadence rules are defined in section 3.3.
 
-> ℹ️ **SQLite backend required:** REGAIN forces MLflow to use a SQLite backend. Provide a tracking URI like
-> `sqlite:///path/to/mlflow.db` (or a filesystem path such as `./mlflow.db`). Non-SQLite tracking URIs are rejected.
-
 ### 7.1 Metric namespaces
 Metric keys are normalized and namespaced as:
 
