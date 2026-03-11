@@ -1,8 +1,8 @@
 # Experimental Framework
 
 This document specifies the benchmark protocol, controller regimes, evaluation behavior, and metric logging
-organization used to measure **retrieval-correctable forgetting** on **SplitCIFAR-100** in a
-**single-head class-incremental learning (CIL)** setting.
+organization used to measure **retrieval-correctable forgetting** on supported class-incremental
+learning (CIL) scenarios (**SplitCIFAR-100**, **Split Tiny-ImageNet**, and **Split ImageNet-R**).
 
 ---
 
@@ -26,7 +26,7 @@ organization used to measure **retrieval-correctable forgetting** on **SplitCIFA
 accuracies and derived analysis metrics.
 
 **High-level pipeline.**
-1. Build a SplitCIFAR-100 continual learning scenario (`num_experiences`, default 10).
+1. Build the configured continual learning scenario (`scenario`, `num_experiences`).
 2. Train a single-head classifier sequentially over experiences.
 3. Fit and/or apply the configured controller (depending on controller type).
 4. Evaluate and log metrics.
@@ -50,17 +50,35 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 ## 1) Benchmark & Scenario
 
 ### Dataset and split
-- Dataset: **CIFAR-100**
-- Image size: **32×32**
-- Number of classes: **100**
-- Scenario builder: **Avalanche `SplitCIFAR100`**
-- Split protocol: **default 10 experiences × 10 classes** (disjoint class subsets; `num_experiences` configurable)
+- Scenario selection is configuration-driven through `scenario`.
+- `num_experiences` controls the class-incremental partitioning and is configurable per experiment.
 - Evaluation setting: **single-head class-incremental** (no task ID at test time)
 
+### Supported scenarios
+
+#### `split_cifar100`
+- Dataset: **CIFAR-100** (100 classes, 32x32 images)
+- Scenario builder: **Avalanche `SplitCIFAR100`**
+- Data source: Managed automatically by Avalanche (download and dataset handling).
+
+#### `split_tiny_imagenet`
+- Dataset: **Tiny-ImageNet-200** (200 classes, 64x64 images)
+- Scenario builder: **Avalanche `SplitTinyImageNet`**
+- Data source: Managed automatically by Avalanche (download and dataset handling).
+
+#### `split_imagenet_r`
+- Dataset: **ImageNet-R** (200 classes)
+- Scenario builder: **custom `SplitImageNetR`**
+- Data source: Downloaded from the Berkeley ImageNet-R release ([Hendrycks et al.](https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar)).
+- Expected split layout under dataset root: `train/<class_name>/*` and `test/<class_name>/*`.
+- If explicit split folders are not found, a deterministic per-class train/test holdout is built from a single-root class folder layout using `seed`.
+
 ### Task definition (Avalanche)
-- We use `SplitCIFAR100(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
+- For `split_cifar100`, we use `SplitCIFAR100(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
+- For `split_tiny_imagenet`, we use `SplitTinyImageNet(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
+- For `split_imagenet_r`, we resolve raw train/test datasets and then build a class-incremental NC benchmark with `return_task_id=False`.
 - Each experience corresponds to one task $T_i$.
-- The class partition/order is determined by Avalanche under `seed` (tasks are defined by Avalanche).
+- The class partition/order is determined by `seed` and scenario generator logic.
 - Assumption: class IDs are contiguous starting from 0 across the full benchmark; this is enforced by the runner
   (`verify_classes` in `regain/experiments/builders.py`).
 
@@ -72,7 +90,7 @@ We record accuracies under two different “label space” regimes:
    (Implemented via a seen-classes masking plugin during reference evaluation.)
 
 2) **All-classes evaluation (for post-sequence + controller accuracies)**  
-   After training all experiences, evaluation is performed over all 100 classes.
+   After training all experiences, evaluation is performed over all benchmark classes.
 
 ---
 
@@ -81,7 +99,7 @@ We record accuracies under two different “label space” regimes:
 ### Model
 - Backbone: `resnet18` | `vit_small` | `vit_tiny` (default `resnet18`)
 - Normalization: **BatchNorm** (standard ResNet-18 by default)
-- Classifier head: linear layer to **100** logits (single head)
+- Classifier head: linear layer to **`num_classes(scenario)`** logits (single head)
 
 > ℹ️ **Class label invariant:** in this single-head setup, logit index `c` corresponds to global class ID `c` (class IDs
 > are contiguous from 0), and downstream analyses/controllers are expected to preserve this ordering.
@@ -93,7 +111,7 @@ We record accuracies under two different “label space” regimes:
 - Offline / multi-epoch training per experience.
 - After completing experience $T_k$, training proceeds to $T_{k+1}$.
 - Raw data from previous experiences are not reused (unless the chosen Avalanche strategy uses replay/memory internally).
-- The classifier remains single-head over all 100 classes throughout.
+- The classifier remains single-head over all benchmark classes throughout.
 
 ---
 
@@ -269,7 +287,7 @@ $$
 ### Post-sequence accuracy (all-classes, after all experiences)
 $$
 A_{\text{post}}(T_i) =
-\text{Acc}\Big(\text{test}(T_i)\ \text{with label space } \{0,\dots,99\}\Big)
+\text{Acc}\Big(\text{test}(T_i)\ \text{with label space } \{0,\dots,C-1\}\Big)
 $$
 
 >ℹ️ With prevention controllers, $A_{\text{post}}$ is the posthoc evaluation of the model trained under the controller
@@ -279,14 +297,14 @@ $$
 ### Controller accuracy (all-classes)
 $$
 A_{\text{ctrl}}(T_i;\theta,b) =
-\text{Acc}\Big(\text{test}(T_i)\ \text{with label space } \{0,\dots,99\}\Big)
+\text{Acc}\Big(\text{test}(T_i)\ \text{with label space } \{0,\dots,C-1\}\Big)
 $$
 >ℹ️ $A_{\text{ctrl}}$ and $\rho$ are logged only for repair controllers, because prevention controllers do not define
 > a post-hoc, toggleable evaluation-time correction.
 
 ### Final global accuracy (all classes)
 $$
-A_{\text{final}} = \text{Acc}\Big(\text{test}(\{0,\dots,99\})\Big)
+A_{\text{final}} = \text{Acc}\Big(\text{test}(\{0,\dots,C-1\})\Big)
 $$
 >ℹ️ In practice this corresponds to the posthoc stream accuracy (e.g., `Top1_Acc_Stream`). It is also surfaced as a
 > normalized `run.summary.accuracy.final.avg.base`; see [section 7](#7-metric-logging--reporting-mlflow).
