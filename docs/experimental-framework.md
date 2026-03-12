@@ -97,7 +97,7 @@ We record accuracies under two different “label space” regimes:
 ## 2) Model & Training Protocol
 
 ### Model
-- Backbone: `resnet18` | `vit_small` | `vit_tiny` (default `resnet18`)
+- Backbone: `resnet18` | `vit_small` | `vit_base` (default `resnet18`)
 - Normalization: **BatchNorm** (standard ResNet-18 by default)
 - Classifier head: linear layer to **`num_classes(scenario)`** logits (single head)
 

@@ -7,13 +7,13 @@ import torch.nn as nn
 
 from regain.models.backbones import ResNet18Backbone
 from regain.models.backbones import ViTSmallBackbone
-from regain.models.backbones import ViTTinyBackbone
+from regain.models.backbones import ViTBaseBackbone
 from regain.models.heads import LinearClassifier
 
 __all__ = [
     'ResNet18Classifier',
+    'ViTBaseClassifier',
     'ViTSmallClassifier',
-    'ViTTinyClassifier',
 ]
 
 
@@ -89,9 +89,9 @@ class ViTSmallClassifier(nn.Module):
         return logits
 
 
-class ViTTinyClassifier(nn.Module):
+class ViTBaseClassifier(nn.Module):
     """
-    ViT-T backbone paired with a linear classifier head.
+    ViT-B backbone paired with a linear classifier head.
 
     Args:
         n_classes: Number of output classes.
@@ -108,7 +108,7 @@ class ViTTinyClassifier(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        self.backbone = ViTTinyBackbone(
+        self.backbone = ViTBaseBackbone(
             image_size=image_size,
             patch_size=patch_size,
             dropout=dropout,
