@@ -5,8 +5,8 @@ The analysis pipeline is intentionally table-first (CSV/JSON artifacts).
 This module provides optional visualization of those artifacts using `matplotlib`.
 
 Typical usage:
-  - `python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results --show-plots`
-  - `python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save`
+  - `python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results --show-plots all`
+  - `python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --save`
 """
 from pathlib import Path
 from typing import Any, Iterable, Optional

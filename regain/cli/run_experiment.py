@@ -5,7 +5,6 @@ CLI entrypoint for running experiments from YAML configuration and logging metri
 import argparse
 import inspect
 from pathlib import Path
-import sys
 
 # WARNING: Don't import non-standard modules at the top-level to ensure prerequisites first.
 
@@ -86,35 +85,7 @@ def _ensure_prerequisites() -> None:
     _patch_avalanche_il2m_initial_eval()
 
 
-def _export_runs_to_csvs(
-    *,
-    experiment_name: str,
-    export_dir: str,
-    tracking_uri: str | None,
-) -> None:
-    """
-    Export run data for one experiment to CSV files.
-
-    Args:
-        experiment_name (str): MLflow experiment name.
-        export_dir (str): Directory for exportable run outputs.
-        tracking_uri (str | None): MLflow tracking URI.
-
-    Returns:
-        None
-
-    """
-    # Import `regain` modules after prerequisites are ensured
-    from regain.cli._utils._export_helpers import export_runs_for_experiment
-
-    export_runs_for_experiment(
-        experiment_name=experiment_name,
-        export_dir=export_dir,
-        tracking_uri=tracking_uri,
-    )
-
-
-def _run_experiment(config_file: str) -> tuple[str, str | None]:
+def _run_experiment(config_file: str) -> None:
     """
     Load and run a single experiment configuration.
 
@@ -122,7 +93,7 @@ def _run_experiment(config_file: str) -> tuple[str, str | None]:
         config_file (str): Path to a single experiment config YAML file.
 
     Returns:
-        tuple[str, str | None]: Experiment name and MLflow tracking URI.
+        None
     """
     # Import `regain` modules after prerequisites are ensured
     from regain.experiments.config import load_experiment_config
@@ -132,46 +103,6 @@ def _run_experiment(config_file: str) -> tuple[str, str | None]:
     experiment_config = load_experiment_config(config_file)
     # Run experiment
     run_experiment(experiment_config)
-    # Return experiment name and tracking URI
-    return experiment_config.experiment_name, experiment_config.mlflow_tracking_uri
-
-
-def _resolve_export_targets(
-    *,
-    experiment_runs: list[tuple[str, str | None]],
-) -> list[tuple[str, str | None]]:
-    """
-    Resolve export targets grouped by experiment.
-
-    Args:
-        experiment_runs (list[tuple[str, str | None]]): Completed run results.
-
-    Returns:
-        list[tuple[str, str | None]]: One export target per experiment.
-
-    Raises:
-        ValueError: If one experiment is associated with multiple tracking URIs.
-    """
-    # Import `regain` modules after prerequisites are ensured
-    from regain.mlflow_utils import normalize_tracking_uri
-
-    experiment_tracking_uris: dict[str, str | None] = {}
-    for experiment_name, tracking_uri_raw in experiment_runs:
-        tracking_uri = normalize_tracking_uri(tracking_uri=tracking_uri_raw)
-        if experiment_name not in experiment_tracking_uris:
-            experiment_tracking_uris[experiment_name] = tracking_uri
-            continue
-
-        existing_tracking_uri = experiment_tracking_uris[experiment_name]
-        if existing_tracking_uri == tracking_uri:
-            continue
-
-        raise ValueError(
-            'Conflicting tracking URIs for the same experiment. '
-            f'Experiment `{experiment_name}` uses both `{existing_tracking_uri}` and `{tracking_uri}`.'
-        )
-
-    return [(name, uri) for name, uri in experiment_tracking_uris.items()]
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -191,12 +122,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         '--config-dir',
         type=str,
         help='Path to a directory recursively searched for experiment config YAML files',
-    )
-    parser.add_argument(
-        '--export-dir',
-        type=str,
-        default=None,
-        help='Path to the directory for exportable run outputs.',
     )
     return parser
 
@@ -256,25 +181,8 @@ def main() -> None:
             parser.error(f'No config YAML files found in --config-dir: {args.config_dir}')
 
     # Run each experiment config file
-    experiment_runs: list[tuple[str, str | None]] = []
     for config_file in config_files:
-        experiment_runs.append(_run_experiment(config_file))
-
-    # Export runs to CSV once per experiment if requested.
-    if args.export_dir is not None:
-        try:
-            export_targets = _resolve_export_targets(
-                experiment_runs=experiment_runs,
-            )
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(1) from exc
-        for experiment_name, tracking_uri in export_targets:
-            _export_runs_to_csvs(
-                experiment_name=experiment_name,
-                export_dir=args.export_dir,
-                tracking_uri=tracking_uri,
-            )
+        _run_experiment(config_file)
 
 
 if __name__ == '__main__':
