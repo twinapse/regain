@@ -27,13 +27,16 @@ from regain.constants import PARAM_RUN_NAME
 
 __all__ = [
     'build_mlflow_run_columns',
+    'delete_mlflow_runs',
     'download_json_artifact',
     'ensure_experiment',
     'format_timestamp_ms',
     'init_mlflow',
     'normalize_tracking_uri',
+    'resolve_active_runs_by_name',
     'resolve_artifact_location',
     'resolve_experiment_id',
+    'resolve_latest_active_runs_by_name',
     'resolve_mlflow_run_name',
     'resolve_tracking_uri',
     'search_runs_paginated',
@@ -309,6 +312,107 @@ def search_runs_paginated(
 ######################
 # Run info resolvers #
 ######################
+
+
+def resolve_active_runs_by_name(
+    *,
+    experiment_name: str,
+    tracking_uri: str | None,
+) -> dict[str, list[object]]:
+    """
+    Resolve active MLflow runs for an experiment grouped by run name.
+
+    Args:
+        experiment_name (str): MLflow experiment name.
+        tracking_uri (str | None): Optional MLflow tracking URI override.
+
+    Returns:
+        dict[str, list[object]]: Active runs grouped by resolved run name.
+    """
+    set_tracking_uri(tracking_uri=tracking_uri)
+    client = MlflowClient()
+    try:
+        experiment_id = resolve_experiment_id(
+            client=client,
+            experiment=experiment_name,
+        )
+    except ValueError:
+        return {}
+
+    runs = search_runs_paginated(
+        client=client,
+        experiment_ids=[experiment_id],
+        filter_string='',
+        run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY,
+    )
+    grouped_runs: dict[str, list[object]] = {}
+    for run in runs:
+        run_name = str(resolve_mlflow_run_name(run=run)).strip()
+        if not run_name:
+            continue
+        if run_name not in grouped_runs:
+            grouped_runs[run_name] = []
+        grouped_runs[run_name].append(run)
+    return grouped_runs
+
+
+def resolve_latest_active_runs_by_name(
+    *,
+    active_runs_by_name: dict[str, list[object]],
+) -> dict[str, object]:
+    """
+    Resolve the latest active run per run name.
+
+    Args:
+        active_runs_by_name (dict[str, list[object]]): Active runs grouped by run name.
+
+    Returns:
+        dict[str, object]: Latest active run object per name.
+    """
+    latest_runs_by_name: dict[str, object] = {}
+    for run_name, grouped_runs in active_runs_by_name.items():
+        if not grouped_runs:
+            continue
+        sorted_runs = sorted(
+            grouped_runs,
+            key=lambda run: (
+                int(getattr(getattr(run, 'info', None), 'start_time', 0) or 0),
+                str(getattr(getattr(run, 'info', None), 'run_id', '') or ''),
+            ),
+            reverse=True,
+        )
+        latest_runs_by_name[run_name] = sorted_runs[0]
+    return latest_runs_by_name
+
+
+def delete_mlflow_runs(
+    *,
+    runs: list[object],
+    tracking_uri: str | None,
+) -> None:
+    """
+    Delete MLflow runs by id, deduplicating repeated ids.
+
+    Args:
+        runs (list[object]): Run-like objects with `.info.run_id`.
+        tracking_uri (str | None): Optional MLflow tracking URI override.
+
+    Returns:
+        None
+    """
+    if not runs:
+        return
+
+    set_tracking_uri(tracking_uri=tracking_uri)
+    client = MlflowClient()
+    deleted_run_ids: set[str] = set()
+    for run in runs:
+        run_id = getattr(getattr(run, 'info', None), 'run_id', '')
+        resolved_run_id = str(run_id) if run_id is not None else ''
+        if resolved_run_id == '' or resolved_run_id in deleted_run_ids:
+            continue
+        client.delete_run(run_id=resolved_run_id)
+        deleted_run_ids.add(resolved_run_id)
 
 
 def resolve_mlflow_run_name(*, run: Run) -> str:
