@@ -133,6 +133,8 @@ def _train_and_evaluate_strategy(
     experiment_config: ExperimentConfig,
     run_config: RunConfig | _InternalRunConfig,
     *,
+    tracking_uri: str | None = None,
+    artifact_location: str | None = None,
     backbone_checkpoint_paths: Sequence[Path] | None = None,
     backbone_analysis_baseline: Mapping[str, Sequence[float | None]] | None = None,
     checkpoint_dir: Path | None = None,
@@ -147,6 +149,8 @@ def _train_and_evaluate_strategy(
     Args:
         experiment_config: Experiment configuration shared across runs.
         run_config: Run-specific configuration.
+        tracking_uri: Optional MLflow tracking URI override.
+        artifact_location: Optional MLflow artifact location override.
         backbone_checkpoint_paths: Optional backbone checkpoint paths for repair-controller runs.
         backbone_analysis_baseline: Optional controller-off baseline vectors from the reserved backbone run.
         checkpoint_dir: Optional output directory for one checkpoint per experience.
@@ -168,8 +172,8 @@ def _train_and_evaluate_strategy(
     with init_mlflow(
         experiment_name=experiment_config.experiment_name,
         run_name=run_config.name,
-        tracking_uri=experiment_config.mlflow_tracking_uri,
-        artifact_uri=experiment_config.mlflow_artifact_uri,
+        tracking_uri=tracking_uri,
+        artifact_location=artifact_location,
     ):
         with tempfile.TemporaryDirectory() as artifacts_dir:
             # Validate backbone checkpoint usage
@@ -470,11 +474,8 @@ def _train_and_evaluate_strategy(
             with config_path.open('w', encoding='utf-8') as f:
                 dumped_config = asdict(experiment_config)
 
-                # Note: We exclude `dataset_path`, `mlflow_tracking_uri`, and `mlflow_artifact_uri`
-                #       because they are environment-specific
+                # Note: We exclude `dataset_path` because it is environment-specific.
                 dumped_config.pop('dataset_path')
-                dumped_config.pop('mlflow_tracking_uri')
-                dumped_config.pop('mlflow_artifact_uri')
                 dumped_config.pop('runs')
 
                 dumped_config['run'] = asdict(run_config)
@@ -493,6 +494,8 @@ def _train_and_evaluate_strategy(
 def _run_backbone_pretraining_run(
     *,
     experiment_config: ExperimentConfig,
+    tracking_uri: str | None,
+    artifact_location: str | None,
     checkpoint_dir: Path,
 ) -> tuple[list[Path], dict[str, float], dict[str, list[float | None]]]:
     """
@@ -500,6 +503,8 @@ def _run_backbone_pretraining_run(
 
     Args:
         experiment_config (ExperimentConfig): Experiment configuration.
+        tracking_uri (str | None): Optional MLflow tracking URI override.
+        artifact_location (str | None): Optional MLflow artifact location override.
         checkpoint_dir (Path): Directory where one checkpoint per experience will be saved.
 
     Returns:
@@ -511,6 +516,8 @@ def _run_backbone_pretraining_run(
     strategy, _, eval_results, checkpoint_paths = _train_and_evaluate_strategy(
         experiment_config=experiment_config,
         run_config=backbone_run_config,
+        tracking_uri=tracking_uri,
+        artifact_location=artifact_location,
         checkpoint_dir=checkpoint_dir,
         log_checkpoint_artifacts=bool(experiment_config.checkpoints_enabled),
         repair_split_fraction_override=experiment_config.repair.split_fraction,
@@ -525,12 +532,19 @@ def _run_backbone_pretraining_run(
 
 
 # TODO: This function is too long and does too many things. Divide it into smaller functions.
-def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, float]]:
+def run_experiment(
+    experiment_config: ExperimentConfig,
+    *,
+    tracking_uri: str | None = None,
+    artifact_location: str | None = None,
+) -> dict[str, dict[str, float]]:
     """
     Execute one or more runs defined in the experiment configuration.
 
     Args:
         experiment_config (ExperimentConfig): Experiment configuration describing all runs.
+        tracking_uri (str | None): Optional MLflow tracking URI override.
+        artifact_location (str | None): Optional MLflow artifact location override.
 
     Returns:
         dict: Mapping from run name to scalar evaluation metrics.
@@ -585,7 +599,7 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
                 f'Missing: {missing_str}.'
             )
 
-    set_tracking_uri(tracking_uri=experiment_config.mlflow_tracking_uri)
+    set_tracking_uri(tracking_uri=tracking_uri)
     mlflow_client = MlflowClient()
 
     local_backbone_run = resolve_local_backbone_run(
@@ -721,6 +735,8 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
                 backbone_analysis_baseline,
             ) = _run_backbone_pretraining_run(
                 experiment_config=experiment_config,
+                tracking_uri=tracking_uri,
+                artifact_location=artifact_location,
                 checkpoint_dir=backbone_checkpoint_dir,
             )
 
@@ -785,6 +801,8 @@ def run_experiment(experiment_config: ExperimentConfig) -> dict[str, dict[str, f
                 _, _, eval_results, _ = _train_and_evaluate_strategy(
                     experiment_config=experiment_config,
                     run_config=run_config,
+                    tracking_uri=tracking_uri,
+                    artifact_location=artifact_location,
                     backbone_checkpoint_paths=(
                         backbone_checkpoint_paths if controller_type == 'repair' else None
                     ),

@@ -93,7 +93,12 @@ class TestRunExecution:
     ) -> None:
         run_calls: list[str] = []
 
-        def _fake_run_experiment(config_file: str) -> None:
+        def _fake_run_experiment(
+            config_file: str,
+            *,
+            tracking_uri: str | None = None,
+            artifact_location: str | None = None,
+        ) -> None:
             run_calls.append(config_file)
 
         monkeypatch.setattr(run_experiment_cli, '_ensure_prerequisites', lambda: None)
@@ -118,7 +123,12 @@ class TestRunExecution:
     ) -> None:
         run_calls: list[str] = []
 
-        def _fake_run_experiment(config_file: str) -> None:
+        def _fake_run_experiment(
+            config_file: str,
+            *,
+            tracking_uri: str | None = None,
+            artifact_location: str | None = None,
+        ) -> None:
             run_calls.append(config_file)
 
         monkeypatch.setattr(run_experiment_cli, '_ensure_prerequisites', lambda: None)

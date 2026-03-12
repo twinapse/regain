@@ -127,13 +127,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         '--tracking-uri',
         type=str,
         default=None,
-        help='MLflow tracking URI (overrides config-derived values).',
+        help='Optional MLflow tracking URI override.',
     )
     parser.add_argument(
-        '--artifact-uri',
+        '--artifact-location',
         type=str,
         default=None,
-        help='MLflow artifact URI or filesystem path.',
+        help='MLflow artifact location or filesystem path.',
     )
     parser.add_argument(
         '--include-controllers',
@@ -180,7 +180,7 @@ def main() -> None:
         config_files=args.config_files,
         config_dir=args.config_dir,
         experiments=args.experiments,
-        tracking_uri_override=args.tracking_uri,
+        tracking_uri=args.tracking_uri,
         failures=failures,
     )
 
@@ -199,7 +199,7 @@ def main() -> None:
                     experiment_dir=experiment_dir,
                     export_path=staged_export_path,
                     tracking_uri=target.tracking_uri,
-                    artifact_uri=args.artifact_uri,
+                    artifact_location=args.artifact_location,
                     runs_table=runs_table,
                     experiences_table=experiences_table,
                     include_controllers=include_controllers,
