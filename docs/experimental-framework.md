@@ -389,6 +389,10 @@ Analysis collection requires each run to provide:
 - `controller.type` in `{none, prevention, repair}`;
 - `repair.split_fraction`.
 
+Runs that do not satisfy these analysis requirements are skipped during collection and recorded as run-level failures.
+`regain/cli/run_analysis.py` can still publish successful outputs when invoked with `--allow-partial`.
+When zero runs are successfully collected, analysis outputs are not published and the command exits with failure.
+
 All metrics live on the run. The final posthoc evaluation is always prefixed with `final.`. For repair-controller
 runs with `repair.fit_schedule=per_experience`, per-experience checkpoint metrics are additionally prefixed with the
 checkpoint name (`exp000.`, `exp001.`, ...).

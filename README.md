@@ -56,7 +56,13 @@ The typical workflow is:
 Provide one or more YAML configs (comma-separated) and run:
 
 ```bash
-python -m regain.cli.run_experiment --config_files ./config/experiment_a.yaml,./config/experiment_b.yaml
+python -m regain.cli.run_experiment --config-files ./config/experiment_a.yaml,./config/experiment_b.yaml
+```
+
+You can also discover configs recursively from a directory:
+
+```bash
+python -m regain.cli.run_experiment --config-dir ./config
 ```
 
 This produces MLflow runs under your configured tracking URI. Artifact storage follows MLflow defaults unless you set 
@@ -67,8 +73,23 @@ To export all MLflow runs in each experiment to CSVs (one row per run, written t
 `./<export_dir>/<experiment>/run_metrics.csv`, overwrites existing exports to capture the latest snapshot/state):
 
 ```bash
-python -m regain.cli.run_experiment --config_files ./config/experiment_a.yaml,./config/experiment_b.yaml --export-dir ./exports
+python -m regain.cli.run_experiment --config-files ./config/experiment_a.yaml,./config/experiment_b.yaml --export-dir ./exports
 ```
+
+When multiple config files target the same experiment, this export happens once per experiment. If configs for the
+same experiment define conflicting tracking URIs, execution fails.
+
+To export later without rerunning experiments:
+
+```bash
+python -m regain.cli.export_runs --config-files ./config/experiment_a.yaml,./config/experiment_b.yaml --export-dir ./exports
+python -m regain.cli.export_runs --config-dir ./config --export-dir ./exports
+```
+
+`export_runs` uses staged publishing:
+* by default, it is transactional (any failure prevents publishing all staged outputs);
+* add `--allow-partial` to publish what succeeds;
+* add `--overwrite` to replace existing `./exports/<experiment>/` targets.
 
 ### 2) Analyze logged runs (write artifacts, optionally plot)
 
@@ -86,6 +107,9 @@ Notes:
   `run.calibration.max_ece` is defined as `max(run.calibration.ece)` over artifact baseline vectors.
 * Analysis collection requires each run to include `controller.type` (`none`, `prevention`, or `repair`) and
   `repair.split_fraction` parameters.
+* Runs that fail collection validation are skipped and reported as run-level failures.
+  Use `--allow-partial` if you want successful outputs to still be published when some runs/stages fail.
+  If zero runs are successfully collected, no analysis outputs are published (exit code `1`).
 * `repair_set_total` in analysis tables is:
   - `0` when `repair.split_fraction == 0.0`;
   - otherwise, the exact total non-empty line count across `repair/exp_*.txt` in `splits.tar.gz`.
@@ -94,12 +118,15 @@ Common flags:
 
 * `--experiment`: MLflow experiment name or id (e.g. `experiment_1`)
 * `--output-dir`: output directory root (experiment subdirectory is created under this path)
-* `--export-dir`: export directory root (writes `<export-dir>/<experiment>/analysis.json`, overwrites to capture the latest snapshot/state)
+* `--export-dir`: export directory root (writes `<export-dir>/<experiment>/analysis.json`; 
+  use `--overwrite` to replace an existing export)
 * `--tracking-uri`: MLflow tracking URI
 * `--artifact-uri`: MLflow artifact URI or filesystem path
 * `--show-plots`: display plots interactively
 * `--save-plots`: save plots to `<output-dir>/<experiment>/plots`
 * `--perf-key`: metric key to maximize for the frontier and plot in curves
+* `--allow-partial`: publish successful outputs even if some stages fail
+* `--overwrite`: replace existing `<output-dir>/<experiment>/*` and/or `<export-dir>/<experiment>/analysis.json`
 
 Examples:
 
@@ -116,6 +143,16 @@ python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./a
 # Export a self-contained JSON bundle
 python -m regain.cli.run_analysis all --experiment experiment_1 --output-dir ./analysis_results --export-dir ./exports
 ```
+
+To export later without rerunning analysis, using existing `./analysis_results/<experiment>/tables/*.jsonl`:
+
+```bash
+python -m regain.cli.export_analysis --experiment experiment_1 --output-dir ./analysis_results --export-dir ./exports
+```
+
+If `./exports/<experiment>/analysis.json` already exists, add `--overwrite`.
+
+Like `export_runs`, `export_analysis` supports `--allow-partial` (best-effort publishing) and `--overwrite`.
 
 Outputs are organized under:
 
@@ -135,6 +172,10 @@ python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save --perf-key analysis.accuracy.final.avg.ctrl
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --show --save --save-dir ./plots
 ```
+
+`generate_plots` defaults to interactive display when neither `--show` nor `--save` is provided.
+When saving, add `--overwrite` to replace an existing target plot directory. `--allow-partial` enables best-effort
+publishing on errors.
 
 ## Code style and formatting
 

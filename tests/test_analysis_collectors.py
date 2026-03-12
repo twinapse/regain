@@ -211,11 +211,12 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             artifact_payload=artifact_payload,
         )
 
-        runs_table, experiences_table = collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
 
         assert len(runs_table) == 1
         assert runs_table[0][RUN_CALIB_MAX_ECE] == pytest.approx(0.31)
         assert len(experiences_table) == 1
+        assert not run_failures
         row = experiences_table[0]
         assert row[RUN_CALIB_ECE] == pytest.approx(0.11)
         assert row[RUN_CALIB_AECE] == pytest.approx(0.12)
@@ -264,11 +265,12 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             artifact_payload=artifact_payload,
         )
 
-        runs_table, experiences_table = collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
 
         assert len(runs_table) == 1
         assert runs_table[0][RUN_CALIB_MAX_ECE] == pytest.approx(0.10)
         assert len(experiences_table) == 1
+        assert not run_failures
         row = experiences_table[0]
         assert row[RUN_CALIB_ECE] == pytest.approx(0.11)
         assert row[RUN_CALIB_AECE] == pytest.approx(0.12)
@@ -307,8 +309,11 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             artifact_payload=None,
         )
 
-        with pytest.raises(ValueError, match='analysis_artifacts.json'):
-            collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not runs_table
+        assert not experiences_table
+        assert len(run_failures) == 1
+        assert 'analysis_artifacts.json' in run_failures[0]['error']
 
     def test_repair_run_missing_diagnostic_vectors_raises(
         self,
@@ -341,8 +346,11 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             },
         )
 
-        with pytest.raises(ValueError, match='required baseline diagnostic metrics'):
-            collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not runs_table
+        assert not experiences_table
+        assert len(run_failures) == 1
+        assert 'required baseline diagnostic metrics' in run_failures[0]['error']
 
     def test_non_repair_run_keeps_logged_diagnostics(
         self,
@@ -380,9 +388,10 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             artifact_payload=artifact_payload,
         )
 
-        _, experiences_table = collect_experiment_tables(experiment='exp_name')
+        _, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
 
         assert len(experiences_table) == 1
+        assert not run_failures
         row = experiences_table[0]
         assert row[RUN_CALIB_ECE] == pytest.approx(0.77)
         assert row[RUN_CALIB_AECE] == pytest.approx(0.66)
@@ -432,12 +441,13 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             client_factory=lambda: _FakeMlflowClient(splits_archive_path=archive_path),
         )
 
-        runs_table, experiences_table = collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
 
         assert len(runs_table) == 1
         assert runs_table[0][COLUMN_REPAIR_SET_TOTAL] == 5
         assert len(experiences_table) == 1
         assert experiences_table[0][COLUMN_REPAIR_SET_TOTAL] == 5
+        assert not run_failures
 
     def test_repair_run_missing_calib_max_ece_scalar_raises(
         self,
@@ -475,8 +485,11 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             artifact_payload=artifact_payload,
         )
 
-        with pytest.raises(ValueError, match=RUN_CALIB_MAX_ECE):
-            collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not runs_table
+        assert not experiences_table
+        assert len(run_failures) == 1
+        assert RUN_CALIB_MAX_ECE in run_failures[0]['error']
 
     def test_collect_skips_splits_download_when_split_fraction_is_zero(
         self,
@@ -509,12 +522,13 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             _raise_unexpected_download,
         )
 
-        runs_table, experiences_table = collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
 
         assert len(runs_table) == 1
         assert runs_table[0][COLUMN_REPAIR_SET_TOTAL] == 0
         assert len(experiences_table) == 1
         assert experiences_table[0][COLUMN_REPAIR_SET_TOTAL] == 0
+        assert not run_failures
 
     def test_collect_does_not_share_repair_set_cache_across_runs(
         self,
@@ -585,7 +599,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             _extract_per_run_total,
         )
 
-        runs_table, experiences_table = collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
 
         assert call_count['value'] == 2
         assert len(runs_table) == 2
@@ -594,6 +608,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         assert len(experiences_table) == 2
         assert experiences_table[0][COLUMN_REPAIR_SET_TOTAL] == 4
         assert experiences_table[1][COLUMN_REPAIR_SET_TOTAL] == 5
+        assert not run_failures
 
     def test_collect_requires_controller_type_param(
         self,
@@ -613,8 +628,11 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             artifact_payload=None,
         )
 
-        with pytest.raises(ValueError, match='controller.type'):
-            collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not runs_table
+        assert not experiences_table
+        assert len(run_failures) == 1
+        assert 'controller.type' in run_failures[0]['error']
 
     def test_collect_requires_repair_split_fraction_param(
         self,
@@ -634,5 +652,8 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             artifact_payload=None,
         )
 
-        with pytest.raises(ValueError, match='repair.split_fraction'):
-            collect_experiment_tables(experiment='exp_name')
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not runs_table
+        assert not experiences_table
+        assert len(run_failures) == 1
+        assert 'repair.split_fraction' in run_failures[0]['error']

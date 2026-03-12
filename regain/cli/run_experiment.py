@@ -103,35 +103,15 @@ def _export_runs_to_csvs(
     Returns:
         None
 
-    Raises:
-        SystemExit: If one or more target export files already exist.
     """
     # Import `regain` modules after prerequisites are ensured
-    from regain.experiments.exports import export_runs_to_csvs
+    from regain.cli._utils._export_helpers import export_runs_for_experiment
 
-    # Build export paths
-    export_root = Path(export_dir) / experiment_name
-    metadata_path = export_root / 'run_metadata.csv'
-    params_path = export_root / 'run_params.csv'
-    metrics_path = export_root / 'run_metrics.csv'
-
-    # Export runs to CSVs, handling existing files gracefully
-    try:
-        export_runs_to_csvs(
-            experiment=experiment_name,
-            metadata_path=metadata_path,
-            params_path=params_path,
-            metrics_path=metrics_path,
-            tracking_uri=tracking_uri,
-        )
-        print(
-            'Run exports written to: '
-            f'{metadata_path}, {params_path}, {metrics_path}'
-        )
-    except FileExistsError as exc:
-        message = f'{exc}. Remove it or choose a different --export-dir.'
-        print(message, file=sys.stderr)
-        sys.exit(1)
+    export_runs_for_experiment(
+        experiment_name=experiment_name,
+        export_dir=export_dir,
+        tracking_uri=tracking_uri,
+    )
 
 
 def _run_experiment(config_file: str) -> tuple[str, str | None]:
@@ -154,6 +134,44 @@ def _run_experiment(config_file: str) -> tuple[str, str | None]:
     run_experiment(experiment_config)
     # Return experiment name and tracking URI
     return experiment_config.experiment_name, experiment_config.mlflow_tracking_uri
+
+
+def _resolve_export_targets(
+    *,
+    experiment_runs: list[tuple[str, str | None]],
+) -> list[tuple[str, str | None]]:
+    """
+    Resolve export targets grouped by experiment.
+
+    Args:
+        experiment_runs (list[tuple[str, str | None]]): Completed run results.
+
+    Returns:
+        list[tuple[str, str | None]]: One export target per experiment.
+
+    Raises:
+        ValueError: If one experiment is associated with multiple tracking URIs.
+    """
+    # Import `regain` modules after prerequisites are ensured
+    from regain.mlflow_utils import normalize_tracking_uri
+
+    experiment_tracking_uris: dict[str, str | None] = {}
+    for experiment_name, tracking_uri_raw in experiment_runs:
+        tracking_uri = normalize_tracking_uri(tracking_uri=tracking_uri_raw)
+        if experiment_name not in experiment_tracking_uris:
+            experiment_tracking_uris[experiment_name] = tracking_uri
+            continue
+
+        existing_tracking_uri = experiment_tracking_uris[experiment_name]
+        if existing_tracking_uri == tracking_uri:
+            continue
+
+        raise ValueError(
+            'Conflicting tracking URIs for the same experiment. '
+            f'Experiment `{experiment_name}` uses both `{existing_tracking_uri}` and `{tracking_uri}`.'
+        )
+
+    return [(name, uri) for name, uri in experiment_tracking_uris.items()]
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -237,12 +255,21 @@ def main() -> None:
         if not config_files:
             parser.error(f'No config YAML files found in --config-dir: {args.config_dir}')
 
-    # Run each experiment config file and optionally export runs to CSVs
+    # Run each experiment config file
+    experiment_runs: list[tuple[str, str | None]] = []
     for config_file in config_files:
-        # Run experiment
-        experiment_name, tracking_uri = _run_experiment(config_file)
-        # Export runs to CSV if requested
-        if args.export_dir is not None:
+        experiment_runs.append(_run_experiment(config_file))
+
+    # Export runs to CSV once per experiment if requested.
+    if args.export_dir is not None:
+        try:
+            export_targets = _resolve_export_targets(
+                experiment_runs=experiment_runs,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1) from exc
+        for experiment_name, tracking_uri in export_targets:
             _export_runs_to_csvs(
                 experiment_name=experiment_name,
                 export_dir=args.export_dir,
