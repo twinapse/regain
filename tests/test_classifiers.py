@@ -4,8 +4,8 @@ Tests for model classifiers.
 
 import torch
 
+from regain.models.classifiers import ViTBaseClassifier
 from regain.models.classifiers import ViTSmallClassifier
-from regain.models.classifiers import ViTTinyClassifier
 
 
 class TestVisionTransformerClassifiers:
@@ -18,8 +18,8 @@ class TestVisionTransformerClassifiers:
         assert torch.is_tensor(logits)
         assert logits.shape == (2, 10)
 
-    def test_vit_tiny_classifier_accepts_constructor_kwargs(self) -> None:
-        model = ViTTinyClassifier(
+    def test_vit_base_classifier_accepts_constructor_kwargs(self) -> None:
+        model = ViTBaseClassifier(
             n_classes=7,
             image_size=32,
             patch_size=4,

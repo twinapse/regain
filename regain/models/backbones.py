@@ -9,8 +9,8 @@ from torchvision.models.vision_transformer import VisionTransformer
 
 __all__ = [
     'ResNet18Backbone',
+    'ViTBaseBackbone',
     'ViTSmallBackbone',
-    'ViTTinyBackbone',
 ]
 
 
@@ -127,7 +127,7 @@ class _TorchVisionViTBackbone(nn.Module):
 
 class ViTSmallBackbone(_TorchVisionViTBackbone):
     """
-    ViT-S backbone for 32x32 inputs with parameter count near ResNet-18.
+    ViT-S backbone
 
     Args:
         image_size: Input image side length.
@@ -149,16 +149,16 @@ class ViTSmallBackbone(_TorchVisionViTBackbone):
             patch_size=patch_size,
             hidden_dim=384,
             mlp_dim=1536,
-            num_layers=6,
+            num_layers=12,
             num_heads=6,
             dropout=dropout,
             attention_dropout=attention_dropout,
         )
 
 
-class ViTTinyBackbone(_TorchVisionViTBackbone):
+class ViTBaseBackbone(_TorchVisionViTBackbone):
     """
-    ViT-T backbone for 32x32 inputs with lower capacity than ViT-S.
+    ViT-B backbone.
 
     Args:
         image_size: Input image side length.
@@ -178,10 +178,10 @@ class ViTTinyBackbone(_TorchVisionViTBackbone):
         super().__init__(
             image_size=image_size,
             patch_size=patch_size,
-            hidden_dim=320,
-            mlp_dim=1280,
-            num_layers=6,
-            num_heads=5,
+            hidden_dim=768,
+            mlp_dim=3072,
+            num_layers=12,
+            num_heads=12,
             dropout=dropout,
             attention_dropout=attention_dropout,
         )
