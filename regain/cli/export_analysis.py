@@ -9,13 +9,15 @@ import sys
 import tempfile
 from typing import Any
 
-from regain.cli._utils._export_helpers import export_analysis_bundle
+from regain.analysis.exports import export_analysis_to_json
 from regain.cli._utils._output_helpers import add_failure
 from regain.cli._utils._output_helpers import CliFailure
 from regain.cli._utils._output_helpers import finalize_staged_outputs
 from regain.cli._utils._output_helpers import print_failure_summary
 from regain.cli._utils._output_helpers import resolve_exit_code
 from regain.cli._utils._output_helpers import StagedOutput
+from regain.cli._utils._selector_helpers import add_experiment_selector_arguments
+from regain.cli._utils._selector_helpers import resolve_experiment_targets
 
 __all__ = [
     'main',
@@ -92,7 +94,7 @@ def _load_analysis_tables(*, experiment_dir: Path) -> tuple[list[dict[str, Any]]
         missing_str = ', '.join(str(path) for path in missing_paths)
         raise FileNotFoundError(
             f'Missing required analysis tables: {missing_str}. '
-            'Run `python -m regain.cli.run_analysis collect ...` first.'
+            'Run `python -m regain.cli.run_analysis --experiments <experiment> --output-dir <analysis_dir> collect` first.'
         )
 
     runs_table = _read_jsonl_table(path=runs_table_path)
@@ -108,24 +110,24 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: Configured ArgumentParser.
     """
     parser = argparse.ArgumentParser(prog='regain-export-analysis')
-    parser.add_argument('--experiment', type=str, required=True, help='MLflow experiment name or id.')
+    add_experiment_selector_arguments(parser=parser)
+    parser.add_argument(
+        '--analysis-dir',
+        type=str,
+        required=True,
+        help='Root directory containing per-experiment analysis outputs.',
+    )
     parser.add_argument(
         '--output-dir',
         type=str,
         required=True,
-        help='Root output directory containing analysis outputs.',
-    )
-    parser.add_argument(
-        '--export-dir',
-        type=str,
-        required=True,
-        help='Path to the directory for exportable analysis outputs.',
+        help='Path to the directory for exported analysis bundles.',
     )
     parser.add_argument(
         '--tracking-uri',
         type=str,
         default=None,
-        help='MLflow tracking URI.',
+        help='MLflow tracking URI (overrides config-derived values).',
     )
     parser.add_argument(
         '--artifact-uri',
@@ -167,45 +169,58 @@ def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    experiment_dir = Path(args.output_dir) / str(args.experiment)
     include_controllers = _parse_list(args.include_controllers)
     exclude_controllers = _parse_list(args.exclude_controllers)
-    destination_path = Path(args.export_dir) / str(args.experiment) / 'analysis.json'
+    analysis_root = Path(args.analysis_dir)
+    destination_root = Path(args.output_dir)
     failures: list[CliFailure] = []
     staged_outputs: list[StagedOutput] = []
+    targets = resolve_experiment_targets(
+        parser=parser,
+        config_files=args.config_files,
+        config_dir=args.config_dir,
+        experiments=args.experiments,
+        tracking_uri_override=args.tracking_uri,
+        failures=failures,
+    )
 
     with tempfile.TemporaryDirectory() as temp_dir:
         staged_export_root = Path(temp_dir) / 'analysis_exports'
-        scope = f'experiment={args.experiment}'
-        try:
-            runs_table, experiences_table = _load_analysis_tables(experiment_dir=experiment_dir)
-            staged_export_path = export_analysis_bundle(
-                experiment=str(args.experiment),
-                experiment_dir=experiment_dir,
-                export_dir=staged_export_root,
-                tracking_uri=args.tracking_uri,
-                artifact_uri=args.artifact_uri,
-                runs_table=runs_table,
-                experiences_table=experiences_table,
-                include_controllers=include_controllers,
-                exclude_controllers=exclude_controllers,
-                max_runs=args.max_runs,
-                default_num_classes=args.default_num_classes,
-                require_finished=True,
-            )
-            staged_outputs.append(
-                StagedOutput(
-                    scope=scope,
-                    source=staged_export_path,
-                    destination=destination_path,
+        for target in targets:
+            experiment_name = target.experiment_name
+            experiment_dir = analysis_root / experiment_name
+            destination_path = destination_root / experiment_name / 'analysis.json'
+            scope = f'experiment={experiment_name}'
+            try:
+                runs_table, experiences_table = _load_analysis_tables(experiment_dir=experiment_dir)
+                staged_export_path = staged_export_root / experiment_name / 'analysis.json'
+                export_analysis_to_json(
+                    experiment=experiment_name,
+                    experiment_dir=experiment_dir,
+                    export_path=staged_export_path,
+                    tracking_uri=target.tracking_uri,
+                    artifact_uri=args.artifact_uri,
+                    runs_table=runs_table,
+                    experiences_table=experiences_table,
+                    include_controllers=include_controllers,
+                    exclude_controllers=exclude_controllers,
+                    max_runs=args.max_runs,
+                    default_num_classes=args.default_num_classes,
+                    require_finished=True,
                 )
-            )
-        except Exception as exc:
-            add_failure(
-                failures=failures,
-                scope=scope,
-                error=exc,
-            )
+                staged_outputs.append(
+                    StagedOutput(
+                        scope=scope,
+                        source=staged_export_path,
+                        destination=destination_path,
+                    )
+                )
+            except Exception as exc:
+                add_failure(
+                    failures=failures,
+                    scope=scope,
+                    error=exc,
+                )
 
         published_count = finalize_staged_outputs(
             outputs=staged_outputs,
@@ -215,7 +230,7 @@ def main() -> None:
         )
 
     if published_count > 0:
-        print(f'Published analysis export to: {destination_path}')
+        print(f'Published analysis export(s) for {published_count} experiment(s).')
 
     print_failure_summary(
         command_name='regain-export-analysis',

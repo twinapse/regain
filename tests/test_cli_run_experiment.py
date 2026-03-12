@@ -11,7 +11,6 @@ import regain.cli.run_experiment as run_experiment_cli
 from regain.cli.run_experiment import _build_arg_parser
 from regain.cli.run_experiment import _find_config_files
 
-
 ####################
 # Parser validation #
 ####################
@@ -28,6 +27,19 @@ class TestRunExperimentParser:
                     'a.yaml,b.yaml',
                     '--config-dir',
                     'configs',
+                ]
+            )
+
+    def test_rejects_export_dir_flag(self) -> None:
+        parser = _build_arg_parser()
+
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    '--config-files',
+                    'a.yaml',
+                    '--export-dir',
+                    '/tmp/exports',
                 ]
             )
 
@@ -69,39 +81,23 @@ class TestFindConfigFiles:
             _find_config_files(config_dir=str(file_path))
 
 
-##############################
-# Grouped run export behavior #
-##############################
+########################
+# Execution behavior   #
+########################
 
 
-class TestGroupedRunExports:
-    def test_exports_once_per_experiment_group(
+class TestRunExecution:
+    def test_runs_all_config_files(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        run_results = [
-            ('shared_exp', 'mlflow://tracking'),
-            ('shared_exp', 'mlflow://tracking'),
-            ('other_exp', None),
-        ]
         run_calls: list[str] = []
-        export_calls: list[tuple[str, str | None]] = []
 
-        def _fake_run_experiment(config_file: str) -> tuple[str, str | None]:
+        def _fake_run_experiment(config_file: str) -> None:
             run_calls.append(config_file)
-            return run_results[len(run_calls) - 1]
-
-        def _fake_export_runs_to_csvs(
-            *,
-            experiment_name: str,
-            export_dir: str,
-            tracking_uri: str | None,
-        ) -> None:
-            export_calls.append((experiment_name, tracking_uri))
 
         monkeypatch.setattr(run_experiment_cli, '_ensure_prerequisites', lambda: None)
         monkeypatch.setattr(run_experiment_cli, '_run_experiment', _fake_run_experiment)
-        monkeypatch.setattr(run_experiment_cli, '_export_runs_to_csvs', _fake_export_runs_to_csvs)
         monkeypatch.setattr(
             sys,
             'argv',
@@ -109,60 +105,35 @@ class TestGroupedRunExports:
                 'regain-run-experiment',
                 '--config-files',
                 'a.yaml,b.yaml,c.yaml',
-                '--export-dir',
-                '/tmp/exports',
             ],
         )
 
         run_experiment_cli.main()
 
         assert run_calls == ['a.yaml', 'b.yaml', 'c.yaml']
-        assert export_calls == [
-            ('shared_exp', 'mlflow://tracking'),
-            ('other_exp', None),
-        ]
 
-    def test_rejects_mixed_tracking_uris_within_same_experiment(
+    def test_runs_config_dir_entries(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        run_results = [
-            ('shared_exp', 'mlflow://one'),
-            ('shared_exp', 'mlflow://two'),
-        ]
         run_calls: list[str] = []
-        export_calls: list[tuple[str, str | None]] = []
 
-        def _fake_run_experiment(config_file: str) -> tuple[str, str | None]:
+        def _fake_run_experiment(config_file: str) -> None:
             run_calls.append(config_file)
-            return run_results[len(run_calls) - 1]
-
-        def _fake_export_runs_to_csvs(
-            *,
-            experiment_name: str,
-            export_dir: str,
-            tracking_uri: str | None,
-        ) -> None:
-            export_calls.append((experiment_name, tracking_uri))
 
         monkeypatch.setattr(run_experiment_cli, '_ensure_prerequisites', lambda: None)
         monkeypatch.setattr(run_experiment_cli, '_run_experiment', _fake_run_experiment)
-        monkeypatch.setattr(run_experiment_cli, '_export_runs_to_csvs', _fake_export_runs_to_csvs)
+        monkeypatch.setattr(run_experiment_cli, '_find_config_files', lambda **kwargs: ['a.yaml', 'b.yaml'])
         monkeypatch.setattr(
             sys,
             'argv',
             [
                 'regain-run-experiment',
-                '--config-files',
-                'a.yaml,b.yaml',
-                '--export-dir',
-                '/tmp/exports',
+                '--config-dir',
+                '/tmp/configs',
             ],
         )
 
-        with pytest.raises(SystemExit) as exc_info:
-            run_experiment_cli.main()
+        run_experiment_cli.main()
 
-        assert int(exc_info.value.code) == 1
         assert run_calls == ['a.yaml', 'b.yaml']
-        assert export_calls == []

@@ -1,14 +1,15 @@
 """
 CLI tool to render plots from analysis artifacts.
 
-This script reads the CSV artifacts produced by `python -m regain.cli.run_analysis ...`
+This script reads analysis CSV artifacts produced by `python -m regain.cli.run_analysis ...`
 and renders (and/or saves) `matplotlib` plots.
 
 Examples:
-  python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --show
-  python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --save
-  python -m regain.cli.generate_plots --analysis-dir ./analysis_results/experiment_1 --show --save --save-dir ./plots
+  python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --show
+  python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --save
+  python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --show --save --output-dir ./plots
 """
+
 import argparse
 from pathlib import Path
 import sys
@@ -21,6 +22,8 @@ from regain.cli._utils._output_helpers import finalize_staged_outputs
 from regain.cli._utils._output_helpers import print_failure_summary
 from regain.cli._utils._output_helpers import resolve_exit_code
 from regain.cli._utils._output_helpers import StagedOutput
+from regain.cli._utils._selector_helpers import add_experiment_selector_arguments
+from regain.cli._utils._selector_helpers import resolve_experiment_targets
 from regain.constants import ANALYSIS_RHO_AVG
 from regain.utils import get_logger
 
@@ -59,50 +62,75 @@ def main() -> None:
     """
     logger = get_logger()
 
-    p = argparse.ArgumentParser(prog='regain-generate-plots')
-    p.add_argument('--analysis-dir', type=str, required=True, help='Path to the analysis directory for a single experiment.')
-    p.add_argument('--show', action='store_true', help='Show plots interactively.')
-    p.add_argument('--save', action='store_true', help='Save plots as PNGs.')
-    p.add_argument(
+    parser = argparse.ArgumentParser(prog='regain-generate-plots')
+    add_experiment_selector_arguments(parser=parser)
+    parser.add_argument(
+        '--analysis-dir',
+        type=str,
+        required=True,
+        help='Root directory containing per-experiment analysis outputs.',
+    )
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default=None,
+        help='Optional root directory for saved plots (uses <output-dir>/<experiment>/plots).',
+    )
+    parser.add_argument('--show', action='store_true', help='Show plots interactively.')
+    parser.add_argument('--save', action='store_true', help='Save plots as PNGs.')
+    parser.add_argument(
         '--perf-key',
         type=str,
         default=ANALYSIS_RHO_AVG,
         help='Which performance key to plot for the recoverability curve.',
     )
-    p.add_argument(
-        '--save-dir',
-        type=str,
-        default=None,
-        help='Optional directory to write plot PNGs (defaults to <analysis-dir>/plots when saving).',
-    )
-    p.add_argument(
+    parser.add_argument(
         '--allow-partial',
         action='store_true',
         help='Allow partial outputs when plotting fails.',
     )
-    p.add_argument(
+    parser.add_argument(
         '--overwrite',
         action='store_true',
         help='Overwrite existing target outputs.',
     )
-    args = p.parse_args()
+    args = parser.parse_args()
 
-    analysis_out = Path(args.analysis_dir)
+    analysis_root = Path(args.analysis_dir)
     mode = _mode_from_flags(show=bool(args.show), save=bool(args.save))
     failures: list[CliFailure] = []
     staged_outputs: list[StagedOutput] = []
-    destination_dir = Path(args.save_dir) if args.save_dir is not None else (analysis_out / 'plots')
+    targets = resolve_experiment_targets(
+        parser=parser,
+        config_files=args.config_files,
+        config_dir=args.config_dir,
+        experiments=args.experiments,
+        tracking_uri_override=None,
+        failures=failures,
+    )
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        staged_save_dir = Path(temp_dir) / 'plots'
-        if not analysis_out.exists():
-            add_failure(
-                failures=failures,
-                scope=f'analysis_dir={analysis_out}',
-                error=f'analysis_dir does not exist: {analysis_out}',
+        staged_root = Path(temp_dir) / 'plots'
+        for target in targets:
+            experiment_name = target.experiment_name
+            analysis_out = analysis_root / experiment_name
+            destination_dir = (
+                Path(args.output_dir) / experiment_name / 'plots'
+                if args.output_dir is not None
+                else (analysis_out / 'plots')
             )
-        else:
+            scope = f'experiment={experiment_name}'
+
+            if not analysis_out.exists():
+                add_failure(
+                    failures=failures,
+                    scope=scope,
+                    error=f'analysis_dir does not exist: {analysis_out}',
+                )
+                continue
+
             try:
+                staged_save_dir = staged_root / experiment_name / 'plots'
                 save_dir = staged_save_dir if mode in ['save', 'both'] else None
                 saved = plot_analysis_outputs(
                     analysis_out=analysis_out,
@@ -113,7 +141,7 @@ def main() -> None:
                 if saved and mode in ['save', 'both']:
                     staged_outputs.append(
                         StagedOutput(
-                            scope=f'analysis_dir={analysis_out}',
+                            scope=scope,
                             source=staged_save_dir,
                             destination=destination_dir,
                         )
@@ -121,7 +149,7 @@ def main() -> None:
             except Exception as exc:
                 add_failure(
                     failures=failures,
-                    scope=f'analysis_dir={analysis_out}',
+                    scope=scope,
                     error=exc,
                 )
 
@@ -133,7 +161,7 @@ def main() -> None:
         )
 
     if published_count > 0:
-        logger.warning(f'Plots written under: {destination_dir}')
+        logger.warning(f'Plots written for {published_count} experiment(s).')
 
     print_failure_summary(
         command_name='regain-generate-plots',
