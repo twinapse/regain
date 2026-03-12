@@ -2,7 +2,7 @@
 Efficiency frontier automation.
 
 Computes Pareto frontiers over:
-  - data cost (b = shots per class),
+  - data cost (b = repair budget fraction),
   - parameter cost (controller_model_param_count),
   - performance (rho avg or final ctrl acc avg).
 
@@ -23,7 +23,7 @@ from regain.constants import COLUMN_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import COLUMN_CONTROLLER_NAME
 from regain.constants import COLUMN_NUM_CLASSES
 from regain.constants import COLUMN_PERFORMANCE
-from regain.constants import COLUMN_REPAIR_BUDGET_PER_CLASS
+from regain.constants import COLUMN_REPAIR_BUDGET_FRACTION
 from regain.constants import COLUMN_REPAIR_BUDGET_TOTAL
 from regain.constants import COLUMN_TOTAL_COST
 from regain.utils import get_logger
@@ -123,7 +123,7 @@ def write_efficiency_frontiers(
         points.append({
             COLUMN_CONTROLLER_NAME: r.get(COLUMN_CONTROLLER_NAME),
             COLUMN_B: r.get(COLUMN_B),
-            COLUMN_REPAIR_BUDGET_PER_CLASS: r.get(COLUMN_REPAIR_BUDGET_PER_CLASS),
+            COLUMN_REPAIR_BUDGET_FRACTION: r.get(COLUMN_REPAIR_BUDGET_FRACTION),
             COLUMN_REPAIR_BUDGET_TOTAL: r.get(COLUMN_REPAIR_BUDGET_TOTAL),
             COLUMN_NUM_CLASSES: r.get(COLUMN_NUM_CLASSES),
             COLUMN_CONTROLLER_MODEL_PARAM_COUNT: pc,

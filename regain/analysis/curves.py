@@ -23,9 +23,8 @@ from regain.constants import COLUMN_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import COLUMN_CONTROLLER_NAME
 from regain.constants import COLUMN_EXP_IDX
 from regain.constants import COLUMN_NUM_CLASSES
-from regain.constants import COLUMN_REPAIR_BUDGET_PER_CLASS
+from regain.constants import COLUMN_REPAIR_BUDGET_FRACTION
 from regain.constants import COLUMN_REPAIR_BUDGET_TOTAL
-from regain.constants import COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS
 from regain.constants import COLUMN_REPAIR_SET_TOTAL
 from regain.constants import COLUMN_REPAIR_SPLIT_FRACTION
 from regain.constants import COLUMN_SEED
@@ -104,9 +103,8 @@ def write_recoverability_curves(
         curve_rows.append({
             COLUMN_CONTROLLER_NAME: controller,
             COLUMN_B: budget,
-            COLUMN_REPAIR_BUDGET_PER_CLASS: rows[0].get(COLUMN_REPAIR_BUDGET_PER_CLASS),
+            COLUMN_REPAIR_BUDGET_FRACTION: rows[0].get(COLUMN_REPAIR_BUDGET_FRACTION),
             COLUMN_REPAIR_BUDGET_TOTAL: rows[0].get(COLUMN_REPAIR_BUDGET_TOTAL),
-            COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS: rows[0].get(COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS),
             COLUMN_REPAIR_SET_TOTAL: rows[0].get(COLUMN_REPAIR_SET_TOTAL),
             COLUMN_REPAIR_SPLIT_FRACTION: rows[0].get(COLUMN_REPAIR_SPLIT_FRACTION),
             COLUMN_NUM_CLASSES: rows[0].get(COLUMN_NUM_CLASSES),
@@ -164,8 +162,7 @@ def write_recoverability_curves(
         calibration_rows.append({
             COLUMN_CONTROLLER_NAME: controller,
             COLUMN_B: budget,
-            COLUMN_REPAIR_BUDGET_PER_CLASS: rows[0].get(COLUMN_REPAIR_BUDGET_PER_CLASS),
-            COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS: rows[0].get(COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS),
+            COLUMN_REPAIR_BUDGET_FRACTION: rows[0].get(COLUMN_REPAIR_BUDGET_FRACTION),
             COLUMN_REPAIR_SPLIT_FRACTION: rows[0].get(COLUMN_REPAIR_SPLIT_FRACTION),
             _ANALYSIS_CALIB_MAX_ECE_AVG: mean(calib_vals),
             _ANALYSIS_CALIB_MAX_ECE_STD: stdev(calib_vals),
@@ -187,8 +184,7 @@ def write_recoverability_curves(
         latency_rows.append({
             COLUMN_CONTROLLER_NAME: controller,
             COLUMN_B: budget,
-            COLUMN_REPAIR_BUDGET_PER_CLASS: rows[0].get(COLUMN_REPAIR_BUDGET_PER_CLASS),
-            COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS: rows[0].get(COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS),
+            COLUMN_REPAIR_BUDGET_FRACTION: rows[0].get(COLUMN_REPAIR_BUDGET_FRACTION),
             COLUMN_REPAIR_SPLIT_FRACTION: rows[0].get(COLUMN_REPAIR_SPLIT_FRACTION),
             _ANALYSIS_LATENCY_MS_PER_SAMPLE_AVG_BASE: mean(base_ms_vals),
             _ANALYSIS_LATENCY_MS_PER_SAMPLE_STD_BASE: stdev(base_ms_vals),

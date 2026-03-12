@@ -124,8 +124,7 @@ def _make_plugin(
         fit_after_experience=False,
         repair_epochs=1,
         repair_batch_size=1,
-        budget_per_class=1,
-        max_repair_samples_per_class=1,
+        budget_fraction=1.0,
         seed=1,
     )
     experience = types.SimpleNamespace(
@@ -148,34 +147,27 @@ def _make_plugin(
 
 
 class TestRepairControllerPluginBudgetSelection:
-    def test_raises_when_budget_per_class_is_zero(self) -> None:
-        with pytest.raises(ValueError, match='must be positive'):
+    def test_raises_when_budget_fraction_is_out_of_range(self) -> None:
+        with pytest.raises(ValueError, match='range'):
             RepairControllerPlugin(
                 controller=_ScriptedRepairController(),
                 fit_after_experience=False,
                 repair_epochs=1,
                 repair_batch_size=1,
-                budget_per_class=0,
-                max_repair_samples_per_class=4,
+                budget_fraction=0.0,
                 seed=1,
             )
-
-    def test_raises_when_budget_exceeds_repair_set(self) -> None:
-        with pytest.raises(
-            ValueError,
-            match='cannot exceed.*maximum_budget_per_class=2',
-        ):
+        with pytest.raises(ValueError, match='range'):
             RepairControllerPlugin(
                 controller=_ScriptedRepairController(),
                 fit_after_experience=False,
                 repair_epochs=1,
                 repair_batch_size=1,
-                budget_per_class=3,
-                max_repair_samples_per_class=2,
+                budget_fraction=1.2,
                 seed=7,
             )
 
-    def test_selects_deterministic_nested_per_class_subsets(self) -> None:
+    def test_selects_deterministic_nested_stratified_subsets(self) -> None:
         dataset = _ToyRepairDataset(
             targets=[0, 0, 0, 0, 1, 1, 1, 1],
             original_indices=[10, 11, 12, 13, 20, 21, 22, 23],
@@ -186,8 +178,7 @@ class TestRepairControllerPluginBudgetSelection:
             fit_after_experience=False,
             repair_epochs=1,
             repair_batch_size=1,
-            budget_per_class=1,
-            max_repair_samples_per_class=4,
+            budget_fraction=0.25,
             seed=42,
         )
         plugin_b2 = RepairControllerPlugin(
@@ -195,8 +186,7 @@ class TestRepairControllerPluginBudgetSelection:
             fit_after_experience=False,
             repair_epochs=1,
             repair_batch_size=1,
-            budget_per_class=2,
-            max_repair_samples_per_class=4,
+            budget_fraction=0.5,
             seed=42,
         )
         plugin_b2_repeat = RepairControllerPlugin(
@@ -204,14 +194,13 @@ class TestRepairControllerPluginBudgetSelection:
             fit_after_experience=False,
             repair_epochs=1,
             repair_batch_size=1,
-            budget_per_class=2,
-            max_repair_samples_per_class=4,
+            budget_fraction=0.5,
             seed=42,
         )
 
-        selected_b1 = plugin_b1._select_budget_per_class(repair_dataset=dataset, exp_idx=0)
-        selected_b2 = plugin_b2._select_budget_per_class(repair_dataset=dataset, exp_idx=0)
-        selected_b2_repeat = plugin_b2_repeat._select_budget_per_class(
+        selected_b1 = plugin_b1._select_budget_fraction(repair_dataset=dataset, exp_idx=0)
+        selected_b2 = plugin_b2._select_budget_fraction(repair_dataset=dataset, exp_idx=0)
+        selected_b2_repeat = plugin_b2_repeat._select_budget_fraction(
             repair_dataset=dataset,
             exp_idx=0,
         )
@@ -226,6 +215,30 @@ class TestRepairControllerPluginBudgetSelection:
         assert selected_b2.targets.count(1) == 2
         assert set(selected_b1.original_indices).issubset(set(selected_b2.original_indices))
         assert selected_b2.original_indices == selected_b2_repeat.original_indices
+
+    def test_preserves_distribution_on_imbalanced_repair_set(self) -> None:
+        dataset = _ToyRepairDataset(
+            targets=[0, 0, 0, 0, 0, 0, 1, 1],
+            original_indices=[10, 11, 12, 13, 14, 15, 20, 21],
+        )
+        plugin = RepairControllerPlugin(
+            controller=_ScriptedRepairController(),
+            fit_after_experience=False,
+            repair_epochs=1,
+            repair_batch_size=1,
+            budget_fraction=0.5,
+            seed=11,
+        )
+
+        selected = plugin._select_budget_fraction(
+            repair_dataset=dataset,
+            exp_idx=0,
+        )
+
+        assert selected is not None
+        assert len(selected) == 4
+        assert selected.targets.count(0) == 3
+        assert selected.targets.count(1) == 1
 
 
 ###########################
@@ -332,8 +345,7 @@ class TestRepairControllerPluginEvalHooks:
             fit_after_experience=False,
             repair_epochs=1,
             repair_batch_size=1,
-            budget_per_class=1,
-            max_repair_samples_per_class=1,
+            budget_fraction=1.0,
             seed=1,
         )
         strategy = _DummyStrategy(

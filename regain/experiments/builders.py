@@ -66,7 +66,6 @@ def build_benchmark(
     *,
     experiment_config: ExperimentConfig,
     repair_split_fraction: float,
-    repair_budget_per_class: int,
 ) -> NCScenario:
     """
     Build the benchmark scenario.
@@ -74,7 +73,6 @@ def build_benchmark(
     Args:
         experiment_config (ExperimentConfig): Experiment configuration.
         repair_split_fraction (float): Fraction of each training experience excluded into the repair stream.
-        repair_budget_per_class (int): Per-class repair budget used for split-feasibility guards.
 
     Returns:
         NCScenario: Built benchmark.
@@ -90,7 +88,6 @@ def build_benchmark(
         num_experiences=experiment_config.num_experiences,
         return_task_id=False,
         repair_split_fraction=repair_split_fraction,
-        repair_budget_per_class=repair_budget_per_class,
         dataset_path=experiment_config.dataset_path,
         seed=experiment_config.seed,
     )
@@ -477,8 +474,7 @@ def build_controller_plugin(
     fit_after_experience: bool | None = None,
     num_epochs: int | None = None,
     batch_size: int | None = None,
-    budget_per_class: int = 0,
-    max_repair_samples_per_class: int = 0,
+    budget_fraction: float = 1.0,
     seed: int = 1,
     debug: bool = False,
     debug_epochs: int | None = None,
@@ -493,9 +489,8 @@ def build_controller_plugin(
         fit_after_experience (bool | None): Whether to fit after each experience.
         num_epochs (int | None): Number of repair epochs.
         batch_size (int | None): Repair batch size.
-        budget_per_class (int): Per-class repair budget `b` used from the fixed repair set.
-        max_repair_samples_per_class (int): Upper bound on per-class repair samples available in the scenario.
-        seed (int): Global seed used for deterministic budget sub-selection.
+        budget_fraction (float): Fraction of each fixed repair set used for controller fitting.
+        seed (int): Global seed used for deterministic repair subset selection.
         debug (bool): Whether to use the debug repair controller plugin.
         debug_epochs (int | None): Epochs per experience for debug metric steps.
         debug_experiences (int | None): Total experiences for debug metric steps.
@@ -528,8 +523,7 @@ def build_controller_plugin(
                 fit_after_experience=fit_after_experience,
                 repair_epochs=num_epochs,
                 repair_batch_size=batch_size,
-                budget_per_class=budget_per_class,
-                max_repair_samples_per_class=max_repair_samples_per_class,
+                budget_fraction=budget_fraction,
                 seed=seed,
                 debug_epochs=debug_epochs,
                 debug_experiences=debug_experiences,
@@ -540,8 +534,7 @@ def build_controller_plugin(
             fit_after_experience=fit_after_experience,
             repair_epochs=num_epochs,
             repair_batch_size=batch_size,
-            budget_per_class=budget_per_class,
-            max_repair_samples_per_class=max_repair_samples_per_class,
+            budget_fraction=budget_fraction,
             seed=seed,
         )
 

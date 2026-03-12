@@ -48,7 +48,7 @@ _CONFIG_PARAM_OVERRIDE_MAP: list[tuple[str, list[str]]] = [
     ('evaluation', ['evaluation']),
     ('avalanche_schedule', ['avalanche_schedule', 'eval_schedule', 'eval_every']),
     ('device', ['device']),
-    ('budget_per_class', ['budget_per_class']),
+    ('budget_fraction', ['budget_fraction']),
     ('split_fraction', ['split_fraction']),
     ('fit_schedule', ['fit_schedule']),
     ('checkpoints_enabled', ['checkpoints_enabled']),
@@ -168,14 +168,14 @@ class RepairConfig:
 
     Attributes:
         split_fraction: Fraction of each experience training dataset carved out for the repair stream in `[0, 1)`.
-        budget_per_class: Repair budget (`b`) number of examples per class used from the fixed set.
+        budget_fraction: Fraction of each fixed repair set used to fit repair controllers.
         fit_schedule: Repair fitting schedule (`per_experience` or `final_only`).
         num_epochs: Number of epochs used by all repair controllers.
         batch_size: Batch size used by all repair controllers. If omitted, the backbone training batch size is used.
     """
 
     split_fraction: float
-    budget_per_class: int | None = None
+    budget_fraction: float | None = None
     fit_schedule: Literal['per_experience', 'final_only'] | None = None
     num_epochs: int | None = None
     batch_size: int | None = None
@@ -651,12 +651,12 @@ def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
     if not (0.0 <= split_fraction < 1.0):
         raise ValueError('`repair.split_fraction` must be in the range [0, 1).')
 
-    budget_raw = repair_config.get('budget_per_class')
-    budget_per_class: int | None = None
+    budget_raw = repair_config.get('budget_fraction')
+    budget_fraction: float | None = None
     if budget_raw is not None:
-        budget_per_class = int(budget_raw)
-        if budget_per_class < 0:
-            raise ValueError('`repair.budget_per_class` must be a non-negative integer.')
+        budget_fraction = float(budget_raw)
+        if not (0.0 < budget_fraction <= 1.0):
+            raise ValueError('`repair.budget_fraction` must be in the range (0, 1].')
 
     fit_schedule_raw = repair_config.get('fit_schedule')
     fit_schedule: Literal['per_experience', 'final_only'] | None = None
@@ -666,7 +666,7 @@ def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
         raise ValueError('`repair.fit_schedule` must be one of: `per_experience`, `final_only`.')
     return RepairConfig(
         split_fraction=split_fraction,
-        budget_per_class=budget_per_class,
+        budget_fraction=budget_fraction,
         fit_schedule=fit_schedule,
         num_epochs=repair_config.get('num_epochs'),
         batch_size=repair_config.get('batch_size'),
@@ -702,8 +702,8 @@ def _validate_repair_config_for_runs(
         return
 
     missing_fields: list[str] = []
-    if repair.budget_per_class is None:
-        missing_fields.append('repair.budget_per_class')
+    if repair.budget_fraction is None:
+        missing_fields.append('repair.budget_fraction')
     if repair.fit_schedule is None:
         missing_fields.append('repair.fit_schedule')
     if repair.num_epochs is None:
