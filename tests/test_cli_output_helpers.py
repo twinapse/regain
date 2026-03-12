@@ -4,9 +4,9 @@ Tests for CLI staged-output publishing helpers.
 
 from pathlib import Path
 
-from regain.cli._utils._output_helpers import CliFailure
-from regain.cli._utils._output_helpers import finalize_staged_outputs
-from regain.cli._utils._output_helpers import StagedOutput
+from regain.cli._utils.output_helpers import CliFailure
+from regain.cli._utils.output_helpers import finalize_staged_outputs
+from regain.cli._utils.output_helpers import StagedOutput
 
 
 def test_finalize_staged_outputs_rejects_empty_source(tmp_path: Path) -> None:

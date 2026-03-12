@@ -6,8 +6,8 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-from regain.cli._utils._output_helpers import add_failure
-from regain.cli._utils._output_helpers import CliFailure
+from regain.cli._utils.output_helpers import add_failure
+from regain.cli._utils.output_helpers import CliFailure
 from regain.experiments.config import load_experiment_config
 from regain.mlflow_utils import normalize_tracking_uri
 

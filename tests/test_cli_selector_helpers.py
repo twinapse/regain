@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from regain.cli._utils._output_helpers import CliFailure
-import regain.cli._utils._selector_helpers as selector_helpers
+from regain.cli._utils.output_helpers import CliFailure
+import regain.cli._utils.selector_helpers as selector_helpers
 
 
 def _build_parser() -> argparse.ArgumentParser:
