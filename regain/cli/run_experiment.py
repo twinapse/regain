@@ -85,12 +85,19 @@ def _ensure_prerequisites() -> None:
     _patch_avalanche_il2m_initial_eval()
 
 
-def _run_experiment(config_file: str) -> None:
+def _run_experiment(
+    config_file: str,
+    *,
+    tracking_uri: str | None = None,
+    artifact_location: str | None = None,
+) -> None:
     """
     Load and run a single experiment configuration.
 
     Args:
         config_file (str): Path to a single experiment config YAML file.
+        tracking_uri (str | None): Optional MLflow tracking URI override.
+        artifact_location (str | None): Optional MLflow artifact location override.
 
     Returns:
         None
@@ -102,7 +109,11 @@ def _run_experiment(config_file: str) -> None:
     # Load experiment config
     experiment_config = load_experiment_config(config_file)
     # Run experiment
-    run_experiment(experiment_config)
+    run_experiment(
+        experiment_config,
+        tracking_uri=tracking_uri,
+        artifact_location=artifact_location,
+    )
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -122,6 +133,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         '--config-dir',
         type=str,
         help='Path to a directory recursively searched for experiment config YAML files',
+    )
+    parser.add_argument(
+        '--tracking-uri',
+        type=str,
+        default=None,
+        help='Optional MLflow tracking URI override.',
+    )
+    parser.add_argument(
+        '--artifact-location',
+        type=str,
+        default=None,
+        help='Optional MLflow artifact location or filesystem path override.',
     )
     return parser
 
@@ -182,7 +205,11 @@ def main() -> None:
 
     # Run each experiment config file
     for config_file in config_files:
-        _run_experiment(config_file)
+        _run_experiment(
+            config_file,
+            tracking_uri=args.tracking_uri,
+            artifact_location=args.artifact_location,
+        )
 
 
 if __name__ == '__main__':

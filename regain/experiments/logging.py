@@ -188,8 +188,6 @@ def flatten_experiment_config_params(
     if not include_backbone_params:
         config_payload.pop(PARAM_BACKBONE, None)
     config_payload.pop('dataset_path', None)
-    config_payload.pop('mlflow_tracking_uri', None)
-    config_payload.pop('mlflow_artifact_uri', None)
     return flatten_prefixed_params(prefix=None, params=config_payload)
 
 

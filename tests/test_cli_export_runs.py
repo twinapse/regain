@@ -67,7 +67,7 @@ def test_export_runs_uses_output_dir_for_multiple_experiments(
     assert captured_outputs[1].destination == tmp_path / 'exports' / 'exp_b'
 
 
-def test_export_runs_passes_tracking_uri_override(
+def test_export_runs_passes_tracking_uri(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

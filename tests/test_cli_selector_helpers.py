@@ -26,7 +26,7 @@ def test_resolve_experiment_targets_from_experiments_dedupes_order() -> None:
         config_files=None,
         config_dir=None,
         experiments='exp_b,exp_a,exp_b',
-        tracking_uri_override=None,
+        tracking_uri=None,
         failures=failures,
     )
 
@@ -35,14 +35,14 @@ def test_resolve_experiment_targets_from_experiments_dedupes_order() -> None:
     assert failures == []
 
 
-def test_resolve_experiment_targets_conflicting_config_tracking_uris_records_failure(
+def test_resolve_experiment_targets_from_configs_dedupes_experiment_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parser = _build_parser()
     failures: list[CliFailure] = []
     config_map = {
-        'a.yaml': SimpleNamespace(experiment_name='exp_shared', mlflow_tracking_uri='mlflow://one'),
-        'b.yaml': SimpleNamespace(experiment_name='exp_shared', mlflow_tracking_uri='mlflow://two'),
+        'a.yaml': SimpleNamespace(experiment_name='exp_shared'),
+        'b.yaml': SimpleNamespace(experiment_name='exp_shared'),
     }
 
     monkeypatch.setattr(
@@ -56,22 +56,24 @@ def test_resolve_experiment_targets_conflicting_config_tracking_uris_records_fai
         config_files='a.yaml,b.yaml',
         config_dir=None,
         experiments=None,
-        tracking_uri_override=None,
+        tracking_uri=None,
         failures=failures,
     )
 
-    assert targets == []
-    assert any('Conflicting tracking URIs' in failure.message for failure in failures)
+    assert len(targets) == 1
+    assert targets[0].experiment_name == 'exp_shared'
+    assert targets[0].tracking_uri is None
+    assert failures == []
 
 
-def test_resolve_experiment_targets_tracking_override_avoids_conflict(
+def test_resolve_experiment_targets_tracking_uri_applies_to_configs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parser = _build_parser()
     failures: list[CliFailure] = []
     config_map = {
-        'a.yaml': SimpleNamespace(experiment_name='exp_shared', mlflow_tracking_uri='mlflow://one'),
-        'b.yaml': SimpleNamespace(experiment_name='exp_shared', mlflow_tracking_uri='mlflow://two'),
+        'a.yaml': SimpleNamespace(experiment_name='exp_shared'),
+        'b.yaml': SimpleNamespace(experiment_name='exp_shared'),
     }
 
     monkeypatch.setattr(
@@ -85,7 +87,7 @@ def test_resolve_experiment_targets_tracking_override_avoids_conflict(
         config_files='a.yaml,b.yaml',
         config_dir=None,
         experiments=None,
-        tracking_uri_override='mlflow://override',
+        tracking_uri='mlflow://override',
         failures=failures,
     )
 
@@ -104,7 +106,7 @@ def test_resolve_experiment_targets_invalid_config_is_recorded(
     def _fake_load_config(config_path: str) -> SimpleNamespace:
         if config_path == 'bad.yaml':
             raise ValueError('bad config')
-        return SimpleNamespace(experiment_name='exp_ok', mlflow_tracking_uri=None)
+        return SimpleNamespace(experiment_name='exp_ok')
 
     monkeypatch.setattr(selector_helpers, 'load_experiment_config', _fake_load_config)
 
@@ -113,7 +115,7 @@ def test_resolve_experiment_targets_invalid_config_is_recorded(
         config_files='bad.yaml,ok.yaml',
         config_dir=None,
         experiments=None,
-        tracking_uri_override=None,
+        tracking_uri=None,
         failures=failures,
     )
 

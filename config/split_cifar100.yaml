@@ -55,10 +55,8 @@ seed: 1
 deterministic: false
 
 # ============================================================
-# Tracking & storage
+# Data paths
 # ============================================================
-mlflow_tracking_uri: null
-mlflow_artifact_uri: null
 dataset_path: null
 
 # ============================================================

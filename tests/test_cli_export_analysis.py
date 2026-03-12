@@ -29,7 +29,7 @@ def test_export_analysis_uses_analysis_and_output_roots(
         experiment_dir: Path,
         export_path: Path,
         tracking_uri: str | None,
-        artifact_uri: str | None,
+        artifact_location: str | None,
         runs_table: list[dict[str, object]],
         experiences_table: list[dict[str, object]],
         include_controllers: list[str] | None,

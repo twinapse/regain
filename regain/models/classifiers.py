@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 
 from regain.models.backbones import ResNet18Backbone
-from regain.models.backbones import ViTSmallBackbone
 from regain.models.backbones import ViTBaseBackbone
+from regain.models.backbones import ViTSmallBackbone
 from regain.models.heads import LinearClassifier
 
 __all__ = [

@@ -140,7 +140,7 @@ def main() -> None:
         '--tracking-uri',
         type=str,
         default=None,
-        help='MLflow tracking URI (overrides config-derived values).',
+        help='Optional MLflow tracking URI override.',
     )
     parser.add_argument('--include-controllers', type=str, default=None, help='Comma-separated allowlist for controller_name.')
     parser.add_argument('--exclude-controllers', type=str, default=None, help='Comma-separated denylist for controller_name.')
@@ -178,7 +178,7 @@ def main() -> None:
         config_files=args.config_files,
         config_dir=args.config_dir,
         experiments=args.experiments,
-        tracking_uri_override=args.tracking_uri,
+        tracking_uri=args.tracking_uri,
         failures=failures,
     )
 

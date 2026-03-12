@@ -230,8 +230,6 @@ class ExperimentConfig:
         device: Device identifier for training.
         seed: Random seed.
         deterministic: Whether to enforce deterministic PyTorch behavior.
-        mlflow_tracking_uri: Optional MLflow tracking URI.
-        mlflow_artifact_uri: Optional MLflow artifact URI or filesystem path.
         dataset_path: Optional dataset root to pass to the scenario builder.
         debug: Whether to enable debug instrumentation for repair controllers.
     """
@@ -258,11 +256,9 @@ class ExperimentConfig:
     seed: int = 1
     deterministic: bool = False
 
-    ###########################
-    # Tracking and data paths #
-    ###########################
-    mlflow_tracking_uri: str | None = None
-    mlflow_artifact_uri: str | None = None
+    ##############
+    # Data paths #
+    ##############
     dataset_path: str | Path | None = None
 
     ###################
@@ -832,8 +828,6 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
         device=_resolve_device(payload.get('device')),
         seed=payload.get(PARAM_SEED, 1),
         deterministic=payload.get('deterministic', False),
-        mlflow_tracking_uri=payload.get('mlflow_tracking_uri'),
-        mlflow_artifact_uri=payload.get('mlflow_artifact_uri'),
         dataset_path=dataset_path,
         debug=payload.get('debug', False),
     )

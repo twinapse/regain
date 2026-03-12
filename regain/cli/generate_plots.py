@@ -105,7 +105,7 @@ def main() -> None:
         config_files=args.config_files,
         config_dir=args.config_dir,
         experiments=args.experiments,
-        tracking_uri_override=None,
+        tracking_uri=None,
         failures=failures,
     )
 

@@ -66,8 +66,14 @@ You can also discover configs recursively from a directory:
 python -m regain.cli.run_experiment --config-dir ./config
 ```
 
-This produces MLflow runs under your configured tracking URI. Artifact storage follows MLflow defaults unless you set 
-`mlflow_artifact_uri` to a filesystem path or artifact URI (for example `file:///path/to/mlruns`).
+Optional MLflow overrides:
+
+```bash
+python -m regain.cli.run_experiment --config-dir ./config --tracking-uri file:./mlruns --artifact-location file:./mlruns
+```
+
+If omitted, MLflow uses its default behavior (environment variables such as `MLFLOW_TRACKING_URI`, configured profile,
+or local default store).
 
 ### 2) Analyze logged runs (write artifacts, optionally plot)
 
@@ -101,7 +107,7 @@ Common flags:
 
 * `--experiments` / `--config-files` / `--config-dir`: one required selector
 * `--output-dir`: output directory root (experiment subdirectory is created under this path)
-* `--tracking-uri`: MLflow tracking URI (overrides config-derived values)
+* `--tracking-uri`: optional MLflow tracking URI override
 * `--show-plots`: display plots interactively
 * `--save-plots`: save plots to `<output-dir>/<experiment>/plots`
 * `--perf-key`: metric key to maximize for the frontier and plot in curves

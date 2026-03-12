@@ -32,7 +32,7 @@ __all__ = [
     'format_timestamp_ms',
     'init_mlflow',
     'normalize_tracking_uri',
-    'resolve_artifact_uri',
+    'resolve_artifact_location',
     'resolve_experiment_id',
     'resolve_mlflow_run_name',
     'resolve_tracking_uri',
@@ -47,15 +47,15 @@ __all__ = [
 ##########################
 
 
-def _normalize_artifact_uri(raw_uri: str) -> str:
+def _normalize_artifact_location(raw_uri: str) -> str:
     """
-    Normalize an artifact URI to a stable representation.
+    Normalize an artifact location to a stable representation.
 
     Args:
-        raw_uri (str): Artifact URI or filesystem path.
+        raw_uri (str): Artifact location or filesystem path.
 
     Returns:
-        str: Normalized artifact URI.
+        str: Normalized artifact location.
     """
     parsed = urlparse(raw_uri)
     if parsed.scheme:
@@ -70,20 +70,20 @@ def _normalize_artifact_uri(raw_uri: str) -> str:
     return f'file:///{resolved.as_posix().lstrip("/")}'
 
 
-def resolve_artifact_uri(*, artifact_uri: str | None) -> str | None:
+def resolve_artifact_location(*, artifact_location: str | None) -> str | None:
     """
-    Normalize an optional artifact URI.
+    Normalize an optional artifact location.
 
     Args:
-        artifact_uri (str | None): Artifact URI or filesystem path supplied by the user.
+        artifact_location (str | None): Artifact location or filesystem path supplied by the user.
 
     Returns:
-        str | None: Normalized artifact URI or None when unset.
+        str | None: Normalized artifact location or None when unset.
     """
-    raw_uri = str(artifact_uri).strip() if artifact_uri is not None else ''
+    raw_uri = str(artifact_location).strip() if artifact_location is not None else ''
     if not raw_uri:
         return None
-    return _normalize_artifact_uri(raw_uri)
+    return _normalize_artifact_location(raw_uri)
 
 
 def resolve_tracking_uri(
@@ -145,14 +145,14 @@ def set_tracking_uri(
 def ensure_experiment(
     *,
     experiment_name: str,
-    artifact_uri: str | None,
+    artifact_location: str | None,
 ) -> str:
     """
     Ensure an MLflow experiment exists, optionally enforcing artifact location.
 
     Args:
         experiment_name (str): Experiment name.
-        artifact_uri (str | None): Optional artifact URI or filesystem path.
+        artifact_location (str | None): Optional artifact location or filesystem path.
 
     Returns:
         str: Experiment id.
@@ -162,18 +162,18 @@ def ensure_experiment(
     """
     client = MlflowClient()
     existing = client.get_experiment_by_name(experiment_name)
-    normalized_artifact_uri = resolve_artifact_uri(artifact_uri=artifact_uri)
+    normalized_artifact_location = resolve_artifact_location(artifact_location=artifact_location)
     if existing is None:
-        if normalized_artifact_uri is not None:
-            return client.create_experiment(name=experiment_name, artifact_location=normalized_artifact_uri)
+        if normalized_artifact_location is not None:
+            return client.create_experiment(name=experiment_name, artifact_location=normalized_artifact_location)
         return client.create_experiment(name=experiment_name)
 
-    if normalized_artifact_uri is not None:
-        existing_location = resolve_artifact_uri(artifact_uri=existing.artifact_location)
-        if existing_location is not None and existing_location != normalized_artifact_uri:
+    if normalized_artifact_location is not None:
+        existing_location = resolve_artifact_location(artifact_location=existing.artifact_location)
+        if existing_location is not None and existing_location != normalized_artifact_location:
             raise ValueError(
                 'MLflow experiment already exists with a different artifact location. '
-                f'Experiment={experiment_name}, existing={existing_location}, requested={normalized_artifact_uri}. '
+                f'Experiment={experiment_name}, existing={existing_location}, requested={normalized_artifact_location}. '
                 'Use a new experiment name or delete the existing experiment to change artifact storage.'
             )
 
@@ -185,7 +185,7 @@ def init_mlflow(
     experiment_name: str = 'regain_experiments',
     run_name: str | None = None,
     tracking_uri: str | None = None,
-    artifact_uri: str | None = None,
+    artifact_location: str | None = None,
 ) -> Iterator[mlflow.ActiveRun]:
     """
     Initialize an MLflow experiment and yield an active run context.
@@ -194,14 +194,14 @@ def init_mlflow(
         experiment_name: Name of the MLflow experiment.
         run_name: Optional run name.
         tracking_uri: Optional tracking URI.
-        artifact_uri: Optional artifact URI or filesystem path.
+        artifact_location: Optional artifact location or filesystem path.
 
     Yields:
         Active MLflow run object.
     """
     set_tracking_uri(tracking_uri=tracking_uri)
-    if artifact_uri is not None:
-        experiment_id = ensure_experiment(experiment_name=experiment_name, artifact_uri=artifact_uri)
+    if artifact_location is not None:
+        experiment_id = ensure_experiment(experiment_name=experiment_name, artifact_location=artifact_location)
         mlflow.set_experiment(experiment_id=experiment_id)
     else:
         mlflow.set_experiment(experiment_name)

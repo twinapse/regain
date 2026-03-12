@@ -26,7 +26,7 @@ class ExperimentTarget:
 
     Attributes:
         experiment_name (str): Experiment name or id.
-        tracking_uri (str | None): Optional effective tracking URI for this experiment.
+        tracking_uri (str | None): Optional effective MLflow tracking URI for this experiment.
     """
 
     experiment_name: str
@@ -151,7 +151,7 @@ def _resolve_config_file_paths(
 def _resolve_experiment_targets_from_configs(
     *,
     config_paths: list[str],
-    tracking_uri_override: str | None,
+    tracking_uri: str | None,
     failures: list[CliFailure],
 ) -> list[ExperimentTarget]:
     """
@@ -159,15 +159,14 @@ def _resolve_experiment_targets_from_configs(
 
     Args:
         config_paths (list[str]): Resolved config paths.
-        tracking_uri_override (str | None): Optional global tracking URI override.
+        tracking_uri (str | None): Optional global MLflow tracking URI.
         failures (list[CliFailure]): Mutable failure collector.
 
     Returns:
         list[ExperimentTarget]: Resolved targets in deterministic first-seen order.
     """
     targets: list[ExperimentTarget] = []
-    target_indexes: dict[str, int] = {}
-    invalid_experiments: set[str] = set()
+    seen_experiments: set[str] = set()
 
     for config_path in config_paths:
         config_scope = f'config={config_path}'
@@ -182,40 +181,16 @@ def _resolve_experiment_targets_from_configs(
             continue
 
         experiment_name = str(experiment_config.experiment_name)
-        if experiment_name in invalid_experiments:
+        if experiment_name in seen_experiments:
             continue
 
-        tracking_uri = tracking_uri_override
-        if tracking_uri is None:
-            tracking_uri = normalize_tracking_uri(
-                tracking_uri=experiment_config.mlflow_tracking_uri,
+        seen_experiments.add(experiment_name)
+        targets.append(
+            ExperimentTarget(
+                experiment_name=experiment_name,
+                tracking_uri=tracking_uri,
             )
-        current_index = target_indexes.get(experiment_name)
-        if current_index is None:
-            target_indexes[experiment_name] = len(targets)
-            targets.append(
-                ExperimentTarget(
-                    experiment_name=experiment_name,
-                    tracking_uri=tracking_uri,
-                )
-            )
-            continue
-
-        current_target = targets[current_index]
-        if current_target.tracking_uri == tracking_uri:
-            continue
-
-        add_failure(
-            failures=failures,
-            scope=f'experiment={experiment_name}',
-            error=(
-                'Conflicting tracking URIs for the same experiment. '
-                f'Expected one URI per experiment but found `{current_target.tracking_uri}` and `{tracking_uri}`.'
-            ),
         )
-        invalid_experiments.add(experiment_name)
-        targets.pop(current_index)
-        target_indexes = {target.experiment_name: index for index, target in enumerate(targets)}
 
     return targets
 
@@ -230,7 +205,7 @@ def _resolve_experiment_targets_from_names(
 
     Args:
         experiment_names (list[str]): Parsed experiment names.
-        tracking_uri (str | None): Optional global tracking URI.
+        tracking_uri (str | None): Optional global MLflow tracking URI.
 
     Returns:
         list[ExperimentTarget]: Resolved targets in deterministic first-seen order.
@@ -256,7 +231,7 @@ def resolve_experiment_targets(
     config_files: str | None,
     config_dir: str | None,
     experiments: str | None,
-    tracking_uri_override: str | None,
+    tracking_uri: str | None,
     failures: list[CliFailure],
 ) -> list[ExperimentTarget]:
     """
@@ -267,14 +242,14 @@ def resolve_experiment_targets(
         config_files (str | None): Raw comma-separated config paths argument.
         config_dir (str | None): Root config directory argument.
         experiments (str | None): Raw comma-separated experiment names argument.
-        tracking_uri_override (str | None): Optional global tracking URI override.
+        tracking_uri (str | None): Optional global MLflow tracking URI.
         failures (list[CliFailure]): Mutable failure collector.
 
     Returns:
         list[ExperimentTarget]: Resolved targets.
     """
-    normalized_tracking_uri_override = normalize_tracking_uri(
-        tracking_uri=tracking_uri_override,
+    normalized_tracking_uri = normalize_tracking_uri(
+        tracking_uri=tracking_uri,
     )
 
     if experiments is not None:
@@ -285,7 +260,7 @@ def resolve_experiment_targets(
         )
         return _resolve_experiment_targets_from_names(
             experiment_names=experiment_names,
-            tracking_uri=normalized_tracking_uri_override,
+            tracking_uri=normalized_tracking_uri,
         )
 
     config_paths = _resolve_config_file_paths(
@@ -295,6 +270,6 @@ def resolve_experiment_targets(
     )
     return _resolve_experiment_targets_from_configs(
         config_paths=config_paths,
-        tracking_uri_override=normalized_tracking_uri_override,
+        tracking_uri=normalized_tracking_uri,
         failures=failures,
     )
