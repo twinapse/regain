@@ -8,7 +8,7 @@ import sys
 import pytest
 
 import regain.cli.export_runs as export_runs_cli
-from regain.cli._utils._output_helpers import CliFailure
+from regain.cli._utils.output_helpers import CliFailure
 
 
 def test_export_runs_uses_output_dir_for_multiple_experiments(

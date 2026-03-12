@@ -16,14 +16,14 @@ import sys
 import tempfile
 
 from regain.analysis.plotting import plot_analysis_outputs
-from regain.cli._utils._output_helpers import add_failure
-from regain.cli._utils._output_helpers import CliFailure
-from regain.cli._utils._output_helpers import finalize_staged_outputs
-from regain.cli._utils._output_helpers import print_failure_summary
-from regain.cli._utils._output_helpers import resolve_exit_code
-from regain.cli._utils._output_helpers import StagedOutput
-from regain.cli._utils._selector_helpers import add_experiment_selector_arguments
-from regain.cli._utils._selector_helpers import resolve_experiment_targets
+from regain.cli._utils.output_helpers import add_failure
+from regain.cli._utils.output_helpers import CliFailure
+from regain.cli._utils.output_helpers import finalize_staged_outputs
+from regain.cli._utils.output_helpers import print_failure_summary
+from regain.cli._utils.output_helpers import resolve_exit_code
+from regain.cli._utils.output_helpers import StagedOutput
+from regain.cli._utils.selector_helpers import add_experiment_selector_arguments
+from regain.cli._utils.selector_helpers import resolve_experiment_targets
 from regain.constants import ANALYSIS_RHO_AVG
 from regain.utils import get_logger
 
