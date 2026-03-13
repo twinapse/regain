@@ -55,8 +55,7 @@ def _make_repair_controller_plugin() -> RepairControllerPlugin:
         fit_after_experience=False,
         repair_epochs=1,
         repair_batch_size=1,
-        budget_per_class=1,
-        max_repair_samples_per_class=1,
+        budget_fraction=1.0,
         seed=1,
     )
 

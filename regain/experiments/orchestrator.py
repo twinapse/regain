@@ -34,7 +34,6 @@ from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
 from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import PARAM_CONTROLLER_TYPE
-from regain.constants import PARAM_REPAIR_MAX_SAMPLES_PER_CLASS
 from regain.constants import RUN_NAME_BACKBONE
 from regain.experiments.backbone import extract_backbone_analysis_baseline
 from regain.experiments.backbone import extract_backbone_kwargs_from_run
@@ -68,7 +67,6 @@ from regain.mlflow_utils import set_tracking_uri
 from regain.models.controllers import Controller
 from regain.models.controllers import PreventionController
 from regain.models.controllers import RepairController
-from regain.utils import extract_targets
 from regain.utils import get_logger
 
 __all__ = [
@@ -88,44 +86,6 @@ class _InternalRunConfig:
 
     name: str
     controller: ControllerConfig | None = None
-
-
-def _resolve_max_repair_samples_per_class(*, benchmark: NCScenario) -> int:
-    """
-    Resolve the maximum per-class repair sample count available across repair experiences.
-
-    Args:
-        benchmark (NCScenario): Scenario that may include `repair_stream`.
-
-    Returns:
-        int: Maximum per-class repair samples available, or 0 when the repair stream is missing/empty.
-    """
-    repair_stream = getattr(benchmark, 'repair_stream', None)
-    if repair_stream is None:
-        return 0
-
-    min_set_size: int | None = None
-    for experience in repair_stream:
-        dataset = experience.dataset
-        targets = extract_targets(dataset)
-        if not targets:
-            return 0
-
-        per_class_counts: dict[int, int] = {}
-        for target in targets:
-            class_id = int(target)
-            per_class_counts[class_id] = per_class_counts.get(class_id, 0) + 1
-        if not per_class_counts:
-            return 0
-
-        experience_min = min(per_class_counts.values())
-        if min_set_size is None:
-            min_set_size = int(experience_min)
-        else:
-            min_set_size = min(int(min_set_size), int(experience_min))
-        if min_set_size == 0:
-            return 0
-    return int(min_set_size) if min_set_size is not None else 0
 
 
 # TODO: This function is too long and does too many things. Divide it into smaller functions.
@@ -242,11 +202,11 @@ def _train_and_evaluate_strategy(
                 repair_split_fraction = float(repair_split_fraction_override)
             else:
                 repair_split_fraction = float(experiment_config.repair.split_fraction)
-            repair_budget_per_class = experiment_config.repair.budget_per_class
-            repair_budget_per_class_value = (
-                int(repair_budget_per_class)
-                if repair_budget_per_class is not None
-                else 0
+            repair_budget_fraction = experiment_config.repair.budget_fraction
+            repair_budget_fraction_value = (
+                float(repair_budget_fraction)
+                if repair_budget_fraction is not None
+                else 1.0
             )
             repair_fit_after_experience = (
                 experiment_config.repair.fit_schedule == 'per_experience'
@@ -256,9 +216,7 @@ def _train_and_evaluate_strategy(
             benchmark = build_benchmark(
                 experiment_config=experiment_config,
                 repair_split_fraction=repair_split_fraction,
-                repair_budget_per_class=repair_budget_per_class_value,
             )
-            max_repair_samples_per_class = _resolve_max_repair_samples_per_class(benchmark=benchmark)
 
             # Initialize the metric context and build its plugin
             context = MetricContext()
@@ -299,8 +257,7 @@ def _train_and_evaluate_strategy(
                         if repair_batch_size is not None
                         else int(backbone_training.batch_size)
                     ),
-                    budget_per_class=repair_budget_per_class_value,
-                    max_repair_samples_per_class=int(max_repair_samples_per_class),
+                    budget_fraction=repair_budget_fraction_value,
                     seed=int(experiment_config.seed),
                     debug=experiment_config.debug,
                     debug_epochs=backbone_training.num_epochs,
@@ -432,7 +389,6 @@ def _train_and_evaluate_strategy(
             elif isinstance(controller, PreventionController):
                 controller_type = 'prevention'
             mlflow.log_param(PARAM_CONTROLLER_TYPE, controller_type)
-            mlflow.log_param(PARAM_REPAIR_MAX_SAMPLES_PER_CLASS, int(max_repair_samples_per_class))
 
             # Train and evaluate the strategy
             strategy.train(
@@ -584,8 +540,8 @@ def run_experiment(
 
     if has_repair_runs:
         missing_fields: list[str] = []
-        if experiment_config.repair.budget_per_class is None:
-            missing_fields.append('repair.budget_per_class')
+        if experiment_config.repair.budget_fraction is None:
+            missing_fields.append('repair.budget_fraction')
         if experiment_config.repair.fit_schedule is None:
             missing_fields.append('repair.fit_schedule')
         if experiment_config.repair.num_epochs is None:

@@ -147,7 +147,7 @@ This codebase distinguishes when a controller acts and how evaluation is execute
 
 **`RepairController` (post-hoc repair)**
 - After each training experience, the repair stream provides that experience’s fixed repair set.
-- Controller fitting uses a deterministic per-class subset (`repair.budget_per_class`) of that set.
+- Controller fitting uses a deterministic stratified subset (`repair.budget_fraction`) of that set.
 - Fitting schedule:
   - For repair-controller runs, `repair.fit_schedule` must be set explicitly.
   - If `repair.fit_schedule=per_experience`, fit after each experience.
@@ -225,11 +225,11 @@ When one or more configured controller runs are present:
   share the exact same repair split defined by:
   - required `repair.split_fraction` (float in `[0, 1)`) as the fraction of each training experience excluded from
     backbone training.
-- `repair.budget_per_class` is the per-class fitting budget consumed from each fixed repair set.
-  For each experience with `n_exp` samples and `k_exp` classes, it must satisfy:
-  `repair.budget_per_class * k_exp <= floor(repair.split_fraction * n_exp)`.
+- `repair.budget_fraction` is the fitting fraction consumed from each fixed repair set.
+  For each experience with repair set size `r_exp = floor(repair.split_fraction * n_exp)`,
+  fitting uses `floor(repair.budget_fraction * r_exp)` samples.
 - If any run in `runs` is a repair controller, the following fields are required explicitly:
-  - `repair.budget_per_class` (non-negative integer)
+  - `repair.budget_fraction` (float in `(0, 1]`)
   - `repair.fit_schedule` (`per_experience` or `final_only`)
   - `repair.num_epochs`
   - `repair.batch_size`
@@ -264,18 +264,17 @@ We use two related but distinct concepts alongside the sequential training strea
 
 - For each experience’s original training dataset, we split samples into:
   - a **training subset** used by the continual learner, and
-  - a **repair subset** used only for controller fitting.
+  - a **repair set** (the full held-out repair subset for that experience).
 - The split is deterministic under the experiment seed.
 - Repair samples are never used for backbone training.
 - The split is controlled by `repair.split_fraction`:
   - per experience with `n_exp` samples, the repair set size is
     `floor(repair.split_fraction * n_exp)`.
-  - when `repair.budget_per_class > 0`, a guard enforces
-    `repair.budget_per_class * k_exp <= floor(repair.split_fraction * n_exp)`.
-  - a second guard enforces at least one remaining training sample per class.
+  - a guard enforces at least one remaining training sample per class.
 - Setting `repair.split_fraction: 0.0` disables the repair stream entirely.
-- For repair controllers, fitting uses a deterministic per-class subset of size `repair.budget_per_class` from each
-  fixed repair set.
+- For repair controllers, fitting uses a deterministic stratified **repair fit subset** sampled from each repair set:
+  - per experience with repair set size `r_exp`, used samples are `floor(repair.budget_fraction * r_exp)`;
+  - class proportions follow the repair-set distribution as closely as possible.
 - Dataset split indices are logged as `splits.tar.gz`, with entries named `{stream}/exp_###.txt`.
 - Analysis derives `repair_set_total` as:
   - `0` when `repair.split_fraction == 0.0`;
@@ -558,7 +557,7 @@ The definitions below are the normative interpretation of the metric families us
 ## 8) REGAIN analysis tool: Curves, Frontiers, and Predictive Associations
 
 ### 8.1 Recoverability curves
-For each repair controller capacity level, we compute curves over repair budget $b$:
+For each repair controller capacity level, we compute curves over repair budget fraction $b$:
 
 - Mean recoverable fraction:
   $$
@@ -580,8 +579,8 @@ The `curves` analysis step writes:
 ### 8.2 Repair efficiency frontier
 We place controller configurations on frontiers defined by:
 
-- **Data cost:** shots/class $b$, where $b = \text{repair.budget\_per\_class}$
-  (total consumed repair examples = `repair.budget_per_class * num_classes`)
+- **Data cost:** repair-fit fraction $b$, where $b = \text{repair.budget\_fraction}$
+  (total consumed repair examples are computed from repair-set size and $b$)
 - **Parameter cost:** controller parameter count $|\theta|$
 
 Frontiers plot recovered performance (e.g., $\bar{\rho}$, $\overline{A}_{\text{ctrl}}$) against these costs.

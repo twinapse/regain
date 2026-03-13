@@ -7,6 +7,7 @@ This module converts MLflow runs into tidy tables suitable for automation of:
 """
 
 import json
+import math
 from pathlib import Path
 import re
 import tarfile
@@ -29,9 +30,8 @@ from regain.constants import COLUMN_CONTROLLER_NAME
 from regain.constants import COLUMN_EXP_IDX
 from regain.constants import COLUMN_EXPERIMENT_ID
 from regain.constants import COLUMN_NUM_CLASSES
-from regain.constants import COLUMN_REPAIR_BUDGET_PER_CLASS
+from regain.constants import COLUMN_REPAIR_BUDGET_FRACTION
 from regain.constants import COLUMN_REPAIR_BUDGET_TOTAL
-from regain.constants import COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS
 from regain.constants import COLUMN_REPAIR_SET_TOTAL
 from regain.constants import COLUMN_REPAIR_SPLIT_FRACTION
 from regain.constants import COLUMN_RUN_ID
@@ -47,7 +47,7 @@ from regain.constants import NS_SEP
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import PARAM_CONTROLLER_TYPE
 from regain.constants import PARAM_NUM_CLASSES
-from regain.constants import PARAM_REPAIR_MAX_SAMPLES_PER_CLASS
+from regain.constants import PARAM_REPAIR_BUDGET_FRACTION
 from regain.constants import PARAM_REPAIR_SPLIT_FRACTION
 from regain.constants import PARAM_SEED
 from regain.constants import RUN_ACC_EXP
@@ -95,7 +95,6 @@ _SUMMARY_RHO_AVG = f'{NAMESPACE_SUMMARY}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'
 
 _PARAM_BACKBONE_STRATEGY_NAME = 'backbone.training.strategy.name'
 _PARAM_CONTROLLER_NAME = 'controller.name'
-_PARAM_REPAIR_BUDGET_PER_CLASS = 'repair.budget_per_class'
 _CONTROLLER_TYPE_NONE = 'none'
 _CONTROLLER_TYPE_PREVENTION = 'prevention'
 _CONTROLLER_TYPE_REPAIR = 'repair'
@@ -485,7 +484,7 @@ def collect_experiment_tables(
     experiences_table: list[dict[str, Any]] = []
     run_failures: list[dict[str, str]] = []
     repair_set_total_cache: dict[
-        tuple[str, int | None, float | None, int | None, int | None],
+        tuple[str, int | None, float | None, int | None, float | None],
         int,
     ] = {}
 
@@ -505,8 +504,7 @@ def collect_experiment_tables(
             continue
         try:
             seed = to_int(params.get(PARAM_SEED))
-            repair_budget_per_class = to_int(params.get(_PARAM_REPAIR_BUDGET_PER_CLASS))
-            max_repair_samples_per_class = to_int(params.get(PARAM_REPAIR_MAX_SAMPLES_PER_CLASS))
+            repair_budget_fraction = to_float(params.get(PARAM_REPAIR_BUDGET_FRACTION))
             repair_split_fraction = to_float(params.get(PARAM_REPAIR_SPLIT_FRACTION))
             num_classes = to_int(params.get(PARAM_NUM_CLASSES))
             if num_classes is None:
@@ -514,10 +512,8 @@ def collect_experiment_tables(
 
             ctrl_param_count = to_int(params.get(PARAM_CONTROLLER_MODEL_PARAM_COUNT))
 
-            b = float(repair_budget_per_class) if repair_budget_per_class is not None else None
-            repair_budget_total = None
-            if b is not None and num_classes is not None and num_classes > 0:
-                repair_budget_total = int(float(b) * float(num_classes))
+            b = float(repair_budget_fraction) if repair_budget_fraction is not None else None
+            repair_budget_total: int | None = None
 
             # Prefer canonical summary metrics, then compute from per-task values.
             rho_avg = to_float(metrics.get(_SUMMARY_RHO_AVG))
@@ -540,6 +536,10 @@ def collect_experiment_tables(
                 experience_metrics=experience_metrics,
             )
             is_repair_controller = _controller_expects_ctrl_metrics(params=params)
+            if is_repair_controller and b is None:
+                raise ValueError(
+                    'Repair run is missing required `repair.budget_fraction` param.'
+                )
             expects_ctrl_metrics = bool(has_logged_ctrl_metrics)
             if is_repair_controller:
                 expects_ctrl_metrics = True
@@ -560,7 +560,7 @@ def collect_experiment_tables(
                     seed,
                     repair_split_fraction,
                     num_classes,
-                    repair_budget_per_class,
+                    repair_budget_fraction,
                 )
                 if cache_key in repair_set_total_cache:
                     repair_set_total = repair_set_total_cache[cache_key]
@@ -570,6 +570,8 @@ def collect_experiment_tables(
                         run_id=str(info.run_id),
                     )
                     repair_set_total_cache[cache_key] = int(repair_set_total)
+            if b is not None and repair_set_total is not None:
+                repair_budget_total = int(math.floor(float(repair_set_total) * float(b)))
 
             artifacts: dict[str, Any] | None = None
             if is_repair_controller:
@@ -646,9 +648,8 @@ def collect_experiment_tables(
                 _COLUMN_STRATEGY_NAME: strategy_name,
                 COLUMN_SEED: seed,
                 COLUMN_CONTROLLER_NAME: controller_name,
-                COLUMN_REPAIR_BUDGET_PER_CLASS: repair_budget_per_class,
+                COLUMN_REPAIR_BUDGET_FRACTION: repair_budget_fraction,
                 COLUMN_REPAIR_BUDGET_TOTAL: repair_budget_total,
-                COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS: max_repair_samples_per_class,
                 COLUMN_REPAIR_SET_TOTAL: repair_set_total,
                 COLUMN_REPAIR_SPLIT_FRACTION: repair_split_fraction,
                 COLUMN_NUM_CLASSES: num_classes,
@@ -680,9 +681,8 @@ def collect_experiment_tables(
                     COLUMN_RUN_ID: str(info.run_id),
                     COLUMN_SEED: seed,
                     COLUMN_CONTROLLER_NAME: controller_name,
-                    COLUMN_REPAIR_BUDGET_PER_CLASS: repair_budget_per_class,
+                    COLUMN_REPAIR_BUDGET_FRACTION: repair_budget_fraction,
                     COLUMN_REPAIR_BUDGET_TOTAL: repair_budget_total,
-                    COLUMN_REPAIR_MAX_SAMPLES_PER_CLASS: max_repair_samples_per_class,
                     COLUMN_REPAIR_SET_TOTAL: repair_set_total,
                     COLUMN_REPAIR_SPLIT_FRACTION: repair_split_fraction,
                     COLUMN_NUM_CLASSES: num_classes,

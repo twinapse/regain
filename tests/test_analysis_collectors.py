@@ -182,7 +182,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'repair',
             'seed': '1',
             'repair.split_fraction': '0.0',
-            'repair.budget_per_class': '5',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -236,7 +236,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'repair',
             'seed': '1',
             'repair.split_fraction': '0.0',
-            'repair.budget_per_class': '5',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -290,7 +290,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'repair',
             'seed': '1',
             'repair.split_fraction': '0.0',
-            'repair.budget_per_class': '5',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -325,7 +325,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'repair',
             'seed': '1',
             'repair.split_fraction': '0.0',
-            'repair.budget_per_class': '5',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -362,7 +362,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'prevention',
             'seed': '1',
             'repair.split_fraction': '0.0',
-            'repair.budget_per_class': '5',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -408,8 +408,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'repair',
             'seed': '1',
             'repair.split_fraction': '0.2',
-            'repair.budget_per_class': '5',
-            'repair.max_samples_per_class': '99',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -459,7 +458,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'repair',
             'seed': '1',
             'repair.split_fraction': '0.0',
-            'repair.budget_per_class': '5',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -501,7 +500,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'prevention',
             'seed': '7',
             'repair.split_fraction': '0.0',
-            'repair.budget_per_class': '0',
+            'repair.budget_fraction': '1.0',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -539,7 +538,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             PARAM_CONTROLLER_TYPE: 'repair',
             'seed': '1',
             'repair.split_fraction': '0.2',
-            'repair.budget_per_class': '5',
+            'repair.budget_fraction': '0.5',
             'num_classes': '2',
         }
         metrics = _base_metrics_with_exp000()
@@ -618,7 +617,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             'controller.name': 'my_prevention_controller',
             'seed': '1',
             'repair.split_fraction': '0.2',
-            'repair.budget_per_class': '1',
+            'repair.budget_fraction': '1.0',
             'num_classes': '2',
         }
         run = _make_run(params=params, metrics=_base_metrics_with_exp000())
@@ -642,7 +641,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             'controller.name': 'my_prevention_controller',
             PARAM_CONTROLLER_TYPE: 'prevention',
             'seed': '1',
-            'repair.budget_per_class': '1',
+            'repair.budget_fraction': '1.0',
             'num_classes': '2',
         }
         run = _make_run(params=params, metrics=_base_metrics_with_exp000())

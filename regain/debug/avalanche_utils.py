@@ -181,8 +181,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         fit_after_experience: bool,
         repair_epochs: int,
         repair_batch_size: int,
-        budget_per_class: int,
-        max_repair_samples_per_class: int,
+        budget_fraction: float,
         seed: int,
         debug_epochs: int,
         debug_experiences: int,
@@ -198,9 +197,8 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             fit_after_experience (bool): Whether to fit after each experience.
             repair_epochs (int): Number of epochs for repair fitting.
             repair_batch_size (int): Batch size for repair fitting.
-            budget_per_class (int): Repair budget `b` used from each fixed repair set.
-            max_repair_samples_per_class (int): Upper bound on per-class repair samples available in the scenario.
-            seed (int): Global seed used for deterministic budget selection.
+            budget_fraction (float): Fraction of each fixed repair set used for controller fitting.
+            seed (int): Global seed used for deterministic subset selection.
             debug_epochs (int): Epochs per experience used only to compute debug metric step values.
             debug_experiences (int): Total experiences used only to compute debug metric step values.
             debug_seed (int): Random seed for debug dataloading.
@@ -212,8 +210,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             fit_after_experience=fit_after_experience,
             repair_epochs=repair_epochs,
             repair_batch_size=repair_batch_size,
-            budget_per_class=budget_per_class,
-            max_repair_samples_per_class=max_repair_samples_per_class,
+            budget_fraction=budget_fraction,
             seed=seed,
         )
         self._debug_epochs = int(debug_epochs)

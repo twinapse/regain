@@ -33,7 +33,7 @@ def _build_base_payload() -> dict[str, object]:
         },
         'repair': {
             'split_fraction': 0.0,
-            'budget_per_class': 0,
+            'budget_fraction': 1.0,
             'fit_schedule': 'per_experience',
         },
         'runs': [],
@@ -121,7 +121,7 @@ class TestRepairConfigParsing:
         payload['evaluation'] = {}
         payload['repair'] = {
             'split_fraction': 0.25,
-            'budget_per_class': 2,
+            'budget_fraction': 0.5,
             'fit_schedule': 'per_experience',
         }
         config_path = _write_payload(tmp_path=tmp_path, payload=payload)
@@ -129,14 +129,14 @@ class TestRepairConfigParsing:
         config = load_experiment_config(config_path)
 
         assert config.repair.split_fraction == pytest.approx(0.25)
-        assert config.repair.budget_per_class == 2
+        assert config.repair.budget_fraction == pytest.approx(0.5)
         assert config.repair.fit_schedule == 'per_experience'
 
     def test_requires_repair_split_fraction_field(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
         payload['evaluation'] = {}
         payload['repair'] = {
-            'budget_per_class': 1,
+            'budget_fraction': 0.5,
             'fit_schedule': 'per_experience',
         }
         config_path = _write_payload(tmp_path=tmp_path, payload=payload)
@@ -157,7 +157,7 @@ class TestRepairConfigParsing:
 
         config = load_experiment_config(config_path)
 
-        assert config.repair.budget_per_class is None
+        assert config.repair.budget_fraction is None
         assert config.repair.fit_schedule is None
         assert config.repair.num_epochs is None
         assert config.repair.batch_size is None
@@ -183,7 +183,7 @@ class TestRepairConfigParsing:
             load_experiment_config(config_path)
 
         message = str(exc_info.value)
-        assert 'repair.budget_per_class' in message
+        assert 'repair.budget_fraction' in message
         assert 'repair.fit_schedule' in message
         assert 'repair.num_epochs' in message
         assert 'repair.batch_size' in message
@@ -193,7 +193,7 @@ class TestRepairConfigParsing:
         payload['evaluation'] = {}
         payload['repair'] = {
             'split_fraction': 1.5,
-            'budget_per_class': 1,
+            'budget_fraction': 0.5,
             'fit_schedule': 'per_experience',
         }
         config_path = _write_payload(tmp_path=tmp_path, payload=payload)

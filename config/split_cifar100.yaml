@@ -38,7 +38,7 @@ backbone:
 # ============================================================
 repair:
   split_fraction: 0.2           # per-experience train split assigned to repair stream (500 * 0.2 = 100)
-  budget_per_class: 100
+  budget_fraction: 1.0          # fraction of the repair set used for fitting
   fit_schedule: per_experience
   num_epochs: 50
   batch_size: 64                # mini-batch size used when fitting repair controllers

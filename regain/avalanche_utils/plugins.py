@@ -459,8 +459,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         fit_after_experience: bool,
         repair_epochs: int,
         repair_batch_size: int,
-        budget_per_class: int = 0,
-        max_repair_samples_per_class: int = 0,
+        budget_fraction: float = 1.0,
         seed: int = 1,
     ) -> None:
         """
@@ -471,9 +470,8 @@ class RepairControllerPlugin(SupervisedPlugin):
             fit_after_experience (bool): Whether to fit on repair data after each experience.
             repair_epochs (int): Number of epochs to use for repair fitting.
             repair_batch_size (int): Batch size to use for repair fitting.
-            budget_per_class (int): Repair budget `b` (per class) consumed from each fixed repair set.
-            max_repair_samples_per_class (int): Upper bound on per-class repair samples available in the scenario.
-            seed (int): Global seed used for deterministic budget sub-selection.
+            budget_fraction (float): Fraction of each fixed repair set used for repair fitting.
+            seed (int): Global seed used for deterministic subset selection.
 
         Raises:
             TypeError: If the controller is not a RepairController.
@@ -494,24 +492,14 @@ class RepairControllerPlugin(SupervisedPlugin):
         self.repair_epochs = int(repair_epochs)
         self.repair_batch_size = int(repair_batch_size)
         self.fit_after_experience = bool(fit_after_experience)
-        self.budget_per_class = int(budget_per_class)
-        self.max_repair_samples_per_class = int(max_repair_samples_per_class)
+        self.budget_fraction = float(budget_fraction)
         self.seed = int(seed)
         if self.repair_batch_size <= 0:
             raise ValueError('`repair_batch_size` must be positive.')
         if self.repair_epochs < 0:
             raise ValueError('`repair_epochs` must be non-negative.')
-        if self.budget_per_class <= 0:
-            raise ValueError('`budget_per_class` must be positive.')
-        if self.max_repair_samples_per_class < 0:
-            raise ValueError('`max_repair_samples_per_class` must be non-negative.')
-        if self.budget_per_class > self.max_repair_samples_per_class:
-            maximum_budget_per_class = int(self.max_repair_samples_per_class)
-            raise ValueError(
-                '`repair.budget_per_class` cannot exceed the maximum per-class repair budget: '
-                f'budget_per_class={self.budget_per_class}, '
-                f'maximum_budget_per_class={maximum_budget_per_class}.'
-            )
+        if not (0.0 < self.budget_fraction <= 1.0):
+            raise ValueError('`budget_fraction` must be in the range (0, 1].')
         self._repair_datasets: list[Dataset] = []
         self._seen_classes: set[int] = set()
         self._train_seen_classes: set[int] = set()
@@ -584,28 +572,25 @@ class RepairControllerPlugin(SupervisedPlugin):
             )
         return values
 
-    def _select_budget_per_class(
+    def _select_budget_fraction(
         self,
         *,
         repair_dataset: Dataset,
         exp_idx: int,
     ) -> Dataset | None:
         """
-        Select exactly `budget_per_class` samples per class from a fixed repair set.
+        Select a deterministic stratified subset from a fixed repair set.
 
         Args:
             repair_dataset (Dataset): Fixed repair set for one experience.
             exp_idx (int): Experience index.
 
         Returns:
-            Dataset | None: Deterministically selected per-class budget subset, or None when budget is zero.
+            Dataset | None: Deterministically selected subset.
 
         Raises:
             TypeError: If the repair dataset does not support subsetting.
-            ValueError: If a class has fewer than `budget_per_class` samples.
         """
-        if self.budget_per_class <= 0:
-            return None
         if not hasattr(repair_dataset, 'subset'):
             raise TypeError('Repair dataset must expose a `subset` method.')
 
@@ -614,17 +599,59 @@ class RepairControllerPlugin(SupervisedPlugin):
             return None
         targets_arr = np.asarray(targets, dtype=np.int64)
         original_indices = self._extract_original_indices(repair_dataset)
+        repair_set_size = int(len(targets_arr))
+        budget_size = int(np.floor(float(self.budget_fraction) * float(repair_set_size)))
+        if budget_size <= 0:
+            return None
+
+        # Compute deterministic stratified per-class selected counts.
+        class_ids = sorted(int(cls) for cls in np.unique(targets_arr))
+        class_counts: dict[int, int] = {
+            class_id: int(np.sum(targets_arr == class_id))
+            for class_id in class_ids
+        }
+        class_target_counts: dict[int, float] = {}
+        selected_count_by_class: dict[int, int] = {}
+        selected_count_total = 0
+        for class_id in class_ids:
+            class_count = int(class_counts[class_id])
+            class_target_count = float(self.budget_fraction) * float(class_count)
+            class_target_counts[class_id] = class_target_count
+            class_selected_count = int(np.floor(class_target_count))
+            selected_count_by_class[class_id] = class_selected_count
+            selected_count_total += class_selected_count
+
+        remaining_slots = int(budget_size - selected_count_total)
+        while remaining_slots > 0:
+            candidate_class_ids = [
+                class_id
+                for class_id in class_ids
+                if selected_count_by_class[class_id] < class_counts[class_id]
+            ]
+            if not candidate_class_ids:
+                raise ValueError(
+                    'Repair budget guard failed: could not place remaining stratified budget slots. '
+                    f'exp_idx={exp_idx}, remaining_slots={remaining_slots}.'
+                )
+            selected_class_id = min(
+                candidate_class_ids,
+                key=lambda class_id: (
+                    -(
+                        class_target_counts[class_id]
+                        - float(selected_count_by_class[class_id])
+                    ),
+                    class_id,
+                ),
+            )
+            selected_count_by_class[selected_class_id] += 1
+            remaining_slots -= 1
 
         selected_indices: list[int] = []
-        for class_id in sorted(int(cls) for cls in np.unique(targets_arr)):
+        for class_id in class_ids:
+            class_budget_count = int(selected_count_by_class[class_id])
+            if class_budget_count <= 0:
+                continue
             class_local_indices = np.where(targets_arr == class_id)[0].tolist()
-            n_class = int(len(class_local_indices))
-            if self.budget_per_class > n_class:
-                raise ValueError(
-                    'Repair budget exceeds fixed set for class. '
-                    f'exp_idx={exp_idx}, class_id={class_id}, '
-                    f'set_size={n_class}, budget={self.budget_per_class}.'
-                )
 
             class_local_indices = sorted(
                 class_local_indices,
@@ -635,7 +662,7 @@ class RepairControllerPlugin(SupervisedPlugin):
                     sample_id=int(original_indices[local_idx]),
                 ),
             )
-            selected_indices.extend(class_local_indices[:self.budget_per_class])
+            selected_indices.extend(class_local_indices[:class_budget_count])
 
         selected_indices = sorted(int(idx) for idx in selected_indices)
         return repair_dataset.subset(selected_indices)
@@ -744,7 +771,7 @@ class RepairControllerPlugin(SupervisedPlugin):
 
     def _ingest_repair_dataset(self, *, experience: object) -> Dataset | None:
         """
-        Resolve and store the budget-filtered repair dataset for one experience.
+        Resolve and store the budgeted repair subset for one experience.
 
         Args:
             experience (object): Avalanche experience.
@@ -756,7 +783,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         if repair_set_dataset is None:
             return None
         exp_idx = int(experience.current_experience)
-        repair_used_dataset = self._select_budget_per_class(
+        repair_used_dataset = self._select_budget_fraction(
             repair_dataset=repair_set_dataset,
             exp_idx=exp_idx,
         )
