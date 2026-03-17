@@ -15,6 +15,7 @@ from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
 from regain.avalanche_utils.plugins import RegainEvaluationPlugin
 from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
+from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR
 from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NS_SEP
@@ -753,11 +754,11 @@ def load_backbone_analysis_baseline_from_run(
     artifacts_payload = download_json_artifact(
         client=client,
         run_id=run_id,
-        artifact_path='analysis_artifacts.json',
+        artifact_path=MLFLOW_ARTIFACT_ANALYSIS_FILE,
     )
     if not isinstance(artifacts_payload, Mapping):
         raise RuntimeError(
-            f'Backbone run `{run_id}` is missing required `analysis_artifacts.json`.'
+            f'Backbone run `{run_id}` is missing required `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.'
         )
 
     baseline: dict[str, list[float | None]] = {

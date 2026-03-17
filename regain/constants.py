@@ -107,6 +107,7 @@ __all__ = [
     'PARAM_TORCH_DETERMINISTIC_ALGORITHMS',
     # ---- Misc ----
     'EXPERIENCE_KEY_PREFIX',
+    'MLFLOW_ARTIFACT_ANALYSIS_FILE',
     'MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR',
     'MLFLOW_ARTIFACT_CONFIG_FILE',
     'MLFLOW_ARTIFACT_SPLITS_FILE',
@@ -297,6 +298,7 @@ _DEBUG_HEALTH_S3_DIV = 's3_div'
 # Note: some constants in this section are used only in one module,
 #       but we keep them to keep track of all the MLflow artifacts in one place.
 
+MLFLOW_ARTIFACT_ANALYSIS_FILE = 'analysis_artifacts.json'
 MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR = 'checkpoints'
 MLFLOW_ARTIFACT_CONFIG_FILE = 'config.yaml'
 MLFLOW_ARTIFACT_SPLITS_FILE = 'splits.tar.gz'

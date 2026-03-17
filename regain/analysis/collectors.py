@@ -41,6 +41,7 @@ from regain.constants import COLUMN_STATUS
 from regain.constants import COLUMN_TASK_AGE
 from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
+from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
 from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NS_SEP
@@ -583,17 +584,17 @@ def collect_experiment_tables(
                 artifacts = download_json_artifact(
                     client=client,
                     run_id=str(info.run_id),
-                    artifact_path='analysis_artifacts.json',
+                    artifact_path=MLFLOW_ARTIFACT_ANALYSIS_FILE,
                 )
                 if not isinstance(artifacts, dict):
                     raise ValueError(
-                        f'Repair run `{info.run_id}` is missing required `analysis_artifacts.json`.'
+                        f'Repair run `{info.run_id}` is missing required `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.'
                     )
                 calib_max_ece = to_float(artifacts.get(RUN_CALIB_MAX_ECE))
                 if calib_max_ece is None:
                     raise ValueError(
                         f'Repair run `{info.run_id}` is missing required '
-                        f'`{RUN_CALIB_MAX_ECE}` in `analysis_artifacts.json`.'
+                        f'`{RUN_CALIB_MAX_ECE}` in `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.'
                     )
                 experience_metrics = _merge_experience_artifacts(
                     experience_metrics,
