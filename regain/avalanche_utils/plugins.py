@@ -39,6 +39,7 @@ from regain.avalanche_utils.logging import MLflowLogger
 from regain.constants import COLUMN_STATUS
 from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
+from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import NAMESPACE_EVAL
 from regain.constants import NAMESPACE_RUN
 from regain.constants import NAMESPACE_SUMMARY
@@ -2607,7 +2608,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 value=1.0,
                 step=final_step,
             )
-            mlflow.log_dict(self.artifacts, 'analysis_artifacts.json')
+            mlflow.log_dict(self.artifacts, MLFLOW_ARTIFACT_ANALYSIS_FILE)
             return
 
         # Build final base accuracies from inherited or current evaluations.
@@ -2659,6 +2660,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         )
 
         self.artifacts = artifacts
+        mlflow.log_dict(self.artifacts, MLFLOW_ARTIFACT_ANALYSIS_FILE)
         log_ctrl_metrics = isinstance(self.controller_plugin, RepairControllerPlugin)
         final_step = int(self._num_experiences * self.num_epochs_per_experience)
         # Log per-experience final base vectors.
