@@ -86,6 +86,7 @@ __all__ = [
     'CalibrationDiagnosticsPlugin',
     'ControllerPlugin',
     'EvaluationIntegrityPlugin',
+    'GradientClippingPlugin',
     'LRSchedulerPlugin',
     'PreventionControllerPlugin',
     'RepairControllerPlugin',
@@ -321,6 +322,36 @@ class LRSchedulerPlugin(SupervisedPlugin):
     def after_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
         if self._scheduler is not None:
             self._scheduler.step()
+
+
+class GradientClippingPlugin(SupervisedPlugin):
+    """
+    Apply gradient clipping before each optimizer update.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_norm: float,
+        norm_type: float = 2.0,
+    ) -> None:
+        super().__init__()
+        self.max_norm = float(max_norm)
+        self.norm_type = float(norm_type)
+
+    def before_update(self, strategy: BaseTemplate, **kwargs) -> None:
+        trainable_params = [
+            parameter
+            for parameter in strategy.model.parameters()
+            if parameter.requires_grad and parameter.grad is not None
+        ]
+        if not trainable_params:
+            return
+        torch.nn.utils.clip_grad_norm_(
+            trainable_params,
+            max_norm=self.max_norm,
+            norm_type=self.norm_type,
+        )
 
 
 class PreventionControllerPlugin(SupervisedPlugin):

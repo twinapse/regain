@@ -215,6 +215,7 @@ def get_backbone_path(name: str) -> str:
 _LR_SCHEDULERS: Mapping[str, str] = MappingProxyType(
     {
         'multi_step': 'torch.optim.lr_scheduler.MultiStepLR',
+        'warmup_cosine': 'regain.experiments.lr_schedulers.WarmupCosineLR',
     }
 )
 

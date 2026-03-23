@@ -74,6 +74,8 @@ def resolve_backbone_training_config(
         strategy=StrategyConfig(name='naive'),
         optimizer=OptimizerConfig(),
         batch_size=128,
+        lr_scheduler=None,
+        grad_clip_max_norm=None,
     )
 
 

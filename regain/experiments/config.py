@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -112,11 +112,11 @@ class LRSchedulerConfig:
     Learning rate schedule configuration.
 
     Attributes:
-        name: Schedule type identifier (currently only ``multi_step`` is supported).
-        kwargs: Schedule-specific keyword arguments (e.g. ``milestones``, ``gamma`` for ``multi_step``).
+        name: Schedule type identifier.
+        kwargs: Schedule-specific keyword arguments.
     """
 
-    name: Literal['multi_step']
+    name: Literal['multi_step', 'warmup_cosine']
     kwargs: dict[str, object] = field(default_factory=dict)
 
 
@@ -131,6 +131,7 @@ class TrainingConfig:
         optimizer: Optimizer configuration for backbone training.
         batch_size: Training mini-batch size for current data (Avalanche `train_mb_size`).
         lr_scheduler: Optional learning rate schedule applied within each experience.
+        grad_clip_max_norm: Optional gradient clipping norm applied before optimizer updates.
     """
 
     num_epochs: int
@@ -138,6 +139,7 @@ class TrainingConfig:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     batch_size: int = 128
     lr_scheduler: LRSchedulerConfig | None = None
+    grad_clip_max_norm: float | None = None
 
 
 @dataclass
@@ -533,10 +535,12 @@ def _parse_optimizer_config(config: dict[str, Any], *, config_name: str) -> Opti
         kwargs_payload = {}
     if not isinstance(kwargs_payload, Mapping):
         raise ValueError(f'{config_name} optimizer `kwargs` must be a mapping.')
-    return OptimizerConfig(
+    optimizer = OptimizerConfig(
         name=optimizer_config['name'],
         kwargs=dict(kwargs_payload),
     )
+    _validate_optimizer_config(optimizer_config=optimizer, config_name=config_name)
+    return optimizer
 
 
 def _parse_lr_scheduler_config(config: dict[str, Any]) -> LRSchedulerConfig | None:
@@ -554,6 +558,120 @@ def _parse_lr_scheduler_config(config: dict[str, Any]) -> LRSchedulerConfig | No
     if not isinstance(kwargs_payload, Mapping):
         raise ValueError('`lr_scheduler.kwargs` must be a mapping when provided.')
     return LRSchedulerConfig(name=name, kwargs=dict(kwargs_payload))
+
+
+def _validate_optimizer_config(
+    *,
+    optimizer_config: OptimizerConfig,
+    config_name: str,
+) -> None:
+    """
+    Validate optimizer configuration payloads.
+
+    Args:
+        optimizer_config (OptimizerConfig): Parsed optimizer configuration.
+        config_name (str): Human-readable config prefix for errors.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If optimizer settings are invalid.
+    """
+    optimizer_name = str(optimizer_config.name).strip().lower()
+    kwargs = dict(optimizer_config.kwargs)
+
+    if optimizer_name == 'sgd':
+        return
+
+    if optimizer_name != 'adam':
+        raise ValueError(
+            f'{config_name} optimizer `name` must be one of `sgd` or `adam`.'
+        )
+
+    betas = kwargs.get('betas')
+    if betas is not None:
+        if isinstance(betas, str):
+            raise ValueError(
+                f'{config_name} optimizer `betas` must be a YAML sequence like '
+                '`[0.9, 0.999]`, not a string literal.'
+            )
+        if not isinstance(betas, Sequence):
+            raise ValueError(
+                f'{config_name} optimizer `betas` must be a sequence of two floats.'
+            )
+        beta_values = list(betas)
+        if len(beta_values) != 2:
+            raise ValueError(
+                f'{config_name} optimizer `betas` must contain exactly two values.'
+            )
+        for beta in beta_values:
+            beta_value = float(beta)
+            if not (0.0 <= beta_value < 1.0):
+                raise ValueError(
+                    f'{config_name} optimizer `betas` values must be in [0, 1).'
+                )
+
+    for key in ('lr', 'eps', 'weight_decay'):
+        if key not in kwargs:
+            continue
+        value = float(kwargs[key])
+        if key == 'weight_decay':
+            if value < 0.0:
+                raise ValueError(
+                    f'{config_name} optimizer `{key}` must be >= 0.'
+                )
+        else:
+            if value <= 0.0:
+                raise ValueError(
+                    f'{config_name} optimizer `{key}` must be > 0.'
+                )
+
+
+def _validate_lr_scheduler_config(
+    *,
+    lr_scheduler: LRSchedulerConfig,
+    num_epochs: int,
+) -> None:
+    """
+    Validate LR scheduler configuration payloads.
+
+    Args:
+        lr_scheduler (LRSchedulerConfig): Parsed scheduler configuration.
+        num_epochs (int): Backbone epochs per experience.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If scheduler settings are invalid.
+    """
+    scheduler_name = str(lr_scheduler.name).strip().lower()
+    kwargs = dict(lr_scheduler.kwargs)
+
+    if scheduler_name == 'multi_step':
+        return
+
+    if scheduler_name != 'warmup_cosine':
+        raise ValueError(
+            '`lr_scheduler.name` must be one of `multi_step` or `warmup_cosine`.'
+        )
+
+    if 'warmup_epochs' not in kwargs:
+        raise ValueError(
+            '`lr_scheduler.kwargs.warmup_epochs` is required for `warmup_cosine`.'
+        )
+    warmup_epochs = int(kwargs['warmup_epochs'])
+    if warmup_epochs < 0:
+        raise ValueError('`lr_scheduler.kwargs.warmup_epochs` must be >= 0.')
+    if warmup_epochs >= int(num_epochs):
+        raise ValueError(
+            '`lr_scheduler.kwargs.warmup_epochs` must be < '
+            '`backbone.training.num_epochs`.'
+        )
+
+    if 'min_lr' in kwargs and float(kwargs['min_lr']) < 0.0:
+        raise ValueError('`lr_scheduler.kwargs.min_lr` must be >= 0.')
 
 
 def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
@@ -610,12 +728,24 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
     if 'num_epochs' not in training_config:
         raise ValueError('Backbone config `training` must include `num_epochs`.')
     lr_scheduler = _parse_lr_scheduler_config(training_config)
+    if lr_scheduler is not None:
+        _validate_lr_scheduler_config(
+            lr_scheduler=lr_scheduler,
+            num_epochs=int(training_config['num_epochs']),
+        )
+    grad_clip_raw = training_config.get('grad_clip_max_norm')
+    grad_clip_max_norm = None
+    if grad_clip_raw is not None:
+        grad_clip_max_norm = float(grad_clip_raw)
+        if grad_clip_max_norm <= 0.0:
+            raise ValueError('`backbone.training.grad_clip_max_norm` must be > 0.')
     training = TrainingConfig(
         num_epochs=training_config['num_epochs'],
         strategy=_parse_strategy_config(training_config, config_name='Backbone training config'),
         optimizer=_parse_optimizer_config(training_config, config_name='Backbone training config'),
         batch_size=training_config.get('batch_size', 128),
         lr_scheduler=lr_scheduler,
+        grad_clip_max_norm=grad_clip_max_norm,
     )
 
     return BackboneConfig(

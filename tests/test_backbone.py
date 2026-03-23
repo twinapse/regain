@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 import regain.experiments.backbone as backbone_module
+import regain.experiments.logging as logging_module
 from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
 from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
 from regain.constants import RUN_CALIB_AECE
@@ -18,6 +19,16 @@ from regain.constants import RUN_DIAG_AVG_ENTROPY
 from regain.constants import RUN_DIAG_LOGIT_AVG_DRIFT
 from regain.constants import RUN_DIAG_OUT_OF_TASK_RATE
 from regain.experiments.backbone import extract_backbone_kwargs_from_run
+from regain.experiments.backbone import extract_backbone_training_config_from_run
+from regain.experiments.config import BackboneConfig
+from regain.experiments.config import EvaluationConfig
+from regain.experiments.config import ExperimentConfig
+from regain.experiments.config import OptimizerConfig
+from regain.experiments.config import RepairConfig
+from regain.experiments.config import StrategyConfig
+from regain.experiments.config import TrainingConfig
+from regain.experiments.config import LRSchedulerConfig
+from regain.experiments.logging import log_run_params
 from regain.experiments.backbone import load_backbone_analysis_baseline_from_run
 
 
@@ -199,3 +210,126 @@ class TestExtractBackboneKwargsFromRun:
             'image_size': 32,
             'dropout': 0.1,
         }
+
+
+class TestExtractBackboneTrainingConfigFromRun:
+    def test_extracts_optimizer_scheduler_and_grad_clip_params(self) -> None:
+        run = _make_run(
+            metrics={},
+            params={
+                'backbone.training.num_epochs': '100',
+                'backbone.training.batch_size': '64',
+                'backbone.training.grad_clip_max_norm': '1.0',
+                'backbone.training.strategy.name': 'naive',
+                'backbone.training.optimizer.name': 'adam',
+                'backbone.training.optimizer.lr': '0.0005',
+                'backbone.training.optimizer.betas': '[0.9, 0.999]',
+                'backbone.training.optimizer.eps': '1e-08',
+                'backbone.training.optimizer.weight_decay': '0.0001',
+                'backbone.training.lr_scheduler.name': 'warmup_cosine',
+                'backbone.training.lr_scheduler.warmup_epochs': '5',
+                'backbone.training.lr_scheduler.min_lr': '0.0',
+            },
+        )
+
+        training = extract_backbone_training_config_from_run(run=run)
+
+        assert training == TrainingConfig(
+            num_epochs=100,
+            strategy=StrategyConfig(name='naive', kwargs={}),
+            optimizer=OptimizerConfig(
+                name='adam',
+                kwargs={
+                    'lr': 5e-4,
+                    'betas': [0.9, 0.999],
+                    'eps': 1e-8,
+                    'weight_decay': 1e-4,
+                },
+            ),
+            batch_size=64,
+            lr_scheduler=LRSchedulerConfig(
+                name='warmup_cosine',
+                kwargs={
+                    'warmup_epochs': 5,
+                    'min_lr': 0.0,
+                },
+            ),
+            grad_clip_max_norm=1.0,
+        )
+
+
+class TestBackboneTrainingLoggingRoundTrip:
+    def test_round_trips_adam_scheduler_and_grad_clip_through_logged_params(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _log_params(params: dict[str, object]) -> None:
+            captured.update(params)
+
+        monkeypatch.setattr(logging_module.mlflow, 'log_params', _log_params)
+
+        experiment_config = ExperimentConfig(
+            experiment_name='unit_test_experiment',
+            scenario='split_cifar100',
+            num_experiences=2,
+            backbone=BackboneConfig(
+                name='vit_small',
+                kwargs={
+                    'image_size': 32,
+                    'patch_size': 4,
+                },
+                training=TrainingConfig(
+                    num_epochs=100,
+                    strategy=StrategyConfig(name='naive', kwargs={}),
+                    optimizer=OptimizerConfig(
+                        name='adam',
+                        kwargs={
+                            'lr': 5e-4,
+                            'betas': [0.9, 0.999],
+                            'eps': 1e-8,
+                            'weight_decay': 1e-4,
+                        },
+                    ),
+                    batch_size=64,
+                    lr_scheduler=LRSchedulerConfig(
+                        name='warmup_cosine',
+                        kwargs={
+                            'warmup_epochs': 5,
+                            'min_lr': 0.0,
+                        },
+                    ),
+                    grad_clip_max_norm=1.0,
+                ),
+            ),
+            repair=RepairConfig(split_fraction=0.0),
+            evaluation=EvaluationConfig(),
+            runs=[],
+        )
+
+        log_run_params(
+            experiment_config=experiment_config,
+            run_config_payload={'name': 'backbone', 'controller': None},
+            controller_name=None,
+            deterministic_algorithms_enabled=False,
+            optimizer_kwargs={
+                'lr': 5e-4,
+                'betas': [0.9, 0.999],
+                'eps': 1e-8,
+                'weight_decay': 1e-4,
+            },
+            include_backbone_params=True,
+            num_classes=100,
+        )
+
+        run = _make_run(
+            metrics={},
+            params={key: str(value) for key, value in captured.items()},
+        )
+        training = extract_backbone_training_config_from_run(run=run)
+
+        assert training.optimizer.kwargs['betas'] == [0.9, 0.999]
+        assert training.lr_scheduler is not None
+        assert training.lr_scheduler.name == 'warmup_cosine'
+        assert training.grad_clip_max_norm == pytest.approx(1.0)

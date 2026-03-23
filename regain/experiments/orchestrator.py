@@ -47,6 +47,7 @@ from regain.experiments.builders import build_backbone
 from regain.experiments.builders import build_benchmark
 from regain.experiments.builders import build_controller
 from regain.experiments.builders import build_controller_plugin
+from regain.experiments.builders import build_gradient_clipping_plugin
 from regain.experiments.builders import build_lr_scheduler_plugin
 from regain.experiments.builders import build_optimizer
 from regain.experiments.builders import make_strategy
@@ -352,8 +353,15 @@ def _train_and_evaluate_strategy(
                     name=backbone_training.lr_scheduler.name,
                     scheduler_kwargs=backbone_training.lr_scheduler.kwargs,
                     initial_lr=initial_lr,
+                    total_epochs=backbone_training.num_epochs,
                 )
                 strategy_plugins.append(lr_scheduler_plugin)
+            if backbone_training.grad_clip_max_norm is not None:
+                strategy_plugins.append(
+                    build_gradient_clipping_plugin(
+                        max_norm=backbone_training.grad_clip_max_norm
+                    )
+                )
 
             # Build the strategy
             strategy = make_strategy(

@@ -11,9 +11,11 @@ from avalanche.training.supervised import Naive
 from avalanche.training.supervised import Replay
 from avalanche.training.templates import BaseTemplate
 import torch
+from torch.optim import Adam
 from torch.optim import SGD
 
 from regain.avalanche_utils.plugins import ControllerPlugin
+from regain.avalanche_utils.plugins import GradientClippingPlugin
 from regain.avalanche_utils.plugins import LRSchedulerPlugin
 from regain.avalanche_utils.plugins import PreventionControllerPlugin
 from regain.avalanche_utils.plugins import RepairControllerPlugin
@@ -43,6 +45,7 @@ __all__ = [
     'build_benchmark',
     'build_controller',
     'build_controller_plugin',
+    'build_gradient_clipping_plugin',
     'build_lr_scheduler_plugin',
     'build_optimizer',
     'make_strategy',
@@ -328,6 +331,40 @@ def build_optimizer(
         }
         optimizer = SGD(model.parameters(), **optimizer_kwargs)
         return optimizer, optimizer_kwargs
+    if optimizer_name == 'adam':
+        default_kwargs: dict[str, object] = {
+            'lr': 1e-3,
+            'betas': [0.9, 0.999],
+            'eps': 1e-8,
+            'weight_decay': 0.0,
+        }
+        merged_kwargs = {**default_kwargs, **optimizer_kwargs_payload}
+        betas_raw = merged_kwargs.get('betas', [0.9, 0.999])
+        if isinstance(betas_raw, str):
+            raise ValueError(
+                'Adam optimizer `betas` must be provided as a YAML sequence like '
+                '`[0.9, 0.999]`.'
+            )
+        if not isinstance(betas_raw, (list, tuple)):
+            raise ValueError('Adam optimizer `betas` must be a sequence of two floats.')
+        betas_values = list(betas_raw)
+        if len(betas_values) != 2:
+            raise ValueError('Adam optimizer `betas` must contain exactly two values.')
+        betas = (float(betas_values[0]), float(betas_values[1]))
+        optimizer_kwargs = {
+            'lr': float(merged_kwargs['lr']),
+            'betas': [betas[0], betas[1]],
+            'eps': float(merged_kwargs['eps']),
+            'weight_decay': float(merged_kwargs['weight_decay']),
+        }
+        optimizer = Adam(
+            model.parameters(),
+            lr=float(optimizer_kwargs['lr']),
+            betas=betas,
+            eps=float(optimizer_kwargs['eps']),
+            weight_decay=float(optimizer_kwargs['weight_decay']),
+        )
+        return optimizer, optimizer_kwargs
     raise ValueError(f'Unsupported optimizer: {optimizer_config.name}')
 
 
@@ -341,6 +378,7 @@ def build_lr_scheduler_plugin(
     name: str,
     scheduler_kwargs: dict[str, object],
     initial_lr: float = 0.1,
+    total_epochs: int | None = None,
 ) -> LRSchedulerPlugin:
     """
     Build an LR scheduler plugin from a registry name.
@@ -349,6 +387,7 @@ def build_lr_scheduler_plugin(
         name (str): LR scheduler registry name.
         scheduler_kwargs (dict[str, object]): Keyword arguments for the scheduler.
         initial_lr (float): Initial learning rate to reset to each experience.
+        total_epochs (int | None): Training epochs per experience when required by the scheduler.
 
     Returns:
         LRSchedulerPlugin: Configured LR scheduler plugin.
@@ -357,11 +396,32 @@ def build_lr_scheduler_plugin(
     scheduler_cls = import_symbol(scheduler_path)
     if not inspect.isclass(scheduler_cls):
         raise TypeError(f'LR scheduler symbol is not a class: {scheduler_path}')
+    effective_scheduler_kwargs = dict(scheduler_kwargs)
+    if str(name).strip().lower() == 'warmup_cosine':
+        if total_epochs is None:
+            raise ValueError('`total_epochs` is required for `warmup_cosine`.')
+        effective_scheduler_kwargs['total_epochs'] = int(total_epochs)
     return LRSchedulerPlugin(
         scheduler_cls=scheduler_cls,
-        scheduler_kwargs=scheduler_kwargs,
+        scheduler_kwargs=effective_scheduler_kwargs,
         initial_lr=initial_lr,
     )
+
+
+def build_gradient_clipping_plugin(
+    *,
+    max_norm: float,
+) -> GradientClippingPlugin:
+    """
+    Build a gradient clipping plugin.
+
+    Args:
+        max_norm (float): Maximum gradient norm.
+
+    Returns:
+        GradientClippingPlugin: Configured gradient clipping plugin.
+    """
+    return GradientClippingPlugin(max_norm=max_norm)
 
 
 ###############
