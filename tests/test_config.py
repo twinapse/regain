@@ -260,11 +260,11 @@ class TestBackboneConfigParsing:
         ):
             load_experiment_config(config_path)
 
-    def test_parses_adam_optimizer_and_warmup_cosine_scheduler(self, tmp_path: Path) -> None:
+    def test_parses_adamw_optimizer_and_warmup_cosine_scheduler(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
         payload['evaluation'] = {}
         payload['backbone']['training']['optimizer'] = {
-            'name': 'adam',
+            'name': 'adamw',
             'kwargs': {
                 'lr': 5e-4,
                 'betas': [0.9, 0.999],
@@ -286,17 +286,17 @@ class TestBackboneConfigParsing:
 
         assert config.backbone is not None
         assert config.backbone.training is not None
-        assert config.backbone.training.optimizer.name == 'adam'
+        assert config.backbone.training.optimizer.name == 'adamw'
         assert config.backbone.training.optimizer.kwargs['betas'] == [0.9, 0.999]
         assert config.backbone.training.lr_scheduler is not None
         assert config.backbone.training.lr_scheduler.name == 'warmup_cosine'
         assert config.backbone.training.grad_clip_max_norm == pytest.approx(1.0)
 
-    def test_rejects_string_literal_betas_for_adam(self, tmp_path: Path) -> None:
+    def test_rejects_string_literal_betas_for_adamw(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
         payload['evaluation'] = {}
         payload['backbone']['training']['optimizer'] = {
-            'name': 'adam',
+            'name': 'adamw',
             'kwargs': {
                 'betas': '(0.9, 0.999)',
             },

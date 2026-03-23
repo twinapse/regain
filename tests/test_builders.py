@@ -64,13 +64,13 @@ class TestBuildBackbone:
 
 
 class TestBuildOptimizer:
-    def test_builds_adam_optimizer_with_beta_sequence(self) -> None:
+    def test_builds_adamw_optimizer_with_beta_sequence(self) -> None:
         model = torch.nn.Linear(4, 2)
 
         optimizer, optimizer_kwargs = build_optimizer(
             model=model,
             optimizer_config=OptimizerConfig(
-                name='adam',
+                name='adamw',
                 kwargs={
                     'lr': 5e-4,
                     'betas': [0.9, 0.999],
@@ -80,19 +80,19 @@ class TestBuildOptimizer:
             ),
         )
 
-        assert isinstance(optimizer, torch.optim.Adam)
+        assert isinstance(optimizer, torch.optim.AdamW)
         assert optimizer.defaults['lr'] == pytest.approx(5e-4)
         assert optimizer.defaults['betas'] == pytest.approx((0.9, 0.999))
         assert optimizer_kwargs['betas'] == [0.9, 0.999]
 
-    def test_rejects_string_beta_literal_for_adam(self) -> None:
+    def test_rejects_string_beta_literal_for_adamw(self) -> None:
         model = torch.nn.Linear(4, 2)
 
         with pytest.raises(ValueError, match='YAML sequence'):
             build_optimizer(
                 model=model,
                 optimizer_config=OptimizerConfig(
-                    name='adam',
+                    name='adamw',
                     kwargs={
                         'betas': '(0.9, 0.999)',
                     },

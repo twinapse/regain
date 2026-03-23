@@ -11,7 +11,7 @@ from avalanche.training.supervised import Naive
 from avalanche.training.supervised import Replay
 from avalanche.training.templates import BaseTemplate
 import torch
-from torch.optim import Adam
+from torch.optim import AdamW
 from torch.optim import SGD
 
 from regain.avalanche_utils.plugins import ControllerPlugin
@@ -331,7 +331,7 @@ def build_optimizer(
         }
         optimizer = SGD(model.parameters(), **optimizer_kwargs)
         return optimizer, optimizer_kwargs
-    if optimizer_name == 'adam':
+    if optimizer_name == 'adamw':
         default_kwargs: dict[str, object] = {
             'lr': 1e-3,
             'betas': [0.9, 0.999],
@@ -342,14 +342,14 @@ def build_optimizer(
         betas_raw = merged_kwargs.get('betas', [0.9, 0.999])
         if isinstance(betas_raw, str):
             raise ValueError(
-                'Adam optimizer `betas` must be provided as a YAML sequence like '
+                'AdamW optimizer `betas` must be provided as a YAML sequence like '
                 '`[0.9, 0.999]`.'
             )
         if not isinstance(betas_raw, (list, tuple)):
-            raise ValueError('Adam optimizer `betas` must be a sequence of two floats.')
+            raise ValueError('AdamW optimizer `betas` must be a sequence of two floats.')
         betas_values = list(betas_raw)
         if len(betas_values) != 2:
-            raise ValueError('Adam optimizer `betas` must contain exactly two values.')
+            raise ValueError('AdamW optimizer `betas` must contain exactly two values.')
         betas = (float(betas_values[0]), float(betas_values[1]))
         optimizer_kwargs = {
             'lr': float(merged_kwargs['lr']),
@@ -357,7 +357,7 @@ def build_optimizer(
             'eps': float(merged_kwargs['eps']),
             'weight_decay': float(merged_kwargs['weight_decay']),
         }
-        optimizer = Adam(
+        optimizer = AdamW(
             model.parameters(),
             lr=float(optimizer_kwargs['lr']),
             betas=betas,
