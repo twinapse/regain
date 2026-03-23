@@ -101,6 +101,14 @@ class TestRegainEvaluationPluginCalibrationScalarPolicy:
 
         assert max_ece == pytest.approx(0.33)
 
+    def test_rejects_non_finite_backbone_nullable_vector_values(self) -> None:
+        with pytest.raises(ValueError, match='non-finite value'):
+            RegainEvaluationPlugin._coerce_required_nullable_backbone_vector(
+                baseline={RUN_CALIB_ECE: [float('nan')]},
+                key=RUN_CALIB_ECE,
+                expected_len=1,
+            )
+
 
 class TestRegainEvaluationPluginArtifactsLogging:
     def test_after_training_logs_full_analysis_artifacts_json(

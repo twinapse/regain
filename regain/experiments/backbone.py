@@ -3,6 +3,7 @@ Backbone utilities for experiment execution.
 """
 
 from collections.abc import Mapping
+import math
 from pathlib import Path
 
 from avalanche.training.templates import BaseTemplate
@@ -403,7 +404,19 @@ def extract_required_float_vector(
         raise RuntimeError(
             f'Missing or invalid `{key}` vector in backbone analysis artifacts.'
         )
-    values = [float(value) for value in raw_values]
+    values: list[float] = []
+    for idx, value in enumerate(raw_values):
+        try:
+            value_float = float(value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f'Backbone `{key}` contains invalid value at index {idx}: {value!r}'
+            ) from exc
+        if not math.isfinite(value_float):
+            raise RuntimeError(
+                f'Backbone `{key}` contains non-finite value at index {idx}: {value!r}'
+            )
+        values.append(value_float)
     if len(values) != int(expected_len):
         raise RuntimeError(
             f'Backbone `{key}` length mismatch. '
@@ -435,11 +448,21 @@ def extract_required_nullable_float_vector(
             f'Missing or invalid `{key}` vector in backbone analysis artifacts.'
         )
     values: list[float | None] = []
-    for value in raw_values:
+    for idx, value in enumerate(raw_values):
         if value is None:
             values.append(None)
             continue
-        values.append(float(value))
+        try:
+            value_float = float(value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f'Backbone `{key}` contains invalid value at index {idx}: {value!r}'
+            ) from exc
+        if not math.isfinite(value_float):
+            raise RuntimeError(
+                f'Backbone `{key}` contains non-finite value at index {idx}: {value!r}'
+            )
+        values.append(value_float)
     if len(values) != int(expected_len):
         raise RuntimeError(
             f'Backbone `{key}` length mismatch. '

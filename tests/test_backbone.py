@@ -112,6 +112,70 @@ class TestLoadBackboneAnalysisBaselineFromRun:
         assert baseline[ARTIFACT_ACC_FINAL_BASE] == pytest.approx([0.55])
         assert baseline[RUN_DIAG_OUT_OF_TASK_RATE] == pytest.approx([0.20])
 
+    def test_rejects_nan_in_required_diagnostic_vector(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run = _make_run(metrics={})
+        artifact_payload: dict[str, Any] = {
+            ARTIFACT_ACC_EXP_BASE: [0.80],
+            ARTIFACT_ACC_FINAL_BASE: [0.55],
+            RUN_DIAG_OUT_OF_TASK_RATE: [0.20],
+            RUN_DIAG_AVG_CONF: [float('nan')],
+            RUN_DIAG_AVG_ENTROPY: [0.40],
+            RUN_CALIB_ECE: [0.10],
+            RUN_CALIB_AECE: [0.11],
+            RUN_CALIB_NLL: [0.12],
+            RUN_DIAG_LOGIT_AVG_DRIFT: [0.13],
+        }
+        monkeypatch.setattr(
+            backbone_module,
+            'download_json_artifact',
+            lambda **kwargs: artifact_payload,
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            load_backbone_analysis_baseline_from_run(
+                client=object(),
+                run=run,
+                expected_num_experiences=1,
+            )
+        error_msg = str(exc_info.value)
+        assert RUN_DIAG_AVG_CONF in error_msg
+        assert 'non-finite value at index 0' in error_msg
+
+    def test_rejects_inf_in_required_diagnostic_vector(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run = _make_run(metrics={})
+        artifact_payload: dict[str, Any] = {
+            ARTIFACT_ACC_EXP_BASE: [0.80],
+            ARTIFACT_ACC_FINAL_BASE: [0.55],
+            RUN_DIAG_OUT_OF_TASK_RATE: [0.20],
+            RUN_DIAG_AVG_CONF: [float('inf')],
+            RUN_DIAG_AVG_ENTROPY: [0.40],
+            RUN_CALIB_ECE: [0.10],
+            RUN_CALIB_AECE: [0.11],
+            RUN_CALIB_NLL: [0.12],
+            RUN_DIAG_LOGIT_AVG_DRIFT: [0.13],
+        }
+        monkeypatch.setattr(
+            backbone_module,
+            'download_json_artifact',
+            lambda **kwargs: artifact_payload,
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            load_backbone_analysis_baseline_from_run(
+                client=object(),
+                run=run,
+                expected_num_experiences=1,
+            )
+        error_msg = str(exc_info.value)
+        assert RUN_DIAG_AVG_CONF in error_msg
+        assert 'non-finite value at index 0' in error_msg
+
 
 class TestExtractBackboneKwargsFromRun:
     def test_extracts_non_training_backbone_params(self) -> None:

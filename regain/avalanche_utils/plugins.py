@@ -91,6 +91,7 @@ __all__ = [
     'RepairControllerPlugin',
     'RegainEvaluationPlugin',
     'MetricContextPlugin',
+    'NumericalStabilityGuardPlugin',
     'SeenClassesMaskPlugin',
     'make_evaluation_plugin',
 ]
@@ -1037,6 +1038,202 @@ class RepairControllerPlugin(SupervisedPlugin):
 ControllerPlugin = PreventionControllerPlugin | RepairControllerPlugin
 
 
+class NumericalStabilityGuardPlugin(SupervisedPlugin):
+    """
+    Fail fast when non-finite tensors are observed during training or evaluation.
+    """
+
+    def __init__(self, *, context: MetricContext) -> None:
+        """
+        Initialize the numerical stability guard plugin.
+
+        Args:
+            context (MetricContext): Shared metric context used to enrich failures.
+        """
+        super().__init__()
+        self._context = context
+        self._train_batch_idx = 0
+        self._eval_batch_idx = 0
+
+    def before_training(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
+        self._train_batch_idx = 0
+
+    def before_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
+        self._eval_batch_idx = 0
+
+    def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
+        self._eval_batch_idx = 0
+
+    def before_backward(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        self._train_batch_idx += 1
+        context = self._error_context(
+            strategy=strategy,
+            batch_idx=self._train_batch_idx,
+        )
+        self._assert_finite_value(
+            value=strategy.loss,
+            tensor_name='loss',
+            context=context,
+        )
+        self._assert_finite_value(
+            value=strategy.mb_output,
+            tensor_name='mb_output',
+            context=context,
+        )
+
+    def after_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        model = strategy.model
+        if not isinstance(model, nn.Module):
+            return
+        total_non_finite = 0
+        first_param_name: str | None = None
+        first_non_finite_value: object | None = None
+        for param_name, param in model.named_parameters():
+            mask = ~torch.isfinite(param.detach())
+            non_finite_count = int(torch.sum(mask).item())
+            if non_finite_count <= 0:
+                continue
+            total_non_finite += non_finite_count
+            if first_param_name is None:
+                first_param_name = str(param_name)
+                first_non_finite_value = (
+                    param.detach()[mask].reshape(-1)[0].to(device='cpu').item()
+                )
+        if total_non_finite <= 0:
+            return
+        context = self._error_context(
+            strategy=strategy,
+            batch_idx=self._train_batch_idx,
+        )
+        self._raise_non_finite(
+            tensor_name='model.parameters',
+            non_finite_count=total_non_finite,
+            context=context,
+            tensor_shape='n/a',
+            tensor_dtype='n/a',
+            first_non_finite_value=first_non_finite_value,
+            extra={
+                'first_parameter': first_param_name,
+            },
+        )
+
+    def after_eval_forward(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
+        self._eval_batch_idx += 1
+        context = self._error_context(
+            strategy=strategy,
+            batch_idx=self._eval_batch_idx,
+        )
+        self._assert_finite_value(
+            value=strategy.mb_output,
+            tensor_name='mb_output',
+            context=context,
+        )
+
+    def _error_context(
+        self,
+        *,
+        strategy: BaseTemplate,
+        batch_idx: int,
+    ) -> dict[str, object]:
+        phase = self._context.phase
+        if hasattr(phase, 'value'):
+            phase_label = str(phase.value)
+        else:
+            phase_label = str(phase)
+        experience = getattr(strategy, 'experience', None)
+        exp_idx: int | None = None
+        if (
+            experience is not None
+            and hasattr(experience, 'current_experience')
+            and getattr(experience, 'current_experience') is not None
+        ):
+            exp_idx = int(experience.current_experience)
+        return {
+            'phase': phase_label,
+            'exp_idx': exp_idx,
+            'step': int(self._context.log_step),
+            'batch': int(batch_idx),
+            'eval_tag': str(getattr(strategy, '_regain_eval_tag', '') or ''),
+        }
+
+    def _assert_finite_value(
+        self,
+        *,
+        value: object,
+        tensor_name: str,
+        context: Mapping[str, object],
+    ) -> None:
+        if torch.is_tensor(value):
+            mask = ~torch.isfinite(value.detach())
+            non_finite_count = int(torch.sum(mask).item())
+            if non_finite_count <= 0:
+                return
+            first_non_finite_value = (
+                value.detach()[mask].reshape(-1)[0].to(device='cpu').item()
+            )
+            self._raise_non_finite(
+                tensor_name=tensor_name,
+                non_finite_count=non_finite_count,
+                context=context,
+                tensor_shape=tuple(int(dim) for dim in value.shape),
+                tensor_dtype=str(value.dtype),
+                first_non_finite_value=first_non_finite_value,
+            )
+            return
+        if isinstance(value, (float, int)) and not math.isfinite(float(value)):
+            self._raise_non_finite(
+                tensor_name=tensor_name,
+                non_finite_count=1,
+                context=context,
+                tensor_shape=(),
+                tensor_dtype=type(value).__name__,
+                first_non_finite_value=float(value),
+            )
+
+    def _raise_non_finite(
+        self,
+        *,
+        tensor_name: str,
+        non_finite_count: int,
+        context: Mapping[str, object],
+        tensor_shape: object,
+        tensor_dtype: str,
+        first_non_finite_value: object,
+        extra: Mapping[str, object] | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            'tensor_name': str(tensor_name),
+            'non_finite_count': int(non_finite_count),
+            'tensor_shape': tensor_shape,
+            'tensor_dtype': str(tensor_dtype),
+            'first_non_finite_value': first_non_finite_value,
+            'phase': context.get('phase'),
+            'exp_idx': context.get('exp_idx'),
+            'step': context.get('step'),
+            'batch': context.get('batch'),
+            'eval_tag': context.get('eval_tag'),
+        }
+        if extra is not None:
+            for key, value in extra.items():
+                payload[str(key)] = value
+        raise RuntimeError(
+            'Non-finite tensor detected. '
+            f'tensor={payload["tensor_name"]}, '
+            f'non_finite_count={payload["non_finite_count"]}, '
+            f'phase={payload["phase"]}, '
+            f'exp_idx={payload["exp_idx"]}, '
+            f'step={payload["step"]}, '
+            f'batch={payload["batch"]}, '
+            f'eval_tag={payload["eval_tag"]}'
+        )
+
+
 @dataclass(frozen=True)
 class _TensorStateSignature:
     """
@@ -1111,6 +1308,12 @@ class EvaluationIntegrityPlugin(SupervisedPlugin):
             raise RuntimeError(
                 'Evaluation integrity violation: `strategy.mb_output` must be 2D logits. '
                 f'observed_shape={tuple(outputs.shape)}'
+            )
+        non_finite_count = int(torch.sum(~torch.isfinite(outputs)).item())
+        if non_finite_count > 0:
+            raise RuntimeError(
+                'Evaluation integrity violation: `strategy.mb_output` contains non-finite values. '
+                f'non_finite_count={non_finite_count}'
             )
 
         # Validate target tensor type and batch alignment.
@@ -2097,11 +2300,17 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
             raise ValueError(f'Backbone baseline `{key}` must be a sequence.')
         vector: list[float | None] = []
-        for value in values:
+        for idx, value in enumerate(values):
             if value is None:
                 vector.append(None)
                 continue
-            vector.append(float(value))
+            value_float = float(value)
+            if not math.isfinite(value_float):
+                raise ValueError(
+                    f'Backbone baseline `{key}` contains non-finite value '
+                    f'at index {idx}: {value!r}'
+                )
+            vector.append(value_float)
         if len(vector) != int(expected_len):
             raise ValueError(
                 f'Backbone baseline `{key}` length mismatch. '
