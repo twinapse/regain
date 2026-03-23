@@ -4,7 +4,9 @@ Tests for registry helpers.
 
 import pytest
 
+from regain.registry import get_lr_scheduler_path
 from regain.registry import get_scenario_builder_path
+from regain.registry import list_lr_schedulers
 from regain.registry import list_scenarios
 
 
@@ -28,3 +30,15 @@ class TestScenarioRegistry:
     def test_get_scenario_builder_path_raises_for_unknown_scenario(self) -> None:
         with pytest.raises(ValueError, match='Unsupported scenario'):
             get_scenario_builder_path('not_a_valid_scenario')
+
+
+class TestLRSchedulerRegistry:
+    def test_list_lr_schedulers_contains_supported_names(self) -> None:
+        schedulers = list_lr_schedulers()
+        assert schedulers == tuple(sorted(schedulers))
+        assert 'multi_step' in schedulers
+        assert 'warmup_cosine' in schedulers
+
+    def test_get_lr_scheduler_path_resolves_warmup_cosine(self) -> None:
+        scheduler_path = get_lr_scheduler_path('warmup_cosine')
+        assert scheduler_path == 'regain.experiments.lr_schedulers.WarmupCosineLR'

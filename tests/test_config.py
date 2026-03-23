@@ -259,3 +259,87 @@ class TestBackboneConfigParsing:
             match='must be the only field under `backbone`',
         ):
             load_experiment_config(config_path)
+
+    def test_parses_adam_optimizer_and_warmup_cosine_scheduler(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['training']['optimizer'] = {
+            'name': 'adam',
+            'kwargs': {
+                'lr': 5e-4,
+                'betas': [0.9, 0.999],
+                'eps': 1e-8,
+                'weight_decay': 1e-4,
+            },
+        }
+        payload['backbone']['training']['lr_scheduler'] = {
+            'name': 'warmup_cosine',
+            'kwargs': {
+                'warmup_epochs': 0,
+                'min_lr': 0.0,
+            },
+        }
+        payload['backbone']['training']['grad_clip_max_norm'] = 1.0
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        config = load_experiment_config(config_path)
+
+        assert config.backbone is not None
+        assert config.backbone.training is not None
+        assert config.backbone.training.optimizer.name == 'adam'
+        assert config.backbone.training.optimizer.kwargs['betas'] == [0.9, 0.999]
+        assert config.backbone.training.lr_scheduler is not None
+        assert config.backbone.training.lr_scheduler.name == 'warmup_cosine'
+        assert config.backbone.training.grad_clip_max_norm == pytest.approx(1.0)
+
+    def test_rejects_string_literal_betas_for_adam(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['training']['optimizer'] = {
+            'name': 'adam',
+            'kwargs': {
+                'betas': '(0.9, 0.999)',
+            },
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='YAML sequence'):
+            load_experiment_config(config_path)
+
+    def test_rejects_non_positive_grad_clip_max_norm(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['training']['grad_clip_max_norm'] = -1.0
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='grad_clip_max_norm'):
+            load_experiment_config(config_path)
+
+    def test_rejects_negative_warmup_epochs(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['training']['lr_scheduler'] = {
+            'name': 'warmup_cosine',
+            'kwargs': {
+                'warmup_epochs': -1,
+            },
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='warmup_epochs'):
+            load_experiment_config(config_path)
+
+    def test_rejects_warmup_epochs_not_less_than_num_epochs(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone']['training']['num_epochs'] = 1
+        payload['backbone']['training']['lr_scheduler'] = {
+            'name': 'warmup_cosine',
+            'kwargs': {
+                'warmup_epochs': 1,
+            },
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='warmup_epochs'):
+            load_experiment_config(config_path)

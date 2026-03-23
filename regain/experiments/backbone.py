@@ -24,6 +24,7 @@ from regain.constants import PARAM_BACKBONE
 from regain.constants import RUN_ACC_EXP
 from regain.constants import RUN_ACC_FINAL
 from regain.constants import RUN_NAME_BACKBONE
+from regain.experiments.config import LRSchedulerConfig
 from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import StrategyConfig
 from regain.experiments.config import TrainingConfig
@@ -125,8 +126,16 @@ def _deserialize_mlflow_param_value(*, raw_value: str) -> object:
         parsed_value = yaml.safe_load(raw_value)
     except yaml.YAMLError:
         return raw_value
-    if isinstance(parsed_value, (Mapping, list, tuple, set)):
+    if isinstance(parsed_value, (Mapping, set)):
         return raw_value
+    if isinstance(parsed_value, str):
+        stripped_value = parsed_value.strip()
+        try:
+            if any(token in stripped_value for token in ('.', 'e', 'E')):
+                return float(stripped_value)
+            return int(stripped_value)
+        except ValueError:
+            return raw_value
     return parsed_value
 
 
@@ -336,6 +345,7 @@ def extract_backbone_training_config_from_run(*, run: Run) -> TrainingConfig:
     training_prefix = f'{PARAM_BACKBONE}{NS_SEP}training'
     strategy_prefix = f'{training_prefix}{NS_SEP}strategy'
     optimizer_prefix = f'{training_prefix}{NS_SEP}optimizer'
+    lr_scheduler_prefix = f'{training_prefix}{NS_SEP}lr_scheduler'
 
     num_epochs = _extract_required_run_param_int(
         params=params_payload,
@@ -368,6 +378,27 @@ def extract_backbone_training_config_from_run(*, run: Run) -> TrainingConfig:
         prefix=optimizer_prefix,
         excluded_leaf_keys={'name'},
     )
+    grad_clip_max_norm: float | None = None
+    grad_clip_key = f'{training_prefix}{NS_SEP}grad_clip_max_norm'
+    if grad_clip_key in params_payload:
+        grad_clip_max_norm = float(
+            _deserialize_mlflow_param_value(raw_value=str(params_payload[grad_clip_key]))
+        )
+    lr_scheduler_name = _extract_optional_run_param_str(
+        params=params_payload,
+        key=f'{lr_scheduler_prefix}{NS_SEP}name',
+        default='',
+    )
+    lr_scheduler: LRSchedulerConfig | None = None
+    if lr_scheduler_name != '':
+        lr_scheduler = LRSchedulerConfig(
+            name=lr_scheduler_name,
+            kwargs=_extract_prefixed_params(
+                params=params_payload,
+                prefix=lr_scheduler_prefix,
+                excluded_leaf_keys={'name'},
+            ),
+        )
     return TrainingConfig(
         num_epochs=num_epochs,
         strategy=StrategyConfig(
@@ -379,6 +410,8 @@ def extract_backbone_training_config_from_run(*, run: Run) -> TrainingConfig:
             kwargs=optimizer_kwargs,
         ),
         batch_size=batch_size,
+        lr_scheduler=lr_scheduler,
+        grad_clip_max_norm=grad_clip_max_norm,
     )
 
 
