@@ -584,9 +584,9 @@ def _validate_optimizer_config(
     if optimizer_name == 'sgd':
         return
 
-    if optimizer_name != 'adam':
+    if optimizer_name != 'adamw':
         raise ValueError(
-            f'{config_name} optimizer `name` must be one of `sgd` or `adam`.'
+            f'{config_name} optimizer `name` must be one of `sgd` or `adamw`.'
         )
 
     betas = kwargs.get('betas')

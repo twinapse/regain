@@ -221,7 +221,7 @@ class TestExtractBackboneTrainingConfigFromRun:
                 'backbone.training.batch_size': '64',
                 'backbone.training.grad_clip_max_norm': '1.0',
                 'backbone.training.strategy.name': 'naive',
-                'backbone.training.optimizer.name': 'adam',
+                'backbone.training.optimizer.name': 'adamw',
                 'backbone.training.optimizer.lr': '0.0005',
                 'backbone.training.optimizer.betas': '[0.9, 0.999]',
                 'backbone.training.optimizer.eps': '1e-08',
@@ -238,7 +238,7 @@ class TestExtractBackboneTrainingConfigFromRun:
             num_epochs=100,
             strategy=StrategyConfig(name='naive', kwargs={}),
             optimizer=OptimizerConfig(
-                name='adam',
+                name='adamw',
                 kwargs={
                     'lr': 5e-4,
                     'betas': [0.9, 0.999],
@@ -259,7 +259,7 @@ class TestExtractBackboneTrainingConfigFromRun:
 
 
 class TestBackboneTrainingLoggingRoundTrip:
-    def test_round_trips_adam_scheduler_and_grad_clip_through_logged_params(
+    def test_round_trips_adamw_scheduler_and_grad_clip_through_logged_params(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -284,7 +284,7 @@ class TestBackboneTrainingLoggingRoundTrip:
                     num_epochs=100,
                     strategy=StrategyConfig(name='naive', kwargs={}),
                     optimizer=OptimizerConfig(
-                        name='adam',
+                        name='adamw',
                         kwargs={
                             'lr': 5e-4,
                             'betas': [0.9, 0.999],

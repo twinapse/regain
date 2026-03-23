@@ -222,10 +222,10 @@ When one or more configured controller runs are present:
 - `backbone` configuration must define exactly one of:
   - `backbone.training` (train from scratch in the current experiment), or
   - `backbone.source_experiment` (reuse a reserved `backbone` run from another experiment).
-- `backbone.training.optimizer.name` supports `sgd` and `adam`.
+- `backbone.training.optimizer.name` supports `sgd` and `adamw`.
 - `backbone.training.lr_scheduler.name` supports `multi_step` and `warmup_cosine`.
 - `backbone.training.grad_clip_max_norm` is optional; when set, gradients are clipped before each optimizer update.
-- For `adam`, provide `backbone.training.optimizer.kwargs.betas` as a YAML sequence such as `[0.9, 0.999]`.
+- For `adamw`, provide `backbone.training.optimizer.kwargs.betas` as a YAML sequence such as `[0.9, 0.999]`.
 - For `warmup_cosine`, provide `backbone.training.lr_scheduler.kwargs.warmup_epochs`; `min_lr` is optional.
 - When `backbone.source_experiment` is provided, it must be the only field under `backbone`.
 - `backbone.source_experiment` must be different from `experiment_name` (same-experiment reuse is rejected).
