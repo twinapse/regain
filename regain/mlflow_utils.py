@@ -8,6 +8,7 @@ from datetime import timezone
 import json
 from pathlib import Path
 import tempfile
+import traceback
 from typing import Iterator, Sequence
 from urllib.parse import urlparse
 
@@ -23,6 +24,7 @@ from regain.constants import COLUMN_RUN_ID
 from regain.constants import COLUMN_RUN_NAME
 from regain.constants import COLUMN_START_TIME
 from regain.constants import COLUMN_STATUS
+from regain.constants import MLFLOW_ARTIFACT_ERROR_FILE
 from regain.constants import PARAM_RUN_NAME
 
 __all__ = [
@@ -32,6 +34,7 @@ __all__ = [
     'ensure_experiment',
     'format_timestamp_ms',
     'init_mlflow',
+    'log_fatal_error_context',
     'normalize_tracking_uri',
     'resolve_active_runs_by_name',
     'resolve_artifact_location',
@@ -210,6 +213,65 @@ def init_mlflow(
         mlflow.set_experiment(experiment_name)
     with mlflow.start_run(run_name=run_name) as run:
         yield run
+
+
+def _log_fatal_error_artifact(
+    *,
+    run_name: str,
+    exc: Exception,
+    traceback_text: str,
+) -> None:
+    """
+    Log a fatal error artifact for the active run.
+
+    Args:
+        run_name (str): Name of the run that failed.
+        exc (Exception): Uncaught exception that caused the run failure.
+        traceback_text (str): Formatted traceback text for the exception.
+
+    Returns:
+        None
+    """
+    if mlflow.active_run() is None:
+        return
+    timestamp_utc = datetime.now(timezone.utc).isoformat()
+    payload = (
+        f'timestamp_utc: {timestamp_utc}\n'
+        f'run_name: {run_name}\n'
+        f'exception_type: {type(exc).__name__}\n'
+        f'exception_message: {exc}\n'
+        'traceback:\n'
+        f'{traceback_text.rstrip()}\n'
+    )
+    try:
+        mlflow.log_text(payload, MLFLOW_ARTIFACT_ERROR_FILE)
+    except Exception:
+        return
+
+
+@contextlib.contextmanager
+def log_fatal_error_context(
+    *,
+    run_name: str,
+) -> Iterator[None]:
+    """
+    Capture uncaught exceptions and log a fatal error artifact for the active run.
+
+    Args:
+        run_name (str): Name of the run that failed.
+
+    Yields:
+        None
+    """
+    try:
+        yield
+    except Exception as exc:
+        _log_fatal_error_artifact(
+            run_name=run_name,
+            exc=exc,
+            traceback_text=traceback.format_exc(),
+        )
+        raise
 
 
 ################################

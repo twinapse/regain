@@ -24,6 +24,7 @@ from regain.avalanche_utils.plugins import ControllerPlugin
 from regain.avalanche_utils.plugins import EvaluationIntegrityPlugin
 from regain.avalanche_utils.plugins import make_evaluation_plugin
 from regain.avalanche_utils.plugins import MetricContextPlugin
+from regain.avalanche_utils.plugins import NumericalStabilityGuardPlugin
 from regain.avalanche_utils.plugins import RegainEvaluationPlugin
 from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.avalanche_utils.plugins import SeenClassesMaskPlugin
@@ -62,6 +63,7 @@ from regain.experiments.utils import enable_determinism
 from regain.experiments.utils import resolve_backbone_training_config
 from regain.experiments.utils import resolve_controller_type
 from regain.mlflow_utils import init_mlflow
+from regain.mlflow_utils import log_fatal_error_context
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import set_tracking_uri
 from regain.models.controllers import Controller
@@ -134,7 +136,7 @@ def _train_and_evaluate_strategy(
         run_name=run_config.name,
         tracking_uri=tracking_uri,
         artifact_location=artifact_location,
-    ):
+    ), log_fatal_error_context(run_name=str(run_config.name)):
         with tempfile.TemporaryDirectory() as artifacts_dir:
             # Validate backbone checkpoint usage
             use_backbone_checkpoints = backbone_checkpoint_paths is not None
@@ -238,6 +240,7 @@ def _train_and_evaluate_strategy(
 
             # Build the calibration metric plugin
             calibration_plugin = CalibrationDiagnosticsPlugin(num_bins=15)
+            numerical_stability_guard_plugin = NumericalStabilityGuardPlugin(context=context)
 
             # Build the controller plugin
             if controller_config is not None:
@@ -297,6 +300,7 @@ def _train_and_evaluate_strategy(
                 )
             if controller_plugin is not None:
                 strategy_plugins.append(controller_plugin)
+            strategy_plugins.append(numerical_stability_guard_plugin)
             strategy_plugins.append(calibration_plugin)
             strategy_plugins.append(regain_evaluation_plugin)
             strategy_plugins.append(eval_integrity_plugin)

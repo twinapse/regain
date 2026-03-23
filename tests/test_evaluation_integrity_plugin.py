@@ -122,6 +122,18 @@ class TestEvaluationIntegrityPluginOutputContract:
         with pytest.raises(RuntimeError, match='target batch size must match output batch size'):
             plugin.after_eval_forward(strategy)
 
+    def test_raises_when_output_contains_non_finite_values(self) -> None:
+        strategy = _DummyStrategy(
+            model=_ToyModel(out_features=3),
+            mb_output=torch.tensor([[0.1, float('nan'), 0.3]], dtype=torch.float32),
+            mb_y=torch.tensor([1], dtype=torch.long),
+            mb_x=torch.randn((1, 3), dtype=torch.float32),
+        )
+        plugin = EvaluationIntegrityPlugin()
+
+        with pytest.raises(RuntimeError, match='contains non-finite values'):
+            plugin.after_eval_forward(strategy)
+
     def test_raises_when_target_out_of_range(self) -> None:
         strategy = _DummyStrategy(
             model=_ToyModel(out_features=3),
