@@ -604,7 +604,7 @@ def collect_experiment_tables(
 
             required_experience_keys = [ARTIFACT_ACC_EXP_BASE, ARTIFACT_ACC_FINAL_BASE]
             if expects_ctrl_metrics:
-                required_experience_keys.extend([ARTIFACT_ACC_FINAL_CTRL, ARTIFACT_RHO])
+                required_experience_keys.append(ARTIFACT_ACC_FINAL_CTRL)
 
             if not experience_metrics:
                 raise ValueError(
