@@ -507,6 +507,8 @@ class _InputConditionedUnitGainController(RepairController):
                 # Scale spatial outputs.
                 if out.ndim == 4:
                     return out * g.view(-1, 1, 1, 1)
+                if out.ndim == 3:
+                    return out * g.view(-1, 1, 1)
                 # Scale vector outputs.
                 if out.ndim == 2:
                     return out * g.view(-1, 1)

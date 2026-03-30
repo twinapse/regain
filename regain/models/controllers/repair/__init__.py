@@ -5,7 +5,7 @@ This package provides small post-hoc controllers trained on a limited repair set
 without updating the backbone. Controllers cover logit calibration, static gain modulation (per unit or per
 channel group), and input-conditioned gain modulation, plus a linear-probe baseline.
 
-Gain-based controllers target ResNet-like backbones via stage/block unit discovery.
+Gain-based controllers target ResNet and ViT backbones via stage/block unit discovery.
 """
 
 from regain.models.controllers.repair.calibration import BiCController
