@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 import regain.analysis.collectors as collectors_module
+from regain.analysis.artifacts import ARTIFACT_RHO
 from regain.analysis.collectors import _extract_repair_set_total_from_splits_artifact
 from regain.analysis.collectors import collect_experiment_tables
 from regain.constants import COLUMN_REPAIR_SET_TOTAL
@@ -279,6 +280,48 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         assert row[RUN_DIAG_AVG_CONF] == pytest.approx(0.22)
         assert row[RUN_DIAG_AVG_ENTROPY] == pytest.approx(0.23)
         assert row[RUN_DIAG_LOGIT_AVG_DRIFT] == pytest.approx(0.24)
+
+    def test_repair_run_allows_missing_per_experience_rho(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        params = {
+            'controller.name': 'my_repair_controller',
+            'controller.path': 'regain.controllers.repair.mock_controller',
+            PARAM_CONTROLLER_TYPE: 'repair',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+        }
+        metrics = _base_metrics_with_exp000()
+        metrics.update({
+            'run.accuracy.final.exp000.ctrl': 0.60,
+            RUN_CALIB_MAX_ECE: 0.95,
+            RUN_CALIB_ECE + '.exp000': 0.99,
+            RUN_CALIB_AECE + '.exp000': 0.88,
+            RUN_CALIB_NLL + '.exp000': 3.33,
+        })
+        artifact_payload = {
+            RUN_CALIB_MAX_ECE: 0.10,
+            RUN_CALIB_ECE: [0.11],
+            RUN_CALIB_AECE: [0.12],
+            RUN_CALIB_NLL: [0.13],
+            RUN_DIAG_OUT_OF_TASK_RATE: [0.21],
+            RUN_DIAG_AVG_CONF: [0.22],
+            RUN_DIAG_AVG_ENTROPY: [0.23],
+            RUN_DIAG_LOGIT_AVG_DRIFT: [0.24],
+        }
+        run = _make_run(params=params, metrics=metrics)
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run],
+            artifact_payload=artifact_payload,
+        )
+
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+
+        assert len(runs_table) == 1
+        assert len(experiences_table) == 1
+        assert not run_failures
+        assert experiences_table[0][ARTIFACT_RHO] is None
 
     def test_repair_run_missing_analysis_artifacts_raises(
         self,
