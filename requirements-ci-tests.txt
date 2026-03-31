@@ -3,5 +3,6 @@ mlflow
 numpy
 pytest
 pyyaml
+timm
 torch
 torchvision

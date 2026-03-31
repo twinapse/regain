@@ -613,7 +613,35 @@ def _resolve_vit_model_root(*, backbone: nn.Module) -> nn.Module | None:
         encoder = getattr(candidate, 'encoder', None)
         if isinstance(conv_proj, nn.Module) and isinstance(encoder, nn.Module):
             return candidate
+        patch_embed = getattr(candidate, 'patch_embed', None)
+        blocks = getattr(candidate, 'blocks', None)
+        if (
+            isinstance(patch_embed, nn.Module)
+            and isinstance(blocks, (nn.Sequential, nn.ModuleList))
+        ):
+            return candidate
     return None
+
+
+def _resolve_vit_block_sequence(*, vit_root: nn.Module) -> list[nn.Module]:
+    """
+    Resolve the ordered transformer blocks for a ViT root module.
+
+    Args:
+        vit_root (nn.Module): ViT root module.
+
+    Returns:
+        list[nn.Module]: Ordered transformer blocks.
+    """
+    encoder = getattr(vit_root, 'encoder', None)
+    layers = getattr(encoder, 'layers', None)
+    if isinstance(layers, nn.Sequential):
+        return list(layers)
+
+    blocks = getattr(vit_root, 'blocks', None)
+    if isinstance(blocks, (nn.Sequential, nn.ModuleList)):
+        return list(blocks)
+    return []
 
 
 def _split_contiguous_ranges(*, num_items: int, num_groups: int) -> list[tuple[int, int]]:
@@ -671,30 +699,36 @@ def _resolve_vit_stage_units(
     conv_proj = getattr(vit_root, 'conv_proj', None)
     if isinstance(conv_proj, nn.Module):
         units.append(('conv_proj', conv_proj))
+    else:
+        patch_embed = getattr(vit_root, 'patch_embed', None)
+        if isinstance(patch_embed, nn.Module):
+            patch_projection = getattr(patch_embed, 'proj', None)
+            units.append((
+                'patch_embed',
+                patch_projection if isinstance(patch_projection, nn.Module) else patch_embed,
+            ))
 
     encoder = getattr(vit_root, 'encoder', None)
-    if not isinstance(encoder, nn.Module):
-        return units
-
-    layers = getattr(encoder, 'layers', None)
-    if not isinstance(layers, nn.Sequential) or len(layers) <= 0:
-        units.append(('encoder', encoder))
+    block_layers = _resolve_vit_block_sequence(vit_root=vit_root)
+    if not block_layers:
+        if isinstance(encoder, nn.Module):
+            units.append(('encoder', encoder))
         return units
 
     if max_units is None or int(max_units) <= 0:
-        target_total_units = min(_DEFAULT_VIT_STAGE_UNITS, len(layers) + 1)
+        target_total_units = min(_DEFAULT_VIT_STAGE_UNITS, len(block_layers) + 1)
     else:
         target_total_units = int(max_units)
 
     if target_total_units <= 1:
         return units[:1]
 
-    num_encoder_groups = min(len(layers), max(target_total_units - 1, 1))
+    num_encoder_groups = min(len(block_layers), max(target_total_units - 1, 1))
     for group_index, (_start, end) in enumerate(
-        _split_contiguous_ranges(num_items=len(layers), num_groups=num_encoder_groups),
+        _split_contiguous_ranges(num_items=len(block_layers), num_groups=num_encoder_groups),
     ):
         # Hook the last block in each contiguous group, which is the group boundary seen by downstream blocks.
-        group_last_block = layers[end - 1]
+        group_last_block = block_layers[end - 1]
         units.append((f'encoder_group_{group_index}', group_last_block))
 
     return units
@@ -714,17 +748,13 @@ def _resolve_vit_block_units(*, backbone: nn.Module) -> list[tuple[str, nn.Modul
     if vit_root is None:
         return []
 
-    encoder = getattr(vit_root, 'encoder', None)
-    if not isinstance(encoder, nn.Module):
-        return []
-
-    layers = getattr(encoder, 'layers', None)
-    if not isinstance(layers, nn.Sequential):
+    block_layers = _resolve_vit_block_sequence(vit_root=vit_root)
+    if not block_layers:
         return []
 
     return [
         (f'encoder_layer_{layer_index}', layer)
-        for layer_index, layer in enumerate(layers)
+        for layer_index, layer in enumerate(block_layers)
     ]
 
 
