@@ -2,7 +2,7 @@
 Static unit-level gain controllers.
 
 These controllers learn one scalar gain per resolved backbone unit (e.g., stage-level or block-level units for
-ResNet-like backbones). Gains are applied multiplicatively to unit outputs via temporary forward hooks.
+ResNet or ViT backbones). Gains are applied multiplicatively to unit outputs via temporary forward hooks.
 
 This provides a compact intermediate-capacity controller between logit calibration and per-channel gains.
 """

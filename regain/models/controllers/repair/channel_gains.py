@@ -65,6 +65,27 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         self._log_gain_max = log_gain_max(gain_max=gain_max)
         self._channels: dict[str, int] = {}
 
+    @staticmethod
+    def _infer_output_width(*, output: Any) -> int:
+        """
+        Infer the feature width used for grouped channel gains from a unit output.
+
+        Args:
+            output (Any): Unit output captured by a forward hook.
+
+        Returns:
+            int: Feature width, or 0 when the output is unsupported.
+        """
+        if not torch.is_tensor(output):
+            return 0
+        if output.ndim == 2 and int(output.shape[1]) > 0:
+            return int(output.shape[1])
+        if output.ndim == 3 and int(output.shape[-1]) > 0:
+            return int(output.shape[-1])
+        if output.ndim == 4 and int(output.shape[1]) > 0:
+            return int(output.shape[1])
+        return 0
+
     def _ensure_initialized(self, *, model: nn.Module, device: torch.device, sample_inputs: torch.Tensor) -> None:
         """
         Ensure units exist, channel counts are current, and grouped-gain parameters match.
@@ -184,9 +205,9 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
 
         def _make_probe_hook(key: str):
             def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
-                # Capture channel dimension from 2D/4D tensors only.
-                if torch.is_tensor(out) and out.ndim in (2, 4) and int(out.shape[1]) > 0:
-                    captured[key] = int(out.shape[1])
+                width = _GroupedChannelUnitGainController._infer_output_width(output=out)
+                if width > 0:
+                    captured[key] = width
                 return out
             return _hook
 
@@ -231,11 +252,10 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         def _make_hook(gain_groups: torch.Tensor):
             def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
                 # Skip non-tensor outputs or unsupported shapes.
-                if not torch.is_tensor(out) or out.ndim not in (2, 4):
+                if not torch.is_tensor(out) or out.ndim not in (2, 3, 4):
                     return out
 
-                c = int(out.shape[1])
-                # Skip empty channel outputs.
+                c = self._infer_output_width(output=out)
                 if c <= 0:
                     return out
 
@@ -256,6 +276,8 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
                 # Broadcast gains across spatial dimensions when needed.
                 if out.ndim == 4:
                     return out * expanded.view(1, c, 1, 1)
+                if out.ndim == 3:
+                    return out * expanded.view(1, 1, c)
                 return out * expanded.view(1, c)
             return _hook
 

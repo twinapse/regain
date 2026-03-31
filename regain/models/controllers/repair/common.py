@@ -1,7 +1,8 @@
 """
 Shared utilities for repair controllers.
 
-The helpers are designed for ResNet-like backbones but keep the public controller interfaces generic.
+The helpers support both ResNet-like and ViT-like backbones while keeping the public controller interfaces
+generic.
 """
 
 from abc import ABC
@@ -44,6 +45,9 @@ __all__ = [
     'resolve_stage_units',
     'run_model_with_hooks',
 ]
+
+
+_DEFAULT_VIT_STAGE_UNITS = 5
 
 
 def build_repair_dataloader(
@@ -589,12 +593,147 @@ def _resolve_residual_stage_units(*, backbone: nn.Module) -> list[tuple[str, nn.
     return units
 
 
+def _resolve_vit_model_root(*, backbone: nn.Module) -> nn.Module | None:
+    """
+    Resolve the ViT module that exposes patch embedding and encoder blocks.
+
+    Args:
+        backbone (nn.Module): Backbone/encoder module to inspect.
+
+    Returns:
+        nn.Module | None: The ViT root module, or None when the backbone does not look ViT-like.
+    """
+    candidates = [backbone]
+    model = getattr(backbone, 'model', None)
+    if isinstance(model, nn.Module):
+        candidates.append(model)
+
+    for candidate in candidates:
+        conv_proj = getattr(candidate, 'conv_proj', None)
+        encoder = getattr(candidate, 'encoder', None)
+        if isinstance(conv_proj, nn.Module) and isinstance(encoder, nn.Module):
+            return candidate
+    return None
+
+
+def _split_contiguous_ranges(*, num_items: int, num_groups: int) -> list[tuple[int, int]]:
+    """
+    Split `num_items` into near-even contiguous half-open index ranges.
+
+    Args:
+        num_items (int): Number of items to split.
+        num_groups (int): Number of contiguous groups to create.
+
+    Returns:
+        list[tuple[int, int]]: List of `(start, end)` ranges with `end` exclusive.
+    """
+    if int(num_items) <= 0 or int(num_groups) <= 0:
+        return []
+
+    num_groups = min(int(num_groups), int(num_items))
+    base = int(num_items) // int(num_groups)
+    remainder = int(num_items) % int(num_groups)
+
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    for group_index in range(num_groups):
+        group_size = base + (1 if group_index < remainder else 0)
+        end = start + group_size
+        ranges.append((start, end))
+        start = end
+    return ranges
+
+
+def _resolve_vit_stage_units(
+    *,
+    backbone: nn.Module,
+    max_units: int | None,
+) -> list[tuple[str, nn.Module]]:
+    """
+    Resolve coarse stage-like units from common ViT backbones.
+
+    The patch projection is kept as its own stage. Encoder stages are represented
+    by contiguous groups of transformer blocks, hooked at the last block of each
+    group.
+
+    Args:
+        backbone (nn.Module): Backbone/encoder module to inspect.
+        max_units (int | None): Maximum number of stage units to include. None means default stage grouping.
+
+    Returns:
+        list[tuple[str, nn.Module]]: List of (unit_key, unit_module) pairs.
+    """
+    vit_root = _resolve_vit_model_root(backbone=backbone)
+    if vit_root is None:
+        return []
+
+    units: list[tuple[str, nn.Module]] = []
+    conv_proj = getattr(vit_root, 'conv_proj', None)
+    if isinstance(conv_proj, nn.Module):
+        units.append(('conv_proj', conv_proj))
+
+    encoder = getattr(vit_root, 'encoder', None)
+    if not isinstance(encoder, nn.Module):
+        return units
+
+    layers = getattr(encoder, 'layers', None)
+    if not isinstance(layers, nn.Sequential) or len(layers) <= 0:
+        units.append(('encoder', encoder))
+        return units
+
+    if max_units is None or int(max_units) <= 0:
+        target_total_units = min(_DEFAULT_VIT_STAGE_UNITS, len(layers) + 1)
+    else:
+        target_total_units = int(max_units)
+
+    if target_total_units <= 1:
+        return units[:1]
+
+    num_encoder_groups = min(len(layers), max(target_total_units - 1, 1))
+    for group_index, (_start, end) in enumerate(
+        _split_contiguous_ranges(num_items=len(layers), num_groups=num_encoder_groups),
+    ):
+        # Hook the last block in each contiguous group, which is the group boundary seen by downstream blocks.
+        group_last_block = layers[end - 1]
+        units.append((f'encoder_group_{group_index}', group_last_block))
+
+    return units
+
+
+def _resolve_vit_block_units(*, backbone: nn.Module) -> list[tuple[str, nn.Module]]:
+    """
+    Resolve transformer block units from common ViT backbones.
+
+    Args:
+        backbone (nn.Module): Backbone/encoder module to inspect.
+
+    Returns:
+        list[tuple[str, nn.Module]]: List of (unit_key, unit_module) pairs.
+    """
+    vit_root = _resolve_vit_model_root(backbone=backbone)
+    if vit_root is None:
+        return []
+
+    encoder = getattr(vit_root, 'encoder', None)
+    if not isinstance(encoder, nn.Module):
+        return []
+
+    layers = getattr(encoder, 'layers', None)
+    if not isinstance(layers, nn.Sequential):
+        return []
+
+    return [
+        (f'encoder_layer_{layer_index}', layer)
+        for layer_index, layer in enumerate(layers)
+    ]
+
+
 def resolve_stage_units(*, backbone: nn.Module, max_units: int | None) -> list[tuple[str, nn.Module]]:
     """
     Resolve coarse stage-like units under a backbone.
 
     This is intentionally low-capacity: it prefers residual stages when available,
-    otherwise falls back to Conv-like containers.
+    then common ViT stages, and otherwise falls back to Conv-like containers.
 
     Args:
         backbone (nn.Module): Backbone/encoder module to inspect.
@@ -604,6 +743,8 @@ def resolve_stage_units(*, backbone: nn.Module, max_units: int | None) -> list[t
         list[tuple[str, nn.Module]]: List of (unit_key, unit_module) pairs.
     """
     units = _resolve_residual_stage_units(backbone=backbone)
+    if not units:
+        units = _resolve_vit_stage_units(backbone=backbone, max_units=max_units)
 
     if not units:
         features = getattr(backbone, 'features', None)
@@ -651,8 +792,8 @@ def resolve_block_units(*, backbone: nn.Module, max_units: int | None) -> list[t
     Resolve finer block-like units under a backbone.
 
     For ResNet-like backbones, this selects residual blocks (BasicBlock/Bottleneck)
-    in forward order. This is the proposal-aligned interpretation of "per-layer"
-    granularity.
+    in forward order. For ViT-like backbones, this selects encoder blocks in forward
+    order. This is the proposal-aligned interpretation of "per-layer" granularity.
 
     Args:
         backbone (nn.Module): Backbone/encoder module to inspect.
@@ -672,6 +813,9 @@ def resolve_block_units(*, backbone: nn.Module, max_units: int | None) -> list[t
             for bi, block in enumerate(stage):
                 if _is_resnet_block(block):
                     units.append((f'{stage_key}_{bi}', block))
+
+    if not units:
+        units = _resolve_vit_block_units(backbone=backbone)
 
     # Fall back to layer/feature scanning when no blocks are found.
     if not units:
