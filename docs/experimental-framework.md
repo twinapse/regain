@@ -56,33 +56,33 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 
 ### Supported scenarios
 
-#### `split_cifar100`
+#### `cifar100`
 - Dataset: **CIFAR-100** (100 classes, 32x32 images)
 - Scenario builder: **Avalanche `SplitCIFAR100`**
 - Data source: Managed automatically by Avalanche (download and dataset handling).
 
-#### `split_tiny_imagenet`
+#### `tiny_imagenet`
 - Dataset: **Tiny-ImageNet-200** (200 classes, 64x64 images)
 - Scenario builder: **Avalanche `SplitTinyImageNet`**
 - Data source: Managed automatically by Avalanche (download and dataset handling).
 
-#### `split_cub200`
+#### `cub200`
 - Dataset: **CUB-200-2011** (200 bird species, variable-resolution natural images)
 - Scenario builder: **Avalanche `SplitCUB200`**
 - Data source: Downloaded from the CaltechDATA CUB-200-2011 archive.
 
-#### `split_imagenet_r`
+#### `imagenet_r`
 - Dataset: **ImageNet-R** (200 classes)
-- Scenario builder: **custom `SplitImageNetR`**
+- Scenario builder: **custom `ImageNetRScenarioBuilder`**
 - Data source: Downloaded from the Berkeley ImageNet-R release ([Hendrycks et al.](https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar)).
 - Expected split layout under dataset root: `train/<class_name>/*` and `test/<class_name>/*`.
 - If explicit split folders are not found, a deterministic per-class train/test holdout is built from a single-root class folder layout using `seed`.
 
 ### Task definition (Avalanche)
-- For `split_cifar100`, we use `SplitCIFAR100(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
-- For `split_tiny_imagenet`, we use `SplitTinyImageNet(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
-- For `split_cub200`, we use `SplitCUB200(n_experiences=<num_experiences>, classes_first_batch=<computed>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)` with scenario-managed dataset download.
-- For `split_imagenet_r`, we resolve raw train/test datasets and then build a class-incremental NC benchmark with `return_task_id=False`.
+- For `cifar100`, we use `SplitCIFAR100(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
+- For `tiny_imagenet`, we use `SplitTinyImageNet(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
+- For `cub200`, we use `SplitCUB200(n_experiences=<num_experiences>, classes_first_batch=<computed>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)` with scenario-managed dataset download.
+- For `imagenet_r`, we resolve raw train/test datasets and then build a class-incremental NC benchmark with `return_task_id=False`.
 - Each experience corresponds to one task $T_i$.
 - The class partition/order is determined by `seed` and scenario generator logic.
 - Assumption: class IDs are contiguous starting from 0 across the full benchmark; this is enforced by the runner

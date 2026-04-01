@@ -19,18 +19,18 @@ class TestScenarioRegistry:
     def test_list_scenarios_contains_supported_names(self) -> None:
         scenarios = list_scenarios()
         assert scenarios == tuple(sorted(scenarios))
-        assert 'split_cifar100' in scenarios
-        assert 'split_cub200' in scenarios
-        assert 'split_imagenet_r' in scenarios
-        assert 'split_tiny_imagenet' in scenarios
+        assert 'cifar100' in scenarios
+        assert 'cub200' in scenarios
+        assert 'imagenet_r' in scenarios
+        assert 'tiny_imagenet' in scenarios
 
-    def test_get_scenario_builder_path_resolves_split_cub200(self) -> None:
-        builder_path = get_scenario_builder_path('split_cub200')
-        assert builder_path == 'regain.avalanche_utils.scenarios.SplitCUB200ScenarioBuilder'
+    def test_get_scenario_builder_path_resolves_cub200(self) -> None:
+        builder_path = get_scenario_builder_path('cub200')
+        assert builder_path == 'regain.avalanche_utils.scenarios.CUB200ScenarioBuilder'
 
-    def test_get_scenario_builder_path_resolves_split_imagenet_r(self) -> None:
-        builder_path = get_scenario_builder_path('split_imagenet_r')
-        assert builder_path == 'regain.avalanche_utils.scenarios.SplitImageNetRScenarioBuilder'
+    def test_get_scenario_builder_path_resolves_imagenet_r(self) -> None:
+        builder_path = get_scenario_builder_path('imagenet_r')
+        assert builder_path == 'regain.avalanche_utils.scenarios.ImageNetRScenarioBuilder'
 
     def test_get_scenario_builder_path_raises_for_unknown_scenario(self) -> None:
         with pytest.raises(ValueError, match='Unsupported scenario'):

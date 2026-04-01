@@ -1108,9 +1108,9 @@ class ScenarioBuilder(ABC):
         return seq
 
 
-class SplitCIFAR100ScenarioBuilder(ScenarioBuilder):
+class CIFAR100ScenarioBuilder(ScenarioBuilder):
     """
-    Scenario builder for Split CIFAR-100.
+    Scenario builder for CIFAR-100.
     """
 
     def _build_scenario(
@@ -1125,7 +1125,7 @@ class SplitCIFAR100ScenarioBuilder(ScenarioBuilder):
         transform_image_size: int | None = None,
     ) -> NCScenario:
         """
-        Build the standard Split CIFAR-100 class-incremental scenario.
+        Build the standard CIFAR-100 class-incremental scenario.
 
         Args:
             num_experiences (int): Number of experiences to split the 100 classes into.
@@ -1172,9 +1172,9 @@ class SplitCIFAR100ScenarioBuilder(ScenarioBuilder):
         )
 
 
-class SplitTinyImageNetScenarioBuilder(ScenarioBuilder):
+class TinyImageNetScenarioBuilder(ScenarioBuilder):
     """
-    Scenario builder for Split Tiny-ImageNet.
+    Scenario builder for Tiny-ImageNet.
     """
 
     def _build_scenario(
@@ -1189,7 +1189,7 @@ class SplitTinyImageNetScenarioBuilder(ScenarioBuilder):
         transform_image_size: int | None = None,
     ) -> NCScenario:
         """
-        Build the standard Split Tiny-ImageNet class-incremental scenario.
+        Build the standard Tiny-ImageNet class-incremental scenario.
 
         Args:
             num_experiences (int): Number of experiences to split the 200 classes into.
@@ -1234,9 +1234,9 @@ class SplitTinyImageNetScenarioBuilder(ScenarioBuilder):
         )
 
 
-class SplitCUB200ScenarioBuilder(ScenarioBuilder):
+class CUB200ScenarioBuilder(ScenarioBuilder):
     """
-    Scenario builder for Split CUB-200.
+    Scenario builder for CUB-200.
 
     This builder uses Avalanche's `SplitCUB200` benchmark while reusing the
     module-level transform defaults and ensuring the dataset is available from
@@ -1267,7 +1267,7 @@ class SplitCUB200ScenarioBuilder(ScenarioBuilder):
         transform_image_size: int | None = None,
     ) -> NCScenario:
         """
-        Build the standard Split CUB-200 class-incremental scenario.
+        Build the standard CUB-200 class-incremental scenario.
 
         Args:
             num_experiences (int): Number of experiences used to split classes.
@@ -1543,9 +1543,9 @@ class _ImageNetRSubsetRawDataset(Dataset):
         return sample, int(target)
 
 
-class SplitImageNetRScenarioBuilder(ScenarioBuilder):
+class ImageNetRScenarioBuilder(ScenarioBuilder):
     """
-    Scenario builder for Split ImageNet-R.
+    Scenario builder for ImageNet-R.
 
     Auto-download ImageNet-R to a default data root and
     build a deterministic class-incremental benchmark from local folders.

@@ -3,7 +3,7 @@ Tests for ImageNet-R scenario helper logic.
 """
 
 from regain.avalanche_utils.scenarios import _ImageNetRSubsetRawDataset
-from regain.avalanche_utils.scenarios import SplitImageNetRScenarioBuilder
+from regain.avalanche_utils.scenarios import ImageNetRScenarioBuilder
 from regain.avalanche_utils.scenarios import ScenarioBuilder
 
 
@@ -41,7 +41,7 @@ class TestImageNetRHoldoutIndices:
     def test_make_per_class_holdout_indices_is_disjoint_and_covering(self) -> None:
         targets = [0] * 10 + [1] * 10 + [2] * 10
 
-        train_indices, test_indices = SplitImageNetRScenarioBuilder._make_per_class_holdout_indices(
+        train_indices, test_indices = ImageNetRScenarioBuilder._make_per_class_holdout_indices(
             targets=targets,
             test_fraction=0.2,
             seed=7,
