@@ -5,12 +5,19 @@ Tests for experiment builders.
 import pytest
 import torch
 
+import regain.experiments.builders as builders_module
 from regain.experiments.builders import build_backbone
+from regain.experiments.builders import build_benchmark
 from regain.experiments.builders import build_controller
 from regain.experiments.builders import build_lr_scheduler_plugin
 from regain.experiments.builders import build_optimizer
+from regain.experiments.config import BackboneConfig
 from regain.experiments.config import ControllerConfig
+from regain.experiments.config import EvaluationConfig
+from regain.experiments.config import ExperimentConfig
 from regain.experiments.config import OptimizerConfig
+from regain.experiments.config import RepairConfig
+from regain.experiments.config import TransformsConfig
 from regain.models.controllers import PreventionController
 
 
@@ -42,6 +49,95 @@ class TestBuildControllerReplayRequirements:
         )
 
         assert isinstance(controller, PreventionController)
+
+
+class TestBuildBenchmark:
+    def test_forwards_none_transform_overrides_and_backbone_image_size(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured_kwargs: dict[str, object] = {}
+
+        def _fake_scenario_builder(**kwargs: object) -> dict[str, object]:
+            captured_kwargs.update(kwargs)
+            return {'ok': True}
+
+        monkeypatch.setattr(
+            builders_module,
+            'get_scenario_builder',
+            lambda *, scenario: _fake_scenario_builder,
+        )
+        experiment_config = ExperimentConfig(
+            experiment_name='unit_test_experiment',
+            scenario='split_cifar100',
+            num_experiences=20,
+            backbone=BackboneConfig(
+                name='vit_small',
+                kwargs={
+                    'image_size': 384,
+                },
+            ),
+            repair=RepairConfig(split_fraction=0.2),
+            transforms=TransformsConfig(),
+            evaluation=EvaluationConfig(),
+            runs=[],
+            dataset_path='/tmp/datasets',
+            seed=7,
+        )
+
+        benchmark = build_benchmark(
+            experiment_config=experiment_config,
+            repair_split_fraction=0.2,
+        )
+
+        assert benchmark == {'ok': True}
+        assert captured_kwargs['num_experiences'] == 20
+        assert captured_kwargs['return_task_id'] is False
+        assert captured_kwargs['repair_split_fraction'] == pytest.approx(0.2)
+        assert captured_kwargs['dataset_path'] == '/tmp/datasets'
+        assert captured_kwargs['seed'] == 7
+        assert captured_kwargs['transform_random_resized_crop'] is None
+        assert captured_kwargs['transform_horizontal_flip'] is None
+        assert captured_kwargs['transform_image_size'] == 384
+
+    def test_forwards_explicit_transform_overrides_without_bool_coercion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured_kwargs: dict[str, object] = {}
+
+        def _fake_scenario_builder(**kwargs: object) -> dict[str, object]:
+            captured_kwargs.update(kwargs)
+            return {'ok': True}
+
+        monkeypatch.setattr(
+            builders_module,
+            'get_scenario_builder',
+            lambda *, scenario: _fake_scenario_builder,
+        )
+        experiment_config = ExperimentConfig(
+            experiment_name='unit_test_experiment',
+            scenario='split_tinyimagenet',
+            num_experiences=10,
+            backbone=BackboneConfig(name='resnet18', kwargs={}),
+            repair=RepairConfig(split_fraction=0.1),
+            transforms=TransformsConfig(
+                random_resized_crop=True,
+                horizontal_flip=False,
+            ),
+            evaluation=EvaluationConfig(),
+            runs=[],
+        )
+
+        benchmark = build_benchmark(
+            experiment_config=experiment_config,
+            repair_split_fraction=0.1,
+        )
+
+        assert benchmark == {'ok': True}
+        assert captured_kwargs['transform_random_resized_crop'] is True
+        assert captured_kwargs['transform_horizontal_flip'] is False
+        assert captured_kwargs['transform_image_size'] is None
 
 
 class TestBuildBackbone:

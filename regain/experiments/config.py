@@ -32,6 +32,7 @@ __all__ = [
     'TrainingConfig',
     'BackboneConfig',
     'RepairConfig',
+    'TransformsConfig',
     'EvaluationConfig',
     'RunConfig',
     'ExperimentConfig',
@@ -45,6 +46,7 @@ _CONFIG_PARAM_OVERRIDE_MAP: list[tuple[str, list[str]]] = [
     ('eval_batch_size', ['eval_batch_size', 'eval_mb_size']),
     ('batch_size_mem', ['batch_size_mem', 'replay_batch_size', 'mem_mb_size', 'mem_batch_size']),
     ('mem_size', ['mem_size', 'replay_memory_size']),
+    ('transforms', ['transforms']),
     ('evaluation', ['evaluation']),
     ('avalanche_schedule', ['avalanche_schedule', 'eval_schedule', 'eval_every']),
     ('device', ['device']),
@@ -184,6 +186,22 @@ class RepairConfig:
 
 
 @dataclass
+class TransformsConfig:
+    """
+    Optional transform configuration for scenario train/eval pipelines.
+
+    Attributes:
+        random_resized_crop: Optional override for `RandomResizedCrop` in train transforms.
+                             When `None`, scenario-specific defaults are used.
+        horizontal_flip: Optional override for `RandomHorizontalFlip` in train transforms.
+                         When `None`, scenario-specific defaults are used.
+    """
+
+    random_resized_crop: bool | None = None
+    horizontal_flip: bool | None = None
+
+
+@dataclass
 class EvaluationConfig:
     """
     Experiment-level evaluation configuration.
@@ -225,6 +243,7 @@ class ExperimentConfig:
         repair: Config shared by all repair controllers.
                 This is mandatory because the backbone must be trained with the same data splitting
                 logic as the repair controllers to prevent data leakage.
+        transforms: Optional transform settings for scenario train/eval pipelines.
         runs: Sequence of run configurations to execute. May be empty for backbone-only pretraining.
         evaluation: Evaluation settings for batch size and Avalanche built-in schedule.
         checkpoints_enabled: Whether to persist checkpoints to MLflow artifacts.
@@ -249,6 +268,7 @@ class ExperimentConfig:
     # Training/eval #
     #################
     checkpoints_enabled: bool = False
+    transforms: TransformsConfig = field(default_factory=TransformsConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     ###############################
@@ -848,6 +868,26 @@ def _validate_repair_config_for_runs(
         )
 
 
+def _parse_transforms_config(payload: dict[str, Any]) -> TransformsConfig:
+    transforms_payload = payload.get('transforms')
+    if transforms_payload is None:
+        return TransformsConfig()
+    if not isinstance(transforms_payload, Mapping):
+        raise ValueError('`transforms` must be a mapping when provided.')
+
+    random_resized_crop = transforms_payload.get('random_resized_crop')
+    horizontal_flip = transforms_payload.get('horizontal_flip')
+    if random_resized_crop is not None and not isinstance(random_resized_crop, bool):
+        raise ValueError('`transforms.random_resized_crop` must be a boolean when provided.')
+    if horizontal_flip is not None and not isinstance(horizontal_flip, bool):
+        raise ValueError('`transforms.horizontal_flip` must be a boolean when provided.')
+
+    return TransformsConfig(
+        random_resized_crop=random_resized_crop,
+        horizontal_flip=horizontal_flip,
+    )
+
+
 def _parse_evaluation_config(payload: dict[str, Any]) -> EvaluationConfig:
     evaluation_config = payload.get('evaluation')
     if not isinstance(evaluation_config, Mapping):
@@ -942,6 +982,7 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
 
     parsed_backbone = _parse_backbone_config(payload)
     parsed_repair = _parse_repair_config(payload)
+    parsed_transforms = _parse_transforms_config(payload)
     parsed_runs = _parse_runs(payload)
     _validate_repair_config_for_runs(repair=parsed_repair, runs=parsed_runs)
 
@@ -952,6 +993,7 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
         num_experiences=payload['num_experiences'],
         backbone=parsed_backbone,
         repair=parsed_repair,
+        transforms=parsed_transforms,
         runs=parsed_runs,
         evaluation=_parse_evaluation_config(payload),
         checkpoints_enabled=payload.get('checkpoints_enabled', False),

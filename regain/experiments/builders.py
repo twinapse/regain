@@ -26,6 +26,7 @@ from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
 from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
 from regain.constants import PARAM_NUM_CLASSES
 from regain.debug.avalanche_utils import DebugRepairControllerPlugin
+from regain.experiments.config import BackboneConfig
 from regain.experiments.config import ControllerConfig
 from regain.experiments.config import ExperimentConfig
 from regain.experiments.config import OptimizerConfig
@@ -65,6 +66,26 @@ _PARAM_NAME_REPLAY_MEM_SIZE = PARAM_BACKBONE_REPLAY_MEM_SIZE.rsplit(NS_SEP, 1)[-
 ##########################
 
 
+def _resolve_backbone_image_size(*, backbone_config: BackboneConfig) -> int | None:
+    """
+    Resolve an optional image size from backbone constructor kwargs.
+
+    Args:
+        backbone_config (BackboneConfig): Backbone configuration.
+
+    Returns:
+        int | None: Parsed image size from `backbone_config.kwargs.image_size`, if present.
+    """
+    if backbone_config is None:
+        return None
+
+    image_size = backbone_config.kwargs.get('image_size')
+    if image_size is None:
+        return None
+
+    return int(image_size)
+
+
 def build_benchmark(
     *,
     experiment_config: ExperimentConfig,
@@ -93,6 +114,9 @@ def build_benchmark(
         repair_split_fraction=repair_split_fraction,
         dataset_path=experiment_config.dataset_path,
         seed=experiment_config.seed,
+        transform_random_resized_crop=experiment_config.transforms.random_resized_crop,
+        transform_horizontal_flip=experiment_config.transforms.horizontal_flip,
+        transform_image_size=_resolve_backbone_image_size(backbone_config=experiment_config.backbone),
     )
     return benchmark
 
