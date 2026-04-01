@@ -57,20 +57,27 @@ class ViTSmallClassifier(nn.Module):
         image_size: Input image side length.
         patch_size: Patch side length.
         dropout: Dropout probability.
+        attention_dropout: Attention dropout probability.
+        pretrained_backbone: Whether to initialize the backbone with pretrained weights.
     """
 
     def __init__(
         self,
         n_classes: int,
-        image_size: int = 32,
-        patch_size: int = 4,
+        *,
+        image_size: int | None = None,
+        patch_size: int | None = None,
         dropout: float = 0.0,
+        attention_dropout: float = 0.0,
+        pretrained_backbone: bool = False,
     ) -> None:
         super().__init__()
         self.backbone = ViTSmallBackbone(
             image_size=image_size,
             patch_size=patch_size,
             dropout=dropout,
+            attention_dropout=attention_dropout,
+            pretrained=pretrained_backbone,
         )
         self.classifier = LinearClassifier(in_dim=self.backbone.out_dim, n_classes=n_classes)
 
@@ -98,20 +105,27 @@ class ViTBaseClassifier(nn.Module):
         image_size: Input image side length.
         patch_size: Patch side length.
         dropout: Dropout probability.
+        attention_dropout: Attention dropout probability.
+        pretrained_backbone: Whether to initialize the backbone with pretrained weights.
     """
 
     def __init__(
         self,
         n_classes: int,
-        image_size: int = 32,
-        patch_size: int = 4,
+        *,
+        image_size: int | None = None,
+        patch_size: int | None = None,
         dropout: float = 0.0,
+        attention_dropout: float = 0.0,
+        pretrained_backbone: bool = False,
     ) -> None:
         super().__init__()
         self.backbone = ViTBaseBackbone(
             image_size=image_size,
             patch_size=patch_size,
             dropout=dropout,
+            attention_dropout=attention_dropout,
+            pretrained=pretrained_backbone,
         )
         self.classifier = LinearClassifier(in_dim=self.backbone.out_dim, n_classes=n_classes)
 
