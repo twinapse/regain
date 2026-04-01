@@ -15,7 +15,7 @@ from regain.avalanche_utils.scenarios import _build_imagenet_train_eval_transfor
 from regain.avalanche_utils.scenarios import _build_square_dataset_train_eval_transforms
 from regain.avalanche_utils.scenarios import _resolve_imagenet_eval_resize_size
 from regain.avalanche_utils.scenarios import _resolve_transform_toggle
-from regain.avalanche_utils.scenarios import SplitImageNetRScenarioBuilder
+from regain.avalanche_utils.scenarios import ImageNetRScenarioBuilder
 
 
 def _transform_type_names(*, transform: Compose) -> list[str]:
@@ -131,7 +131,7 @@ class TestImageNetTransforms:
     def test_imagenet_default_builder_applies_image_size_even_with_all_toggles_disabled(self) -> None:
         image_size = 384
         expected_resize_size = _resolve_imagenet_eval_resize_size(image_size=image_size)
-        train_transform, eval_transform = SplitImageNetRScenarioBuilder._build_default_transforms(
+        train_transform, eval_transform = ImageNetRScenarioBuilder._build_default_transforms(
             transform_random_resized_crop=False,
             transform_horizontal_flip=False,
             transform_image_size=image_size,
@@ -150,7 +150,7 @@ class TestImageNetTransforms:
         assert _resolve_center_crop_size(transform=eval_crop) == image_size
 
     def test_imagenet_default_builder_uses_horizontal_flip_when_toggle_is_omitted(self) -> None:
-        train_transform, _ = SplitImageNetRScenarioBuilder._build_default_transforms(
+        train_transform, _ = ImageNetRScenarioBuilder._build_default_transforms(
             transform_random_resized_crop=None,
             transform_horizontal_flip=None,
             transform_image_size=224,

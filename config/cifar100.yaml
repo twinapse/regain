@@ -1,8 +1,8 @@
 # ============================================================
 # Experiment identity & scenario
 # ============================================================
-experiment_name: retrieval_controllers_split_cifar100
-scenario: split_cifar100
+experiment_name: retrieval_controllers_cifar100
+scenario: cifar100
 num_experiences: 20
 
 # ============================================================

@@ -20,7 +20,7 @@ from regain.experiments.config import load_experiment_config
 def _build_base_payload() -> dict[str, object]:
     return {
         'experiment_name': 'unit_test_experiment',
-        'scenario': 'split_cifar100',
+        'scenario': 'cifar100',
         'num_experiences': 2,
         'backbone': {
             'name': 'resnet18',

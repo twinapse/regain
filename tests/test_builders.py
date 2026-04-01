@@ -69,7 +69,7 @@ class TestBuildBenchmark:
         )
         experiment_config = ExperimentConfig(
             experiment_name='unit_test_experiment',
-            scenario='split_cifar100',
+            scenario='cifar100',
             num_experiences=20,
             backbone=BackboneConfig(
                 name='vit_small',
@@ -117,7 +117,7 @@ class TestBuildBenchmark:
         )
         experiment_config = ExperimentConfig(
             experiment_name='unit_test_experiment',
-            scenario='split_tinyimagenet',
+            scenario='tiny_imagenet',
             num_experiences=10,
             backbone=BackboneConfig(name='resnet18', kwargs={}),
             repair=RepairConfig(split_fraction=0.1),

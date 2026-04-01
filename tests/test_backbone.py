@@ -272,7 +272,7 @@ class TestBackboneTrainingLoggingRoundTrip:
 
         experiment_config = ExperimentConfig(
             experiment_name='unit_test_experiment',
-            scenario='split_cifar100',
+            scenario='cifar100',
             num_experiences=2,
             backbone=BackboneConfig(
                 name='vit_small',

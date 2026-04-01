@@ -124,10 +124,10 @@ def _list_registry_entries(mapping: Mapping[str, str]) -> tuple[str, ...]:
 
 _SCENARIOS: Mapping[str, str] = MappingProxyType(
     {
-        'split_cifar100': 'regain.avalanche_utils.scenarios.SplitCIFAR100ScenarioBuilder',
-        'split_cub200': 'regain.avalanche_utils.scenarios.SplitCUB200ScenarioBuilder',
-        'split_imagenet_r': 'regain.avalanche_utils.scenarios.SplitImageNetRScenarioBuilder',
-        'split_tiny_imagenet': 'regain.avalanche_utils.scenarios.SplitTinyImageNetScenarioBuilder',
+        'cifar100': 'regain.avalanche_utils.scenarios.CIFAR100ScenarioBuilder',
+        'cub200': 'regain.avalanche_utils.scenarios.CUB200ScenarioBuilder',
+        'imagenet_r': 'regain.avalanche_utils.scenarios.ImageNetRScenarioBuilder',
+        'tiny_imagenet': 'regain.avalanche_utils.scenarios.TinyImageNetScenarioBuilder',
     }
 )
 
