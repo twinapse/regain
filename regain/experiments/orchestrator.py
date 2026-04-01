@@ -25,11 +25,13 @@ from regain.avalanche_utils.plugins import EvaluationIntegrityPlugin
 from regain.avalanche_utils.plugins import make_evaluation_plugin
 from regain.avalanche_utils.plugins import MetricContextPlugin
 from regain.avalanche_utils.plugins import NumericalStabilityGuardPlugin
+from regain.avalanche_utils.plugins import PredictionLoggingPlugin
 from regain.avalanche_utils.plugins import RegainEvaluationPlugin
 from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.avalanche_utils.plugins import SeenClassesMaskPlugin
 from regain.constants import MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR
 from regain.constants import MLFLOW_ARTIFACT_CONFIG_FILE
+from regain.constants import MLFLOW_ARTIFACT_PREDICTIONS_DIR
 from regain.constants import NS_SEP
 from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
 from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
@@ -241,6 +243,14 @@ def _train_and_evaluate_strategy(
 
             # Build the calibration metric plugin
             calibration_plugin = CalibrationDiagnosticsPlugin(num_bins=15)
+
+            # Build the prediction logging plugin
+            prediction_logging_plugin = PredictionLoggingPlugin(
+                artifact_root=Path(artifacts_dir) / MLFLOW_ARTIFACT_PREDICTIONS_DIR,
+                num_classes=benchmark.n_classes,
+            )
+
+            # Build the numerical stability guard plugin
             numerical_stability_guard_plugin = NumericalStabilityGuardPlugin(context=context)
 
             # Build the controller plugin
@@ -303,6 +313,7 @@ def _train_and_evaluate_strategy(
                 strategy_plugins.append(controller_plugin)
             strategy_plugins.append(numerical_stability_guard_plugin)
             strategy_plugins.append(calibration_plugin)
+            strategy_plugins.append(prediction_logging_plugin)
             strategy_plugins.append(regain_evaluation_plugin)
             strategy_plugins.append(eval_integrity_plugin)
 
@@ -418,6 +429,12 @@ def _train_and_evaluate_strategy(
                 if checkpoint_dir is None:
                     raise ValueError('Checkpoint artifacts requested but no checkpoint directory was provided.')
                 mlflow.log_artifacts(str(checkpoint_dir), artifact_path=MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR)
+
+            if prediction_logging_plugin.has_artifacts():
+                mlflow.log_artifacts(
+                    str(prediction_logging_plugin.artifact_root),
+                    artifact_path=MLFLOW_ARTIFACT_PREDICTIONS_DIR,
+                )
 
             # Count and log controller model parameters after training because some controllers
             # may materialize additional parameters dynamically during fitting.

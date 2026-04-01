@@ -3,6 +3,7 @@ Avalanche plugins.
 """
 from dataclasses import dataclass
 import hashlib
+import json
 import math
 from pathlib import Path
 import time
@@ -40,11 +41,13 @@ from regain.constants import COLUMN_STATUS
 from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
+from regain.constants import MLFLOW_ARTIFACT_PREDICTIONS_MANIFEST_FILE
 from regain.constants import NAMESPACE_EVAL
 from regain.constants import NAMESPACE_RUN
 from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NAMESPACE_TRAIN
 from regain.constants import NS_SEP
+from regain.constants import PREDICTION_ARTIFACT_SCHEMA_VERSION
 from regain.constants import RUN_ACC_EXP
 from regain.constants import RUN_ACC_FINAL
 from regain.constants import RUN_ACC_FINAL_AVG_BASE
@@ -93,6 +96,7 @@ __all__ = [
     'RegainEvaluationPlugin',
     'MetricContextPlugin',
     'NumericalStabilityGuardPlugin',
+    'PredictionLoggingPlugin',
     'SeenClassesMaskPlugin',
     'make_evaluation_plugin',
 ]
@@ -2192,6 +2196,303 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
             return None
         return float(max(ece_values))
 
+
+class PredictionLoggingPlugin(SupervisedPlugin):
+    """
+    Persist per-experience evaluation logits and targets as compressed artifacts.
+
+    The plugin listens to evaluation lifecycle hooks and writes one `.npz` file per
+    evaluated test experience when REGAIN-managed evaluation attaches capture metadata
+    to the strategy.
+    """
+
+    def __init__(
+        self,
+        *,
+        artifact_root: Path,
+        num_classes: int,
+    ) -> None:
+        """
+        Initialize the prediction artifact plugin.
+
+        Args:
+            artifact_root (Path): Directory where prediction artifacts are staged.
+            num_classes (int): Model output width expected for stored logits.
+        """
+        super().__init__()
+        self.artifact_root = Path(artifact_root)
+        self.num_classes = int(num_classes)
+        if self.num_classes <= 0:
+            raise ValueError('`num_classes` must be positive.')
+
+        self._manifest_entries: dict[str, dict[str, object]] = {}
+        self._capture_context: dict[str, object] | None = None
+        self._current_exp_idx: int | None = None
+        self._current_task_class_ids: list[int] = []
+        self._current_logits_chunks: list[np.ndarray] = []
+        self._current_targets_chunks: list[np.ndarray] = []
+
+    @property
+    def manifest_path(self) -> Path:
+        """
+        Return the staged manifest path.
+
+        Returns:
+            Path: Manifest JSON path.
+        """
+        return self.artifact_root / MLFLOW_ARTIFACT_PREDICTIONS_MANIFEST_FILE
+
+    def has_artifacts(self) -> bool:
+        """
+        Check whether any prediction artifact files were written.
+
+        Returns:
+            bool: True when at least one prediction file has been staged.
+        """
+        return bool(self._manifest_entries)
+
+    def _reset_current_experience(self) -> None:
+        """
+        Reset buffers for the current evaluated experience.
+
+        Returns:
+            None.
+        """
+        self._current_exp_idx = None
+        self._current_task_class_ids = []
+        self._current_logits_chunks = []
+        self._current_targets_chunks = []
+
+    @staticmethod
+    def _coerce_capture_context(strategy: BaseTemplate) -> dict[str, object] | None:
+        """
+        Resolve prediction-capture metadata from the strategy.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            dict[str, object] | None: Capture metadata or None when disabled.
+        """
+        context = getattr(strategy, '_regain_prediction_capture_context', None)
+        if not isinstance(context, Mapping):
+            return None
+
+        eval_tag = str(context.get('eval_tag') or '').strip()
+        checkpoint_exp_idx = context.get('checkpoint_exp_idx')
+        if eval_tag == '' or checkpoint_exp_idx is None:
+            return None
+
+        checkpoint_exp_idx_int = int(checkpoint_exp_idx)
+        if checkpoint_exp_idx_int < 0:
+            return None
+
+        return {
+            'eval_tag': eval_tag,
+            'checkpoint_exp_idx': checkpoint_exp_idx_int,
+            'mask_enabled': bool(context.get('mask_enabled', False)),
+        }
+
+    @staticmethod
+    def _task_class_ids_for_experience(strategy: BaseTemplate) -> list[int]:
+        """
+        Resolve class ids for the current evaluation experience.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            list[int]: Sorted task class ids.
+        """
+        experience = getattr(strategy, 'experience', None)
+        class_ids = getattr(experience, 'classes_in_this_experience', []) or []
+        return sorted(int(class_id) for class_id in class_ids)
+
+    @staticmethod
+    def _artifact_relative_path(
+        *,
+        eval_tag: str,
+        checkpoint_exp_idx: int,
+        test_exp_idx: int,
+    ) -> Path:
+        """
+        Build the relative artifact path for one evaluation experience.
+
+        Args:
+            eval_tag (str): Evaluation tag such as `reference`, `base`, or `ctrl`.
+            checkpoint_exp_idx (int): Checkpoint experience index.
+            test_exp_idx (int): Evaluated test experience index.
+
+        Returns:
+            Path: Relative artifact path under the predictions root directory.
+        """
+        return (
+            Path(str(eval_tag))
+            / f'ckpt_{EXPERIENCE_KEY_PREFIX}{int(checkpoint_exp_idx):03d}'
+            / f'test_{EXPERIENCE_KEY_PREFIX}{int(test_exp_idx):03d}.npz'
+        )
+
+    def _write_manifest(self) -> None:
+        """
+        Persist the staged manifest JSON.
+
+        Returns:
+            None.
+        """
+        self.artifact_root.mkdir(parents=True, exist_ok=True)
+        payload = {
+            'schema_version': PREDICTION_ARTIFACT_SCHEMA_VERSION,
+            'num_classes': self.num_classes,
+            'files': [
+                self._manifest_entries[path]
+                for path in sorted(self._manifest_entries)
+            ],
+        }
+        self.manifest_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding='utf-8',
+        )
+
+    def before_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        """
+        Initialize capture state for an evaluation pass.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            None.
+        """
+        del kwargs
+        self._capture_context = self._coerce_capture_context(strategy)
+        self._reset_current_experience()
+
+    def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        """
+        Initialize buffers for one evaluated experience.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            None.
+        """
+        del kwargs
+        self._reset_current_experience()
+        if self._capture_context is None:
+            return
+
+        experience = getattr(strategy, 'experience', None)
+        exp_idx = getattr(experience, 'current_experience', None)
+        if exp_idx is None:
+            return
+
+        self._current_exp_idx = int(exp_idx)
+        self._current_task_class_ids = self._task_class_ids_for_experience(strategy)
+
+    def after_eval_iteration(self, strategy: BaseTemplate, **kwargs) -> None:
+        """
+        Append logits and targets for the current evaluation minibatch.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            None.
+        """
+        del kwargs
+        if self._capture_context is None or self._current_exp_idx is None:
+            return
+
+        logits = strategy.mb_output
+        targets = strategy.mb_y
+        if not torch.is_tensor(logits) or logits.ndim != 2:
+            return
+        if not torch.is_tensor(targets):
+            return
+
+        targets_vec = targets.reshape(-1).to(device=logits.device, dtype=torch.long)
+        if int(targets_vec.shape[0]) != int(logits.shape[0]):
+            return
+        if int(logits.shape[1]) != self.num_classes:
+            raise ValueError(
+                'Prediction artifact width mismatch. '
+                f'expected={self.num_classes}, observed={int(logits.shape[1])}'
+            )
+        if targets_vec.numel() == 0:
+            return
+
+        self._current_logits_chunks.append(
+            logits.detach().to(device='cpu', dtype=torch.float32).numpy()
+        )
+        self._current_targets_chunks.append(
+            targets_vec.detach().to(device='cpu', dtype=torch.int32).numpy()
+        )
+
+    def after_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        """
+        Flush one evaluated experience to a compressed `.npz` artifact.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            None.
+        """
+        del strategy
+        del kwargs
+        if self._capture_context is None or self._current_exp_idx is None:
+            return
+        if not self._current_logits_chunks or not self._current_targets_chunks:
+            self._reset_current_experience()
+            return
+
+        logits = np.concatenate(self._current_logits_chunks, axis=0).astype(np.float32, copy=False)
+        targets = np.concatenate(self._current_targets_chunks, axis=0).astype(np.int32, copy=False)
+        relative_path = self._artifact_relative_path(
+            eval_tag=str(self._capture_context['eval_tag']),
+            checkpoint_exp_idx=int(self._capture_context['checkpoint_exp_idx']),
+            test_exp_idx=int(self._current_exp_idx),
+        )
+        output_path = self.artifact_root / relative_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        np.savez_compressed(
+            output_path,
+            logits=logits,
+            targets=targets,
+            task_class_ids=np.asarray(self._current_task_class_ids, dtype=np.int32),
+        )
+
+        self._manifest_entries[relative_path.as_posix()] = {
+            'path': relative_path.as_posix(),
+            'eval_tag': str(self._capture_context['eval_tag']),
+            'checkpoint_exp_idx': int(self._capture_context['checkpoint_exp_idx']),
+            'test_exp_idx': int(self._current_exp_idx),
+            'mask_enabled': bool(self._capture_context['mask_enabled']),
+            'num_samples': int(targets.shape[0]),
+            'num_classes': self.num_classes,
+            'task_class_ids': [int(class_id) for class_id in self._current_task_class_ids],
+        }
+        self._write_manifest()
+        self._reset_current_experience()
+
+    def after_eval(self, strategy: BaseTemplate, **kwargs) -> None:
+        """
+        Clear capture state after an evaluation pass completes.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            None.
+        """
+        del strategy
+        del kwargs
+        self._capture_context = None
+        self._reset_current_experience()
+
+
 class RegainEvaluationPlugin(SupervisedPlugin):
     """
     Run reference/post/controller evaluations and log analysis artifacts.
@@ -2222,8 +2523,10 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             seen_mask_plugin (SeenClassesMaskPlugin): Plugin used to mask unseen classes.
             num_epochs_per_experience (int): Number of epochs per experience.
             context (MetricContext): Metric context for logging.
-            backbone_analysis_baseline (Mapping[str, Sequence[float | None]] | None): Optional controller-off baseline vectors
-                from the reserved backbone run. When present, expected keys are `acc.exp.base` and `acc.final.base`.
+            backbone_analysis_baseline (Mapping[str, Sequence[float | None]] | None):
+                Optional controller-off baseline vectors from the reserved backbone
+                run. When present, expected keys are `acc.exp.base` and
+                `acc.final.base`.
             eps (float): Threshold for retrieval-correctable fraction calculations.
 
         Returns:
@@ -2381,6 +2684,30 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             self.seen_mask_plugin.disable_masking()
         return previous_state
 
+    @staticmethod
+    def _prediction_capture_context(
+        *,
+        eval_tag: str,
+        checkpoint_exp_idx: int,
+        mask_enabled: bool,
+    ) -> dict[str, object]:
+        """
+        Build evaluation metadata for prediction artifact capture.
+
+        Args:
+            eval_tag (str): Evaluation tag such as `reference`, `base`, or `ctrl`.
+            checkpoint_exp_idx (int): Checkpoint experience index being evaluated.
+            mask_enabled (bool): Whether seen-class masking is enabled.
+
+        Returns:
+            dict[str, object]: JSON-serializable capture metadata.
+        """
+        return {
+            'eval_tag': str(eval_tag),
+            'checkpoint_exp_idx': int(checkpoint_exp_idx),
+            'mask_enabled': bool(mask_enabled),
+        }
+
     def _run_eval_with_state(
         self,
         strategy: BaseTemplate,
@@ -2388,6 +2715,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         *,
         mask_enabled: bool,
         eval_tag: str,
+        checkpoint_exp_idx: int,
     ) -> dict[str, object]:
         prev_mask_state = self._toggle_mask(mask_enabled)
         prev_phase = self.context.phase
@@ -2395,8 +2723,18 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         prev_log_step = self.context.log_step
         prev_log_enabled = self.context.log_enabled
         prev_eval_tag = getattr(strategy, '_regain_eval_tag', None)
+        prev_capture_context = getattr(strategy, '_regain_prediction_capture_context', None)
         try:
             setattr(strategy, '_regain_eval_tag', str(eval_tag))
+            setattr(
+                strategy,
+                '_regain_prediction_capture_context',
+                self._prediction_capture_context(
+                    eval_tag=eval_tag,
+                    checkpoint_exp_idx=checkpoint_exp_idx,
+                    mask_enabled=mask_enabled,
+                ),
+            )
             self.context.set_phase(MetricPhase.EVAL)
             self.context.set_log_namespace(NAMESPACE_EVAL)
             self.context.set_log_enabled(False)
@@ -2407,6 +2745,11 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                     delattr(strategy, '_regain_eval_tag')
             else:
                 setattr(strategy, '_regain_eval_tag', prev_eval_tag)
+            if prev_capture_context is None:
+                if hasattr(strategy, '_regain_prediction_capture_context'):
+                    delattr(strategy, '_regain_prediction_capture_context')
+            else:
+                setattr(strategy, '_regain_prediction_capture_context', prev_capture_context)
             self.context.set_phase(prev_phase)
             self.context.set_log_namespace(prev_log_namespace)
             self.context.set_log_step(prev_log_step)
@@ -2422,6 +2765,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         log_namespace: str,
         log_step: int,
         eval_tag: str,
+        checkpoint_exp_idx: int,
     ) -> dict[str, object]:
         """
         Run evaluation with toggled mask state and metric logging enabled.
@@ -2432,6 +2776,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             mask_enabled (bool): Whether to enable seen-class masking.
             log_namespace (str): Namespace to apply to logged metrics.
             log_step (int): Step to assign to logged metrics.
+            checkpoint_exp_idx (int): Checkpoint experience index being evaluated.
 
         Returns:
             dict[str, object]: Avalanche evaluation results.
@@ -2442,8 +2787,18 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         prev_log_step = self.context.log_step
         prev_log_enabled = self.context.log_enabled
         prev_eval_tag = getattr(strategy, '_regain_eval_tag', None)
+        prev_capture_context = getattr(strategy, '_regain_prediction_capture_context', None)
         try:
             setattr(strategy, '_regain_eval_tag', str(eval_tag))
+            setattr(
+                strategy,
+                '_regain_prediction_capture_context',
+                self._prediction_capture_context(
+                    eval_tag=eval_tag,
+                    checkpoint_exp_idx=checkpoint_exp_idx,
+                    mask_enabled=mask_enabled,
+                ),
+            )
             self.context.set_phase(MetricPhase.EVAL)
             self.context.set_log_namespace(log_namespace)
             self.context.set_log_step(int(log_step))
@@ -2455,6 +2810,11 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                     delattr(strategy, '_regain_eval_tag')
             else:
                 setattr(strategy, '_regain_eval_tag', prev_eval_tag)
+            if prev_capture_context is None:
+                if hasattr(strategy, '_regain_prediction_capture_context'):
+                    delattr(strategy, '_regain_prediction_capture_context')
+            else:
+                setattr(strategy, '_regain_prediction_capture_context', prev_capture_context)
             self.context.set_phase(prev_phase)
             self.context.set_log_namespace(prev_log_namespace)
             self.context.set_log_step(prev_log_step)
@@ -2497,6 +2857,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             log_namespace=log_namespace,
             log_step=log_step,
             eval_tag=('ctrl' if has_controller else 'base'),
+            checkpoint_exp_idx=final_exp_idx,
         )
         scalar_results = extract_scalar_metrics(eval_results)
         self.last_posthoc_scalar_results = scalar_results
@@ -2559,6 +2920,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 [self.benchmark.test_stream[exp_idx]],
                 mask_enabled=True,
                 eval_tag='reference',
+                checkpoint_exp_idx=exp_idx,
             )
             acc_map = extract_top1_by_experience(ref_results, self._num_experiences)
             if exp_idx not in acc_map:
@@ -2868,6 +3230,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                     self.benchmark.test_stream,
                     mask_enabled=False,
                     eval_tag='base',
+                    checkpoint_exp_idx=self._num_experiences - 1,
                 )
             a_base = ordered_accuracies(a_base_results, self._num_experiences)
 
@@ -2882,6 +3245,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                     self.benchmark.test_stream,
                     mask_enabled=False,
                     eval_tag='ctrl',
+                    checkpoint_exp_idx=self._num_experiences - 1,
                 )
             a_final_ctrl = ordered_accuracies(a_final_ctrl_results, self._num_experiences)
 

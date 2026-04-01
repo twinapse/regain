@@ -473,6 +473,22 @@ At the end of training, when reference accuracies are complete, the evaluation p
   - `run.diagnostics.logit_avg_drift`
 - Additional persisted scalar in `analysis_artifacts.json` (when available):
   - `run.calibration.max_ece`
+- Additional prediction artifact family in MLflow:
+  - `predictions/manifest.json`
+  - `predictions/<eval_tag>/ckpt_exp###/test_exp###.npz`
+  - each `.npz` stores:
+    - `logits`: `float32[num_samples, num_classes]`
+    - `targets`: `int32[num_samples]`
+    - `task_class_ids`: `int32[num_task_classes]`
+  - prediction artifacts are emitted only for REGAIN-managed evaluation/test passes, not for online training batches
+  - current eval tags are:
+    - `reference` for seen-classes reference evaluation after each experience
+    - `base` for controller-off posthoc evaluation
+    - `ctrl` for controller-on posthoc evaluation
+  - repair-controller runs log their own `ctrl` prediction artifacts; backbone/controller-off prediction artifacts remain on
+    the corresponding `backbone` run
+  - these artifacts are intended to support future metric recomputation from stored predictions; the current
+    `run_analysis` pipeline still consumes logged metrics and `analysis_artifacts.json`
 - For repair-controller runs, analysis outputs (`runs_table`, curves, predictive summaries) enforce baseline-only
   consumption of diagnostic values and analysis calibration values (`run.calibration.ece`, `run.calibration.aece`, `run.calibration.nll`,
   run-level `run.calibration.max_ece`) from `analysis_artifacts.json`.
@@ -509,6 +525,8 @@ We report mean ± std across seeds (common configs use **3 seeds**) for:
 - Per-task accuracies $(A_{\text{ctrl}})$ for repair controllers with complete reference vectors
 - Per-task $\rho$ for valid tasks in repair-controller runs (invalid tasks are omitted from `run.repair.rho.exp###`)
 - Per-task calibration/diagnostic vectors for base post-sequence behavior (when available)
+- Per-experience prediction artifacts for evaluation/test passes under `predictions/`, storing logits and targets in
+  compressed `.npz` files plus a manifest
 - Aggregate summaries and curve/frontier/predictive inputs
 
 ### Metric definitions (calibration, overhead, diagnostics, analysis)
