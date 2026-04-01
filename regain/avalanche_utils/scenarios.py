@@ -2,6 +2,7 @@ from abc import ABC
 from abc import abstractmethod
 import dataclasses
 import inspect
+import math
 from pathlib import Path
 
 ####################################################################################################
@@ -26,6 +27,9 @@ from torchvision.datasets.utils import download_and_extract_archive
 from torchvision.transforms import CenterCrop
 from torchvision.transforms import Compose
 from torchvision.transforms import Normalize
+from torchvision.transforms import RandomCrop
+from torchvision.transforms import RandomHorizontalFlip
+from torchvision.transforms import RandomResizedCrop
 from torchvision.transforms import Resize
 from torchvision.transforms import ToTensor
 
@@ -39,6 +43,172 @@ __all__ = [
     'get_scenario_builder',
     'get_num_classes_from_experience',
 ]
+
+_CIFAR100_IMAGE_SIZE = 32
+_CIFAR100_MEAN = (0.5071, 0.4865, 0.4409)
+_CIFAR100_STD = (0.2673, 0.2564, 0.2762)
+
+_TINY_IMAGENET_IMAGE_SIZE = 64
+_TINY_IMAGENET_MEAN = (0.4914, 0.4822, 0.4465)
+_TINY_IMAGENET_STD = (0.2023, 0.1994, 0.2010)
+
+_IMAGENET_IMAGE_SIZE = 224
+_IMAGENET_MEAN = (0.485, 0.456, 0.406)
+_IMAGENET_STD = (0.229, 0.224, 0.225)
+_IMAGENET_EVAL_RESIZE_RATIO = 1.0 / 0.875
+
+_DEFAULT_RANDOM_RESIZED_CROP = False
+_DEFAULT_HORIZONTAL_FLIP = True
+
+
+def _resolve_image_size(*, image_size: int | None, default_image_size: int) -> int:
+    """
+    Resolve a positive image size, falling back to a default.
+
+    Args:
+        image_size (int | None): Optional candidate image size.
+        default_image_size (int): Fallback image size when `image_size` is None.
+
+    Returns:
+        int: Resolved positive image size.
+    """
+    resolved_size = default_image_size if image_size is None else int(image_size)
+    if resolved_size <= 0:
+        raise ValueError('Image size must be > 0.')
+    return int(resolved_size)
+
+
+def _resolve_transform_toggle(*, toggle: bool | None, default_toggle: bool) -> bool:
+    """
+    Resolve an optional transform toggle against a scenario default.
+
+    Args:
+        toggle (bool | None): User-provided transform toggle.
+        default_toggle (bool): Scenario default when `toggle` is None.
+
+    Returns:
+        bool: Resolved transform toggle.
+    """
+    if toggle is None:
+        return bool(default_toggle)
+    return bool(toggle)
+
+
+def _build_square_dataset_train_eval_transforms(
+    *,
+    image_size: int,
+    default_image_size: int,
+    mean: tuple[float, float, float],
+    std: tuple[float, float, float],
+    random_resized_crop: bool,
+    horizontal_flip: bool,
+    include_default_random_crop: bool = False,
+    default_random_crop_padding: int = 0,
+) -> tuple[Compose, Compose]:
+    """
+    Build train/eval transforms for fixed-size square datasets (e.g., CIFAR/Tiny-ImageNet).
+
+    Args:
+        image_size (int): Target crop size for train/eval transforms.
+        default_image_size (int): Native side length of the dataset images.
+        mean (tuple[float, float, float]): Channel-wise normalization mean.
+        std (tuple[float, float, float]): Channel-wise normalization standard deviation.
+        random_resized_crop (bool): Whether to add `RandomResizedCrop` in train transforms.
+        horizontal_flip (bool): Whether to add `RandomHorizontalFlip` in train transforms.
+        include_default_random_crop (bool): Whether to include a fallback `RandomCrop` when
+            `random_resized_crop=False` and `image_size` matches `default_image_size`.
+        default_random_crop_padding (int): Optional `RandomCrop` padding used when
+            `include_default_random_crop=True`.
+
+    Returns:
+        tuple[Compose, Compose]: `(train_transform, eval_transform)` transforms.
+    """
+    train_ops: list[object] = []
+    if random_resized_crop:
+        train_ops.append(RandomResizedCrop(size=int(image_size)))
+    elif int(image_size) != int(default_image_size):
+        train_ops.append(Resize(int(image_size)))
+    elif include_default_random_crop:
+        train_ops.append(
+            RandomCrop(
+                size=int(image_size),
+                padding=int(default_random_crop_padding),
+            )
+        )
+    if horizontal_flip:
+        train_ops.append(RandomHorizontalFlip())
+    train_ops.append(ToTensor())
+    train_ops.append(Normalize(mean=mean, std=std))
+
+    eval_ops: list[object] = []
+    if int(image_size) != int(default_image_size):
+        eval_ops.append(Resize(int(image_size)))
+    eval_ops.extend([
+        ToTensor(),
+        Normalize(mean=mean, std=std),
+    ])
+    return Compose(train_ops), Compose(eval_ops)
+
+
+def _resolve_imagenet_eval_resize_size(*, image_size: int) -> int:
+    """
+    Resolve the pre-crop resize size for ImageNet-style eval transforms.
+
+    Args:
+        image_size (int): Target center-crop size.
+
+    Returns:
+        int: Resize side length that is always >= `image_size`.
+    """
+    min_resize = int(image_size)
+    scaled_resize = int(math.ceil(float(image_size) * _IMAGENET_EVAL_RESIZE_RATIO))
+    return max(min_resize, scaled_resize)
+
+
+def _build_imagenet_train_eval_transforms(
+    *,
+    image_size: int,
+    mean: tuple[float, float, float],
+    std: tuple[float, float, float],
+    random_resized_crop: bool,
+    horizontal_flip: bool,
+) -> tuple[Compose, Compose]:
+    """
+    Build train/eval transforms from transform flags for ImageNet-style datasets.
+
+    Args:
+        image_size (int): Target crop size for train/eval transforms.
+        mean (tuple[float, float, float]): Channel-wise normalization mean.
+        std (tuple[float, float, float]): Channel-wise normalization standard deviation.
+        random_resized_crop (bool): Whether to add `RandomResizedCrop` in train transforms.
+        horizontal_flip (bool): Whether to add `RandomHorizontalFlip` in train transforms.
+
+    Returns:
+        tuple[Compose, Compose]: `(train_transform, eval_transform)` transforms.
+    """
+    resize_size = _resolve_imagenet_eval_resize_size(image_size=int(image_size))
+    train_ops: list[object] = []
+    if random_resized_crop:
+        train_ops.append(RandomResizedCrop(size=int(image_size)))
+    else:
+        train_ops.extend([
+            Resize(resize_size),
+            CenterCrop(int(image_size)),
+        ])
+    if horizontal_flip:
+        train_ops.append(RandomHorizontalFlip())
+    train_ops.extend([
+        ToTensor(),
+        Normalize(mean=mean, std=std),
+    ])
+
+    eval_ops = [
+        Resize(resize_size),
+        CenterCrop(int(image_size)),
+        ToTensor(),
+        Normalize(mean=mean, std=std),
+    ]
+    return Compose(train_ops), Compose(eval_ops)
 
 
 class ScenarioBuilder(ABC):
@@ -58,6 +228,9 @@ class ScenarioBuilder(ABC):
         repair_split_fraction: float,
         dataset_path: str | Path | None = None,
         seed: int = 1,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
     ) -> NCScenario:
         """
         Create an Avalanche `NCScenario` for class-incremental or task-incremental learning.
@@ -85,6 +258,9 @@ class ScenarioBuilder(ABC):
                 backbone training and assigned to the repair stream.
             dataset_path (str | Path | None): Optional root directory for storing the dataset.
             seed (int): Random seed controlling the split and dataloader shuffling.
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
 
         Returns:
             NCScenario: A new Avalanche `NCScenario`.
@@ -99,6 +275,12 @@ class ScenarioBuilder(ABC):
             raise ValueError('`num_experiences` must be a positive integer.')
         if not (0.0 <= float(repair_split_fraction) < 1.0):
             raise ValueError('`repair_split_fraction` must be in the range [0, 1).')
+        if transform_random_resized_crop is not None and not isinstance(transform_random_resized_crop, bool):
+            raise ValueError('`transform_random_resized_crop` must be a boolean when provided.')
+        if transform_horizontal_flip is not None and not isinstance(transform_horizontal_flip, bool):
+            raise ValueError('`transform_horizontal_flip` must be a boolean when provided.')
+        if transform_image_size is not None and int(transform_image_size) <= 0:
+            raise ValueError('`transform_image_size` must be > 0 when provided.')
 
         # Let subclass build the base scenario
         benchmark = self._build_scenario(
@@ -106,6 +288,9 @@ class ScenarioBuilder(ABC):
             return_task_id=return_task_id,
             dataset_path=dataset_path,
             seed=seed,
+            transform_random_resized_crop=transform_random_resized_crop,
+            transform_horizontal_flip=transform_horizontal_flip,
+            transform_image_size=transform_image_size,
         )
 
         # Inject global example indices (`original_indices`)
@@ -136,6 +321,9 @@ class ScenarioBuilder(ABC):
         return_task_id: bool,
         dataset_path: str | Path | None = None,
         seed: int = 1,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
     ) -> NCScenario:
         """
         Build the base scenario.
@@ -148,6 +336,9 @@ class ScenarioBuilder(ABC):
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Optional root directory for storing the dataset.
             seed (int): Random seed controlling the split and dataloader shuffling.
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
 
         Returns:
             NCScenario: A new Avalanche `NCScenario` (without `original_indices` and `repair_stream` yet).
@@ -923,6 +1114,9 @@ class SplitCIFAR100ScenarioBuilder(ScenarioBuilder):
         return_task_id: bool,
         dataset_path: str | Path | None = None,
         seed: int = 1,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
     ) -> NCScenario:
         """
         Build the standard Split CIFAR-100 class-incremental scenario.
@@ -932,16 +1126,43 @@ class SplitCIFAR100ScenarioBuilder(ScenarioBuilder):
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Optional root directory for storing the CIFAR-100 dataset.
             seed (int): Random seed controlling the split and dataloader shuffling.
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
 
         Returns:
             NCScenario: Avalanche scenario configured for class-incremental learning.
         """
+        random_resized_crop = _resolve_transform_toggle(
+            toggle=transform_random_resized_crop,
+            default_toggle=_DEFAULT_RANDOM_RESIZED_CROP,
+        )
+        horizontal_flip = _resolve_transform_toggle(
+            toggle=transform_horizontal_flip,
+            default_toggle=_DEFAULT_HORIZONTAL_FLIP,
+        )
+        image_size = _resolve_image_size(
+            image_size=transform_image_size,
+            default_image_size=_CIFAR100_IMAGE_SIZE,
+        )
+        train_transform, eval_transform = _build_square_dataset_train_eval_transforms(
+            image_size=image_size,
+            default_image_size=_CIFAR100_IMAGE_SIZE,
+            mean=_CIFAR100_MEAN,
+            std=_CIFAR100_STD,
+            random_resized_crop=random_resized_crop,
+            horizontal_flip=horizontal_flip,
+            include_default_random_crop=True,
+            default_random_crop_padding=4,
+        )
         return SplitCIFAR100(
             n_experiences=num_experiences,
             return_task_id=return_task_id,
             seed=seed,
             class_ids_from_zero_from_first_exp=True,
             dataset_root=dataset_path,
+            train_transform=train_transform,
+            eval_transform=eval_transform,
         )
 
 
@@ -957,6 +1178,9 @@ class SplitTinyImageNetScenarioBuilder(ScenarioBuilder):
         return_task_id: bool,
         dataset_path: str | Path | None = None,
         seed: int = 1,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
     ) -> NCScenario:
         """
         Build the standard Split Tiny-ImageNet class-incremental scenario.
@@ -966,16 +1190,41 @@ class SplitTinyImageNetScenarioBuilder(ScenarioBuilder):
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Optional root directory for storing the Tiny-ImageNet dataset.
             seed (int): Random seed controlling the split and dataloader shuffling.
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
 
         Returns:
             NCScenario: Avalanche scenario configured for class-incremental learning.
         """
+        random_resized_crop = _resolve_transform_toggle(
+            toggle=transform_random_resized_crop,
+            default_toggle=_DEFAULT_RANDOM_RESIZED_CROP,
+        )
+        horizontal_flip = _resolve_transform_toggle(
+            toggle=transform_horizontal_flip,
+            default_toggle=_DEFAULT_HORIZONTAL_FLIP,
+        )
+        image_size = _resolve_image_size(
+            image_size=transform_image_size,
+            default_image_size=_TINY_IMAGENET_IMAGE_SIZE,
+        )
+        train_transform, eval_transform = _build_square_dataset_train_eval_transforms(
+            image_size=image_size,
+            default_image_size=_TINY_IMAGENET_IMAGE_SIZE,
+            mean=_TINY_IMAGENET_MEAN,
+            std=_TINY_IMAGENET_STD,
+            random_resized_crop=random_resized_crop,
+            horizontal_flip=horizontal_flip,
+        )
         return SplitTinyImageNet(
             n_experiences=num_experiences,
             return_task_id=return_task_id,
             seed=seed,
             class_ids_from_zero_from_first_exp=True,
             dataset_root=dataset_path,
+            train_transform=train_transform,
+            eval_transform=eval_transform,
         )
 
 
@@ -1070,6 +1319,9 @@ class SplitImageNetRScenarioBuilder(ScenarioBuilder):
         return_task_id: bool,
         dataset_path: str | Path | None = None,
         seed: int = 1,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
     ) -> NCScenario:
         """
         Build a class-incremental ImageNet-R scenario from local folder datasets.
@@ -1079,6 +1331,9 @@ class SplitImageNetRScenarioBuilder(ScenarioBuilder):
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Root path that contains ImageNet-R images.
             seed (int): Random seed controlling class order and deterministic holdout splitting.
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
 
         Returns:
             NCScenario: Avalanche scenario configured for class-incremental learning.
@@ -1088,7 +1343,11 @@ class SplitImageNetRScenarioBuilder(ScenarioBuilder):
             dataset_path=dataset_path,
             seed=seed,
         )
-        train_transform, eval_transform = self._build_default_transforms()
+        train_transform, eval_transform = self._build_default_transforms(
+            transform_random_resized_crop=transform_random_resized_crop,
+            transform_horizontal_flip=transform_horizontal_flip,
+            transform_image_size=transform_image_size,
+        )
         benchmark = self._build_nc_benchmark(
             train_dataset=train_dataset,
             test_dataset=test_dataset,
@@ -1385,28 +1644,42 @@ class SplitImageNetRScenarioBuilder(ScenarioBuilder):
         return sorted(train_indices), sorted(test_indices)
 
     @staticmethod
-    def _build_default_transforms() -> tuple[Compose, Compose]:
+    def _build_default_transforms(
+        *,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
+    ) -> tuple[Compose, Compose]:
         """
         Build default ImageNet-style transforms for train/eval streams.
+
+        Args:
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
 
         Returns:
             tuple[Compose, Compose]: `(train_transform, eval_transform)` transforms.
         """
-        mean = (0.485, 0.456, 0.406)
-        std = (0.229, 0.224, 0.225)
-        train_transform = Compose([
-            Resize(256),
-            CenterCrop(224),
-            ToTensor(),
-            Normalize(mean=mean, std=std),
-        ])
-        eval_transform = Compose([
-            Resize(256),
-            CenterCrop(224),
-            ToTensor(),
-            Normalize(mean=mean, std=std),
-        ])
-        return train_transform, eval_transform
+        random_resized_crop = _resolve_transform_toggle(
+            toggle=transform_random_resized_crop,
+            default_toggle=_DEFAULT_RANDOM_RESIZED_CROP,
+        )
+        horizontal_flip = _resolve_transform_toggle(
+            toggle=transform_horizontal_flip,
+            default_toggle=_DEFAULT_HORIZONTAL_FLIP,
+        )
+        image_size = _resolve_image_size(
+            image_size=transform_image_size,
+            default_image_size=_IMAGENET_IMAGE_SIZE,
+        )
+        return _build_imagenet_train_eval_transforms(
+            image_size=image_size,
+            mean=_IMAGENET_MEAN,
+            std=_IMAGENET_STD,
+            random_resized_crop=random_resized_crop,
+            horizontal_flip=horizontal_flip,
+        )
 
     @staticmethod
     def _build_nc_benchmark(

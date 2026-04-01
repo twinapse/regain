@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from regain.experiments.config import EvaluationConfig
+from regain.experiments.config import TransformsConfig
 from regain.experiments.config import load_experiment_config
 
 
@@ -114,6 +115,83 @@ class TestEvaluationConfigParsing:
         with pytest.raises(ValueError, match='keys should not override `evaluation`'):
             load_experiment_config(config_path)
 
+
+class TestTransformsConfigParsing:
+    def test_parses_nested_transforms_config(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['transforms'] = {
+            'random_resized_crop': True,
+            'horizontal_flip': False,
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        config = load_experiment_config(config_path)
+
+        assert config.transforms == TransformsConfig(
+            random_resized_crop=True,
+            horizontal_flip=False,
+        )
+
+    def test_uses_transforms_defaults_when_section_is_missing(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        config = load_experiment_config(config_path)
+
+        assert config.transforms == TransformsConfig()
+
+    def test_rejects_non_mapping_transforms_section(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['transforms'] = ['invalid']
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='`transforms` must be a mapping when provided'):
+            load_experiment_config(config_path)
+
+    def test_rejects_non_boolean_random_resized_crop(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['transforms'] = {
+            'random_resized_crop': 'true',
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='`transforms.random_resized_crop` must be a boolean'):
+            load_experiment_config(config_path)
+
+    def test_rejects_non_boolean_horizontal_flip(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['transforms'] = {
+            'horizontal_flip': 'false',
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='`transforms.horizontal_flip` must be a boolean'):
+            load_experiment_config(config_path)
+
+    def test_rejects_run_level_transforms_override(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['transforms'] = {
+            'random_resized_crop': None,
+            'horizontal_flip': None,
+        }
+        payload['runs'] = [
+            {
+                'name': 'invalid_run',
+                'transforms': {
+                    'horizontal_flip': False,
+                },
+            },
+        ]
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='keys should not override `transforms`'):
+            load_experiment_config(config_path)
 
 class TestRepairConfigParsing:
     def test_parses_repair_split_fraction_field(self, tmp_path: Path) -> None:
