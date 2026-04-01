@@ -12,6 +12,8 @@ from pathlib import Path
 ####################################################################################################
 from avalanche.benchmarks import SplitCIFAR100
 from avalanche.benchmarks import SplitTinyImageNet
+from avalanche.benchmarks.classic import SplitCUB200
+from avalanche.benchmarks.datasets import default_dataset_location
 from avalanche.benchmarks.scenarios.deprecated.classification_scenario import ClassificationStream
 from avalanche.benchmarks.scenarios.deprecated.dataset_scenario import StreamDef
 from avalanche.benchmarks.scenarios.deprecated.generators import nc_benchmark
@@ -51,6 +53,10 @@ _CIFAR100_STD = (0.2673, 0.2564, 0.2762)
 _TINY_IMAGENET_IMAGE_SIZE = 64
 _TINY_IMAGENET_MEAN = (0.4914, 0.4822, 0.4465)
 _TINY_IMAGENET_STD = (0.2023, 0.1994, 0.2010)
+
+_CUB200_IMAGE_SIZE = 224
+_CUB200_MEAN = (0.4914, 0.4822, 0.4465)
+_CUB200_STD = (0.2023, 0.1994, 0.2010)
 
 _IMAGENET_IMAGE_SIZE = 224
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -1226,6 +1232,258 @@ class SplitTinyImageNetScenarioBuilder(ScenarioBuilder):
             train_transform=train_transform,
             eval_transform=eval_transform,
         )
+
+
+class SplitCUB200ScenarioBuilder(ScenarioBuilder):
+    """
+    Scenario builder for Split CUB-200.
+
+    This builder uses Avalanche's `SplitCUB200` benchmark while reusing the
+    module-level transform defaults and ensuring the dataset is available from
+    the current CaltechDATA archive.
+    """
+
+    _ARCHIVE_URL = 'https://data.caltech.edu/records/65de6-vp158/files/CUB_200_2011.tgz?download=1'
+    _ARCHIVE_FILENAME = 'CUB_200_2011.tgz'
+    _DATASET_DIR_NAME = 'CUB_200_2011'
+    _ARCHIVE_MD5 = '97eceeb196236b17998738112f37df78'
+    _NUM_CLASSES = 200
+    _REQUIRED_METADATA_FILES = (
+        'bounding_boxes.txt',
+        'image_class_labels.txt',
+        'images.txt',
+        'train_test_split.txt',
+    )
+
+    def _build_scenario(
+        self,
+        *,
+        num_experiences: int,
+        return_task_id: bool,
+        dataset_path: str | Path | None = None,
+        seed: int = 1,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
+    ) -> NCScenario:
+        """
+        Build the standard Split CUB-200 class-incremental scenario.
+
+        Args:
+            num_experiences (int): Number of experiences used to split classes.
+            return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
+            dataset_path (str | Path | None): Optional dataset root or extracted `CUB_200_2011` directory.
+            seed (int): Random seed controlling class order.
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
+
+        Returns:
+            NCScenario: Avalanche scenario configured for class-incremental learning.
+        """
+        dataset_root = self._ensure_cub200_available(
+            root_hint=self._resolve_download_root(dataset_path=dataset_path),
+        )
+        train_transform, eval_transform = self._build_default_transforms(
+            transform_random_resized_crop=transform_random_resized_crop,
+            transform_horizontal_flip=transform_horizontal_flip,
+            transform_image_size=transform_image_size,
+        )
+        return SplitCUB200(
+            n_experiences=num_experiences,
+            classes_first_batch=self._resolve_classes_first_batch(
+                num_experiences=num_experiences,
+            ),
+            return_task_id=return_task_id,
+            seed=seed,
+            class_ids_from_zero_from_first_exp=True,
+            train_transform=train_transform,
+            eval_transform=eval_transform,
+            dataset_root=dataset_root,
+        )
+
+    @staticmethod
+    def _build_default_transforms(
+        *,
+        transform_random_resized_crop: bool | None = None,
+        transform_horizontal_flip: bool | None = None,
+        transform_image_size: int | None = None,
+    ) -> tuple[Compose, Compose]:
+        """
+        Build default ImageNet-style transforms for CUB-200 train/eval streams.
+
+        Args:
+            transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
+            transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
+            transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
+
+        Returns:
+            tuple[Compose, Compose]: `(train_transform, eval_transform)` transforms.
+        """
+        random_resized_crop = _resolve_transform_toggle(
+            toggle=transform_random_resized_crop,
+            default_toggle=_DEFAULT_RANDOM_RESIZED_CROP,
+        )
+        horizontal_flip = _resolve_transform_toggle(
+            toggle=transform_horizontal_flip,
+            default_toggle=_DEFAULT_HORIZONTAL_FLIP,
+        )
+        image_size = _resolve_image_size(
+            image_size=transform_image_size,
+            default_image_size=_CUB200_IMAGE_SIZE,
+        )
+        return _build_imagenet_train_eval_transforms(
+            image_size=image_size,
+            mean=_CUB200_MEAN,
+            std=_CUB200_STD,
+            random_resized_crop=random_resized_crop,
+            horizontal_flip=horizontal_flip,
+        )
+
+    @classmethod
+    def _resolve_classes_first_batch(cls, *, num_experiences: int) -> int:
+        """
+        Compute a valid first-batch class count for Avalanche's `SplitCUB200`.
+
+        Avalanche models CUB-200 as one first experience with
+        `classes_first_batch` classes and the remaining classes split evenly
+        across the later experiences. This helper assigns any remainder to the
+        first experience so arbitrary valid experience counts remain supported.
+
+        Args:
+            num_experiences (int): Requested number of experiences.
+
+        Returns:
+            int: Number of classes to place in the first experience.
+
+        Raises:
+            ValueError: If the number of experiences exceeds the number of classes.
+        """
+        total_classes = cls._NUM_CLASSES
+        if num_experiences > total_classes:
+            raise ValueError(
+                f'CUB-200 supports at most {total_classes} experiences, got {num_experiences}.'
+            )
+        if num_experiences == 1:
+            return total_classes
+
+        classes_per_later_experience = total_classes // num_experiences
+        if classes_per_later_experience <= 0:
+            raise ValueError(
+                f'CUB-200 cannot allocate classes across {num_experiences} experiences.'
+            )
+        return total_classes - (classes_per_later_experience * (num_experiences - 1))
+
+    @classmethod
+    def _resolve_download_root(cls, *, dataset_path: str | Path | None) -> Path:
+        """
+        Resolve the root directory used for CUB-200 storage.
+
+        Args:
+            dataset_path (str | Path | None): Optional user-provided path.
+
+        Returns:
+            Path: Resolved local root path.
+        """
+        if dataset_path is None:
+            return Path(default_dataset_location(cls._DATASET_DIR_NAME))
+        return Path(dataset_path)
+
+    @classmethod
+    def _ensure_cub200_available(cls, *, root_hint: Path) -> Path:
+        """
+        Ensure the extracted CUB-200 dataset is available locally.
+
+        Args:
+            root_hint (Path): Preferred local storage root or extracted dataset directory.
+
+        Returns:
+            Path: Root directory that contains the extracted `CUB_200_2011` folder.
+
+        Raises:
+            ValueError: If the dataset path is invalid or extraction fails.
+        """
+        if root_hint.exists() and not root_hint.is_dir():
+            raise ValueError(f'CUB-200 dataset path must be a directory: {root_hint}')
+
+        normalized_root = cls._normalize_dataset_root(root=root_hint)
+        if cls._has_extracted_dataset(root=normalized_root):
+            return normalized_root
+
+        normalized_root.mkdir(parents=True, exist_ok=True)
+        download_and_extract_archive(
+            url=cls._ARCHIVE_URL,
+            download_root=str(normalized_root),
+            filename=cls._ARCHIVE_FILENAME,
+            md5=cls._ARCHIVE_MD5,
+            remove_finished=False,
+        )
+        if cls._has_extracted_dataset(root=normalized_root):
+            return normalized_root
+
+        raise ValueError(
+            'CUB-200 dataset not found after download. '
+            f'Expected extracted files under: {normalized_root / cls._DATASET_DIR_NAME}'
+        )
+
+    @classmethod
+    def _normalize_dataset_root(cls, *, root: Path) -> Path:
+        """
+        Normalize a user/default path to the parent directory expected by this builder.
+
+        Args:
+            root (Path): Candidate dataset root.
+
+        Returns:
+            Path: Normalized root directory.
+        """
+        if cls._is_extracted_dataset_dir(path=root):
+            return root.parent
+        return root
+
+    @classmethod
+    def _has_extracted_dataset(cls, *, root: Path) -> bool:
+        """
+        Check whether the extracted CUB-200 dataset exists under a root.
+
+        Args:
+            root (Path): Candidate root directory.
+
+        Returns:
+            bool: `True` when the extracted dataset tree is available.
+        """
+        dataset_dir = root / cls._DATASET_DIR_NAME
+        if not dataset_dir.is_dir():
+            return False
+        images_dir = dataset_dir / 'images'
+        if not images_dir.is_dir():
+            return False
+        for metadata_name in cls._REQUIRED_METADATA_FILES:
+            if not (dataset_dir / metadata_name).is_file():
+                return False
+        return True
+
+    @classmethod
+    def _is_extracted_dataset_dir(cls, *, path: Path) -> bool:
+        """
+        Check whether a path is the extracted `CUB_200_2011` directory itself.
+
+        Args:
+            path (Path): Candidate extracted dataset directory.
+
+        Returns:
+            bool: `True` when the path points directly to the extracted dataset directory.
+        """
+        if not path.is_dir():
+            return False
+        if path.name != cls._DATASET_DIR_NAME:
+            return False
+        if not (path / 'images').is_dir():
+            return False
+        for metadata_name in cls._REQUIRED_METADATA_FILES:
+            if not (path / metadata_name).is_file():
+                return False
+        return True
 
 
 class _ImageNetRSubsetRawDataset(Dataset):

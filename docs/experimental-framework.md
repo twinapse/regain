@@ -2,7 +2,7 @@
 
 This document specifies the benchmark protocol, controller regimes, evaluation behavior, and metric logging
 organization used to measure **retrieval-correctable forgetting** on supported class-incremental
-learning (CIL) scenarios (**SplitCIFAR-100**, **Split Tiny-ImageNet**, and **Split ImageNet-R**).
+learning (CIL) scenarios (**SplitCIFAR-100**, **Split CUB-200**, **Split Tiny-ImageNet**, and **Split ImageNet-R**).
 
 ---
 
@@ -66,6 +66,11 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 - Scenario builder: **Avalanche `SplitTinyImageNet`**
 - Data source: Managed automatically by Avalanche (download and dataset handling).
 
+#### `split_cub200`
+- Dataset: **CUB-200-2011** (200 bird species, variable-resolution natural images)
+- Scenario builder: **Avalanche `SplitCUB200`**
+- Data source: Downloaded from the CaltechDATA CUB-200-2011 archive.
+
 #### `split_imagenet_r`
 - Dataset: **ImageNet-R** (200 classes)
 - Scenario builder: **custom `SplitImageNetR`**
@@ -76,6 +81,7 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 ### Task definition (Avalanche)
 - For `split_cifar100`, we use `SplitCIFAR100(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
 - For `split_tiny_imagenet`, we use `SplitTinyImageNet(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
+- For `split_cub200`, we use `SplitCUB200(n_experiences=<num_experiences>, classes_first_batch=<computed>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)` with scenario-managed dataset download.
 - For `split_imagenet_r`, we resolve raw train/test datasets and then build a class-incremental NC benchmark with `return_task_id=False`.
 - Each experience corresponds to one task $T_i$.
 - The class partition/order is determined by `seed` and scenario generator logic.

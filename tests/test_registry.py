@@ -20,8 +20,13 @@ class TestScenarioRegistry:
         scenarios = list_scenarios()
         assert scenarios == tuple(sorted(scenarios))
         assert 'split_cifar100' in scenarios
+        assert 'split_cub200' in scenarios
         assert 'split_imagenet_r' in scenarios
         assert 'split_tiny_imagenet' in scenarios
+
+    def test_get_scenario_builder_path_resolves_split_cub200(self) -> None:
+        builder_path = get_scenario_builder_path('split_cub200')
+        assert builder_path == 'regain.avalanche_utils.scenarios.SplitCUB200ScenarioBuilder'
 
     def test_get_scenario_builder_path_resolves_split_imagenet_r(self) -> None:
         builder_path = get_scenario_builder_path('split_imagenet_r')
