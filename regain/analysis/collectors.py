@@ -43,7 +43,6 @@ from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
-from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NS_SEP
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import PARAM_CONTROLLER_TYPE
@@ -51,10 +50,10 @@ from regain.constants import PARAM_NUM_CLASSES
 from regain.constants import PARAM_REPAIR_BUDGET_FRACTION
 from regain.constants import PARAM_REPAIR_SPLIT_FRACTION
 from regain.constants import PARAM_SEED
-from regain.constants import RUN_ACC_EXP
-from regain.constants import RUN_ACC_FINAL
-from regain.constants import RUN_ACC_FINAL_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_AVG_CTRL
+from regain.constants import RUN_ACC_FINAL_TEST
+from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_TEST_AVG_CTRL
+from regain.constants import RUN_ACC_REF_TEST
 from regain.constants import RUN_CALIB_AECE
 from regain.constants import RUN_CALIB_BRIER
 from regain.constants import RUN_CALIB_ECE
@@ -89,11 +88,6 @@ __all__ = [
 _COLUMN_SCENARIO = 'scenario'
 _COLUMN_STRATEGY_NAME = 'strategy_name'
 
-# Summary metric keys (run.summary.* namespace).
-_SUMMARY_ACC_FINAL_AVG_BASE = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
-_SUMMARY_ACC_FINAL_AVG_CTRL = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
-_SUMMARY_RHO_AVG = f'{NAMESPACE_SUMMARY}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'
-
 _PARAM_BACKBONE_STRATEGY_NAME = 'backbone.training.strategy.name'
 _PARAM_CONTROLLER_NAME = 'controller.name'
 _CONTROLLER_TYPE_NONE = 'none'
@@ -124,20 +118,20 @@ _NS_SEP_ESCAPED = re.escape(NS_SEP)
 
 # Regex patterns for parsing per-experience MLflow metric keys.
 # Example keys:
-# `run.accuracy.exp.exp000.base`, `run.accuracy.final.exp000.ctrl`,
+# `run.eval.acc.ref.test.exp000.base`, `run.eval.acc.final.test.exp000.ctrl`,
 # `run.repair.rho.exp000`, etc.
 _ACC_EXP_BASE_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_EXP)}'
+    rf'^{re.escape(RUN_ACC_REF_TEST)}'
     rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
     rf'{_NS_SEP_ESCAPED}base$'
 )
 _ACC_FINAL_BASE_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_FINAL)}'
+    rf'^{re.escape(RUN_ACC_FINAL_TEST)}'
     rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
     rf'{_NS_SEP_ESCAPED}base$'
 )
 _ACC_FINAL_CTRL_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_FINAL)}'
+    rf'^{re.escape(RUN_ACC_FINAL_TEST)}'
     rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
     rf'{_NS_SEP_ESCAPED}ctrl$'
 )
@@ -348,8 +342,8 @@ def _has_logged_ctrl_metrics(
         bool: True if repair-controller metrics are available, else False.
     """
     if (
-        _SUMMARY_ACC_FINAL_AVG_CTRL in metrics
-        or _SUMMARY_RHO_AVG in metrics
+        RUN_ACC_FINAL_TEST_AVG_CTRL in metrics
+        or RUN_RHO_AVG in metrics
     ):
         return True
 
@@ -516,10 +510,10 @@ def collect_experiment_tables(
             b = float(repair_budget_fraction) if repair_budget_fraction is not None else None
             repair_budget_total: int | None = None
 
-            # Prefer canonical summary metrics, then compute from per-task values.
-            rho_avg = to_float(metrics.get(_SUMMARY_RHO_AVG))
-            a_ctrl_avg = to_float(metrics.get(_SUMMARY_ACC_FINAL_AVG_CTRL))
-            a_base_avg = to_float(metrics.get(_SUMMARY_ACC_FINAL_AVG_BASE))
+            # Prefer direct aggregate metrics, then compute from per-task values.
+            rho_avg = to_float(metrics.get(RUN_RHO_AVG))
+            a_ctrl_avg = to_float(metrics.get(RUN_ACC_FINAL_TEST_AVG_CTRL))
+            a_base_avg = to_float(metrics.get(RUN_ACC_FINAL_TEST_AVG_BASE))
             calib_max_ece = to_float(metrics.get(RUN_CALIB_MAX_ECE))
             latency_base_ms = to_float(metrics.get(RUN_LATENCY_MS_PER_SAMPLE_BASE))
             latency_base_sps = to_float(metrics.get(RUN_LATENCY_SAMPLES_PER_SEC_BASE))
@@ -657,8 +651,8 @@ def collect_experiment_tables(
                 COLUMN_B: b,
                 COLUMN_CONTROLLER_MODEL_PARAM_COUNT: ctrl_param_count,
                 RUN_RHO_AVG: rho_avg,
-                RUN_ACC_FINAL_AVG_CTRL: a_ctrl_avg,
-                RUN_ACC_FINAL_AVG_BASE: a_base_avg,
+                RUN_ACC_FINAL_TEST_AVG_CTRL: a_ctrl_avg,
+                RUN_ACC_FINAL_TEST_AVG_BASE: a_base_avg,
                 RUN_CALIB_MAX_ECE: calib_max_ece,
                 RUN_LATENCY_MS_PER_SAMPLE_BASE: latency_base_ms,
                 RUN_LATENCY_SAMPLES_PER_SEC_BASE: latency_base_sps,

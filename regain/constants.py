@@ -35,14 +35,17 @@ __all__ = [
     'NAMESPACE_DEBUG',
     'NAMESPACE_EVAL',
     'NAMESPACE_RUN',
-    'NAMESPACE_SUMMARY',
     'NAMESPACE_TRAIN',
     'NS_SEP',
     # ---- Per-run metric keys (MLflow) ----
-    'RUN_ACC_EXP',
-    'RUN_ACC_FINAL',
-    'RUN_ACC_FINAL_AVG_BASE',
-    'RUN_ACC_FINAL_AVG_CTRL',
+    'RUN_ACC_FINAL_TEST',
+    'RUN_ACC_FINAL_TEST_AVG_BASE',
+    'RUN_ACC_FINAL_TEST_AVG_CTRL',
+    'RUN_ACC_FINAL_TRAIN',
+    'RUN_ACC_FINAL_TRAIN_AVG_BASE',
+    'RUN_ACC_FINAL_TRAIN_AVG_CTRL',
+    'RUN_ACC_REF_TEST',
+    'RUN_ACC_REF_TRAIN',
     'RUN_CALIB_AECE',
     'RUN_CALIB_BRIER',
     'RUN_CALIB_ECE',
@@ -130,7 +133,6 @@ NAMESPACE_RUN = 'run'
 NAMESPACE_ANALYSIS = 'analysis'
 NAMESPACE_TRAIN = f'{NAMESPACE_RUN}{NS_SEP}train'
 NAMESPACE_EVAL = f'{NAMESPACE_RUN}{NS_SEP}eval'
-NAMESPACE_SUMMARY = f'{NAMESPACE_RUN}{NS_SEP}summary'
 NAMESPACE_DEBUG = f'{NAMESPACE_RUN}{NS_SEP}debug'
 
 ########################
@@ -203,13 +205,23 @@ COLUMN_TOTAL_COST = 'total_cost'
 
 _RUN = NAMESPACE_RUN  # shorthand for building metric strings
 
-# Accuracy vectors — per-experience, with base/ctrl suffix appended at log time
-RUN_ACC_EXP = f'{_RUN}{NS_SEP}accuracy{NS_SEP}exp'           # run.accuracy.exp  (+ .exp###.base)
-RUN_ACC_FINAL = f'{_RUN}{NS_SEP}accuracy{NS_SEP}final'       # run.accuracy.final (+ .exp###.base|ctrl)
-
-# Accuracy aggregates — per-run averages across experiences
-RUN_ACC_FINAL_AVG_BASE = f'{_RUN}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
-RUN_ACC_FINAL_AVG_CTRL = f'{_RUN}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
+# Unified accuracy metrics under `run.eval.acc.*`.
+RUN_ACC_REF_TEST = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}ref{NS_SEP}test'
+RUN_ACC_REF_TRAIN = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}ref{NS_SEP}train'
+RUN_ACC_FINAL_TEST = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}test'
+RUN_ACC_FINAL_TRAIN = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}train'
+RUN_ACC_FINAL_TEST_AVG_BASE = (
+    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}test{NS_SEP}avg{NS_SEP}base'
+)
+RUN_ACC_FINAL_TEST_AVG_CTRL = (
+    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}test{NS_SEP}avg{NS_SEP}ctrl'
+)
+RUN_ACC_FINAL_TRAIN_AVG_BASE = (
+    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}train{NS_SEP}avg{NS_SEP}base'
+)
+RUN_ACC_FINAL_TRAIN_AVG_CTRL = (
+    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}train{NS_SEP}avg{NS_SEP}ctrl'
+)
 
 # Rho (correctable fraction)
 RUN_RHO = f'{_RUN}{NS_SEP}repair{NS_SEP}rho'                          # run.repair.rho (+ .exp###)
@@ -260,7 +272,7 @@ RUN_EPS = f'{_RUN}{NS_SEP}eps'
 
 _ANA = NAMESPACE_ANALYSIS  # shorthand
 
-ANALYSIS_ACC_FINAL_AVG_CTRL = f'{_ANA}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
+ANALYSIS_ACC_FINAL_AVG_CTRL = f'{_ANA}{NS_SEP}acc{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
 ANALYSIS_RHO_AVG = f'{_ANA}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'
 
 ################################################

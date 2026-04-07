@@ -70,13 +70,11 @@ def export_runs_to_csvs(
     )
     rows: list[dict[str, Any]] = []
     parent_param_keys: set[str] = set()
-    parent_metric_keys: set[str] = set()
 
     for run in all_runs:
-        row = build_mlflow_run_columns(run=run)
+        row = build_mlflow_run_columns(run=run, client=client)
         rows.append(row)
         parent_param_keys.update(run.data.params.keys())
-        parent_metric_keys.update(run.data.metrics.keys())
 
     metadata_columns = [
         COLUMN_RUN_ID,
@@ -87,7 +85,12 @@ def export_runs_to_csvs(
     ]
     reserved_keys = set(metadata_columns)
     param_columns = sorted(key for key in parent_param_keys if key not in reserved_keys)
-    metric_columns = sorted(key for key in parent_metric_keys if key not in reserved_keys)
+    metric_columns = sorted({
+        key
+        for row in rows
+        for key in row.keys()
+        if key not in reserved_keys and key not in parent_param_keys
+    })
 
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     params_path.parent.mkdir(parents=True, exist_ok=True)

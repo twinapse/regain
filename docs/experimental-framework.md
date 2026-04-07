@@ -171,24 +171,24 @@ This codebase distinguishes when a controller acts and how evaluation is execute
 Evaluation flow per run:
 
 - After each training experience, one full-stream evaluation pass runs over all test experiences.
-- The same checkpoint evaluation pass drives:
-  - `run.eval.*` metrics,
-  - prediction artifact capture under `predictions/`,
-  - end-of-experience base accuracy point logging (`run.accuracy.exp.exp###.base`).
-- For repair-controller runs with `repair.fit_schedule=per_experience`, the same checkpoint pass is also mirrored to
-  `run.exp###.*`.
-- At training end, `run.final.*` metrics are emitted from the final checkpoint evaluation results.
-- In repair-controller runs, base baselines ($A_{\text{exp,base}}$, $A_{\text{base}}$) are inherited from the
-  reserved `backbone` run. In backbone/prevention runs, they are computed from the current run.
+- That checkpoint evaluation pass drives:
+  - canonical `run.eval.forgetting.*` / `run.eval.transfer.*` histories,
+  - prediction artifact capture under `predictions/`.
+- After each training experience, explicit single-experience reference probes log
+  `run.eval.acc.ref.<stream>.exp###.base`, where `<stream>` is `train` or `test`.
+- Raw checkpoint-by-checkpoint posthoc accuracy history is not logged under generic `run.eval.*`.
+- At training end, final accuracy metrics are emitted under `run.eval.acc.final.*`.
+- In repair-controller runs, base accuracies are measured with controller correction disabled on the shared backbone
+  trajectory, while baseline diagnostic/calibration artifact vectors still come from the reserved `backbone` run.
 
 Within that flow, evaluation cadence is controlled by two knobs:
 
 1. `evaluation.avalanche_schedule` controls which Avalanche metric families are enabled for `run.eval.*`:
    - `per_experience`: includes forward-transfer metrics.
    - `final_only`: excludes forward-transfer metrics.
-2. `repair.fit_schedule` (repair controllers) controls repair fitting cadence and posthoc raw evaluation cadence:
-   - `per_experience`: fit after each experience; `run.exp###.*` metrics are emitted after each experience.
-   - `final_only`: fit once after training; no per-experience `run.exp###.*` metrics are emitted.
+2. `repair.fit_schedule` (repair controllers) controls repair fitting cadence:
+   - `per_experience`: fit after each experience.
+   - `final_only`: fit once after training.
 
 >ℹ️ Metric placement and metric namespaces are defined in [section 7](#7-metric-logging--reporting-mlflow).
 
@@ -198,8 +198,11 @@ When one or more configured controller runs are present:
   - automatically executing that dedicated reserved `backbone` run in the current experiment when it does not exist, or
   - loading an existing `backbone` run from `backbone.source_experiment`.
 - `backbone.source_experiment` reuse requires that source `backbone` run to contain
-  backbone checkpoint artifacts (i.e., checkpoints must have been saved in that source run), and base
-  baseline vectors (`acc.exp.base`, `acc.final.base`) available as either metrics or in `analysis_artifacts.json`.
+  backbone checkpoint artifacts (i.e., checkpoints must have been saved in that source run), plus a complete
+  `analysis_artifacts.json` payload.
+  That artifact must provide the base baseline vectors (`acc.exp.base`, `acc.final.base`) and the required
+  baseline diagnostic/calibration vectors consumed by repair-run analysis.
+  Metric-only baselines are not sufficient for source-run reuse.
 - Repair-run downstream analysis enforces a baseline-only policy:
   - diagnostic vectors and analysis calibration vectors (`run.calibration.ece`, `run.calibration.aece`, `run.calibration.nll`) are sourced from
     base `analysis_artifacts.json`;
@@ -257,7 +260,7 @@ When one or more configured controller runs are present:
 - If `runs` is omitted, `null`, or empty, the run executes backbone-only mode:
   - if `backbone.source_experiment` is not set, it logs only the reserved `backbone` run (creating it only when absent);
   - if `backbone.source_experiment` is set, it reuses the source `backbone` run without creating a new local run
-    (requires source backbone checkpoint artifacts and `acc.exp.base`/`acc.final.base` baselines).
+    (requires source backbone checkpoint artifacts and a complete `analysis_artifacts.json` baseline payload).
   - if a local `backbone` run already exists while `backbone` config is non-null, execution is rejected.
 - If `backbone.training` is not set and user-configured runs are present, all configured runs must be repair-controller
   runs (non-repair runs require local backbone training).
@@ -287,7 +290,7 @@ We use two related but distinct concepts alongside the sequential training strea
 - For repair controllers, fitting uses a deterministic stratified **repair fit subset** sampled from each repair set:
   - per experience with repair set size `r_exp`, used samples are `floor(repair.budget_fraction * r_exp)`;
   - class proportions follow the repair-set distribution as closely as possible.
-- Dataset split indices are logged as `splits.tar.gz`, with entries named `{stream}/exp_###.txt`.
+- Dataset split indices are logged as `splits.tar.gz`, with entries named `<stream>/exp_###.txt`.
 - Analysis derives `repair_set_total` as:
   - `0` when `repair.split_fraction == 0.0`;
   - otherwise, the exact total non-empty line count over `repair/exp_*.txt` in `splits.tar.gz`.
@@ -331,7 +334,7 @@ $$
 A_{\text{final}} = \text{Acc}\Big(\text{test}(\{0,\dots,C-1\})\Big)
 $$
 >ℹ️ In practice this corresponds to the posthoc stream accuracy (e.g., `Top1_Acc_Stream`). It is also surfaced as a
-> normalized `run.summary.accuracy.final.avg.base`; see [section 7](#7-metric-logging--reporting-mlflow).
+> normalized `run.eval.acc.final.test.avg.base`; see [section 7](#7-metric-logging--reporting-mlflow).
 
 ---
 
@@ -384,25 +387,24 @@ This section describes **how metrics are organized in MLflow** and **what we rep
 ### 7.1 Metric namespaces
 Metric keys are normalized and namespaced as:
 
-- `run.train.<metric>` for training-time logs
-- `run.eval.<metric>` for checkpoint evaluation logs
-- `run.exp###.<metric>` for per-experience posthoc evaluations (repair runs with `per_experience` schedule)
-- `run.final.<metric>` for the final posthoc evaluation
+- `run.train.loss.*` for Avalanche training-loss metrics
+- `run.train.time.*` for Avalanche time metrics
+- `run.eval.forgetting.*` / `run.eval.transfer.*` for Avalanche eval histories
+- `run.eval.acc.ref.*` / `run.eval.acc.final.*` for reference/final accuracy metrics
 - `run.calibration.<...>` for calibration metrics (for example per-task `run.calibration.<metric>.exp###` and run-level `run.calibration.max_ece`)
 - `run.diagnostics.<...>` for task-level diagnostic metrics (for example `run.diagnostics.<metric>.exp###`)
 - `run.latency.<...>` for base/ctrl latency and throughput
 - `run.repair.seconds` / `run.repair.steps` for repair fit-time resources
-- `run.summary.<...>` for duplicated run-level summary scalars used in dashboards
 
 Cross-run analysis artifacts (CSV columns) use `analysis.<...>` keys.
-Examples: `analysis.repair.rho.avg`, `analysis.accuracy.final.avg.ctrl`, `analysis.latency.ms_ratio.avg`.
+Examples: `analysis.repair.rho.avg`, `analysis.acc.final.avg.ctrl`, `analysis.latency.ms_ratio.avg`.
 
 **Important implications**
-- Runs do not emit paired base/ctrl posthoc metric streams in the same run.
-- In repair-controller runs, base analysis baselines (`acc.exp.base`, `acc.final.base`) are inherited from the `backbone`
-  run; posthoc raw metrics in repair runs correspond to ctrl evaluation.
-- `run.train.*` metrics always correspond to the actual training procedure that was executed:
-  - If a training-time controller was used, `run.train.*` metrics reflect that controller-influenced training.
+- Runs emit posthoc accuracy streams through `run.eval.acc.ref.*` and `run.eval.acc.final.*`.
+- In repair-controller runs, base analysis diagnostics come from the reserved `backbone` artifact payload, while
+  `run.eval.acc.*` base accuracies are logged from controller-off evaluation on the shared backbone trajectory.
+- `run.train.*` metrics always correspond to the training procedure applied in the run:
+  - If a training-time controller is used, `run.train.*` metrics reflect that controller-influenced training.
   - `run.train.*` is not a base/ctrl comparison; it is simply “what happened during training”.
 
 ### 7.2 MLflow run structure
@@ -414,53 +416,56 @@ Analysis collection requires each run to provide:
 - `repair.split_fraction`.
 
 Runs that do not satisfy these analysis requirements are skipped during collection and recorded as run-level failures.
-`regain/cli/run_analysis.py` can still publish successful outputs when invoked with `--allow-partial`.
+`regain/cli/run_analysis.py` can publish successful outputs when invoked with `--allow-partial`.
 When zero runs are successfully collected, analysis outputs are not published and the command exits with failure.
 
-All metrics live on the run. The final posthoc evaluation is always prefixed with `final.`. For repair-controller
-runs with `repair.fit_schedule=per_experience`, per-experience checkpoint metrics are additionally prefixed with the
-checkpoint name (`exp000.`, `exp001.`, ...).
+All metrics live on the run. Unique reference/final accuracy metrics are logged directly under `run.eval.acc.*`.
+Eval-history families such as forgetting and forward transfer stay under `run.eval.*` and use MLflow steps to
+identify the checkpoint that produced each value.
 
 Metric-family placement summary:
 
 | Metric family                          | Key pattern                                         |
 |----------------------------------------|-----------------------------------------------------|
-| Training metrics                       | `run.train.<metric>`                                |
-| Checkpoint evaluation metrics          | `run.eval.<metric>`                                 |
-| Posthoc raw evaluation metrics         | `run.final.<metric>` or `run.exp###.<metric>`       |
+| Training metrics                       | `run.train.loss.*`, `run.train.time.*`              |
+| Eval-history metrics                   | `run.eval.forgetting.*`, `run.eval.transfer.*`      |
+| Reference/final accuracies             | `run.eval.acc.ref.*`, `run.eval.acc.final.*`        |
 | Calibration per-task metrics           | `run.calibration.<metric>.exp###`                         |
 | Diagnostic per-task metrics            | `run.diagnostics.<metric>.exp###`                          |
 | Repair fit resources                   | `run.repair.seconds`, `run.repair.steps`, and suffixed keys |
 | Latency overhead                       | `run.latency.<...>`                                 |
-| Summary duplicate metrics              | `run.summary.<...>`                                 |
 | Cross-run analysis columns             | `analysis.<...>`                                    |
 
 ### 7.3 Where the analysis artifacts live
+Accuracy metric names follow:
+
+- `run.eval.acc.<stage>.<stream>.<target>.<mode>`
+- `<stage>` is `ref` or `final`
+- `<stream>` is `train` or `test`
+- `<target>` is `exp###` (per-task) or `avg` (aggregate)
+- `<mode>` is `base` or `ctrl`
+  - `ctrl` is emitted only for repair controllers
+  - `ref` metrics use `exp###.base` only
+
 After each experience, the evaluation plugin logs:
 
-- Per-task:
-  - `run.accuracy.exp.exp###.base`
+- Per-task reference accuracies: `run.eval.acc.ref.<stream>.exp###.base`
 
 At the end of training, when all end-of-experience base accuracy points are complete, the evaluation plugin logs:
 
-- Per-task:
-  - `run.accuracy.final.exp###.base`
-- Per-task (repair controllers only):
-  - `run.accuracy.final.exp###.ctrl`
-  - `run.repair.rho.exp###` (only for valid tasks)
-- Aggregates:
-  - `run.accuracy.final.avg.base`
-  - `run.summary.accuracy.final.avg.base`
-  - `run.summary.accuracy.exp.avg.base`
-- Aggregates (repair controllers only):
-  - `run.repair.rho.avg`
-  - `run.summary.repair.rho.avg`
-  - `run.accuracy.final.avg.ctrl`
-  - `run.summary.accuracy.final.avg.ctrl`
+- Per-task final accuracies: `run.eval.acc.final.<stream>.exp###.base`
+- Per-task final accuracies for repair controllers: `run.eval.acc.final.<stream>.exp###.ctrl`
+- Per-task repairability for repair controllers: `run.repair.rho.exp###` (only for valid tasks)
+- Aggregate final accuracies: `run.eval.acc.final.<stream>.avg.base`
+- Aggregate final accuracies for repair controllers: `run.eval.acc.final.<stream>.avg.ctrl`
+- Aggregate repairability for repair controllers: `run.repair.rho.avg`
 - Calibration aggregates:
   - `run.calibration.max_ece`:
-    - non-repair runs: maximum per-task ECE over the latest completed eval pass;
-    - repair runs: maximum over baseline artifact `run.calibration.ece` vectors (`max_i run.calibration.ece[i]`).
+    - non-repair runs: the run-level MLflow metric is the maximum per-task ECE over the latest completed eval pass;
+    - repair runs: analysis uses the baseline-only scalar persisted in `analysis_artifacts.json`, computed as
+      `max_i run.calibration.ece[i]` over baseline artifact vectors.
+      The run-level MLflow metric on the repair run comes from the latest completed eval pass and is not the
+      authoritative value for analysis.
 - Additional persisted vectors in `analysis_artifacts.json` (when available):
   - `run.diagnostics.out_of_task_rate`
   - `run.diagnostics.avg_conf`
@@ -472,19 +477,19 @@ At the end of training, when all end-of-experience base accuracy points are comp
 - Additional persisted scalar in `analysis_artifacts.json` (when available):
   - `run.calibration.max_ece`
 - Additional prediction artifact family in MLflow:
-  - `predictions/<eval_tag>/test_exp###_after_exp###.npz`
+- `predictions/<eval_tag>/test_exp###_after_exp###.npz`
   - each `.npz` stores:
     - `logits`: `float32[num_samples, num_classes]`
     - `targets`: `int32[num_samples]`
     - `class_ids`: `int32[num_task_classes]`
   - prediction artifacts are emitted only for REGAIN-managed evaluation/test passes, not for online training batches
-  - current eval tags are:
+  - eval tags are:
     - `base` for controller-off posthoc evaluation
     - `ctrl` for controller-on posthoc evaluation
   - repair-controller runs log their own `ctrl` prediction artifacts; backbone/controller-off prediction artifacts remain on
     the corresponding `backbone` run
-  - these artifacts are intended to support future metric recomputation from stored predictions; the current
-    `run_analysis` pipeline still consumes logged metrics and `analysis_artifacts.json`
+  - these artifacts support metric recomputation from stored predictions; the `run_analysis` pipeline consumes
+    logged metrics and `analysis_artifacts.json`
 - For repair-controller runs, analysis outputs (`runs_table`, curves, predictive summaries) enforce baseline-only
   consumption of diagnostic values and analysis calibration values (`run.calibration.ece`, `run.calibration.aece`, `run.calibration.nll`,
   run-level `run.calibration.max_ece`) from `analysis_artifacts.json`.
@@ -497,7 +502,7 @@ At the end of training, when all end-of-experience base accuracy points are comp
   - `run.latency.ms_per_sample.ctrl` (controller runs)
   - `run.latency.samples_per_sec.ctrl` (controller runs)
   - `run.latency.ms_ratio` (controller runs; on/off latency ratio)
-- If end-of-experience base accuracies are incomplete, the plugin logs no `run.accuracy.final` / `run.repair.rho`
+- If end-of-experience base accuracies are incomplete, the plugin logs no `run.eval.acc.final.*` / `run.repair.rho`
   vectors and instead writes a JSON artifact (`analysis_artifacts.json`) containing:
   - `status` (set to `incomplete_acc_exp_base`)
   - `expected_num_experiences`
@@ -505,6 +510,27 @@ At the end of training, when all end-of-experience base accuracy points are comp
   - `run.eps`
   - partial `acc.exp.base` vector
 - A flag metric `run.status.incomplete_acc_exp_base=1.0` is logged when end-of-experience base accuracies are incomplete.
+
+For step-history eval metrics exported to flat tables, the exporter inserts `after_exp###`:
+
+- `exp###` keeps its original meaning as the evaluated experience.
+- `after_exp###` denotes the checkpoint/current-experience identity derived from MLflow step history.
+- The checkpoint identity map is anchored only by `run.eval.acc.ref.test.exp###.base` metric histories.
+- Export materialization is strict and fail-fast:
+  - each reference metric must resolve to exactly one unique MLflow step;
+  - history-bearing eval families must raise when reference history is missing or incomplete;
+  - history-bearing eval families must raise when reference history is ambiguous;
+  - history-bearing eval families must raise when their own MLflow history is missing;
+  - history-bearing eval families must raise when a non-zero history step has no matching checkpoint identity;
+  - an unmatched `step=0` history point (Avalanche's pre-training bootstrap, emitted before
+    any reference checkpoint exists) is dropped — there is no recoverable signal before the
+    first training experience completes;
+  - history-bearing eval families must raise when MLflow history lookup fails.
+- The exporter does not fall back to raw latest-value `run.eval.forgetting.*` / `run.eval.transfer.*` columns when
+  strict history materialization fails.
+- Example exported columns:
+  - `run.eval.forgetting.after_exp003.exp001`
+  - `run.eval.transfer.after_exp002.stream`
 
 ### 7.4 What gets reported
 We report mean ± std across seeds (common configs use **3 seeds**) for:
@@ -545,18 +571,18 @@ The definitions below are the normative interpretation of the metric families us
 
 #### Resource / overhead metrics
 
-- Conceptual `perf.ms_per_sample`: latency (milliseconds per sample), measured on timed forward passes after
+- `run.latency.ms_per_sample.base`: base latency (milliseconds per sample), measured on timed forward passes after
   warm-up.
-  - Logged as `run.latency.ms_per_sample.base` (base) and `run.latency.ms_per_sample.ctrl` (ctrl).
-- Conceptual `perf.samples_per_sec`: throughput (samples/sec) on the same timed passes.
-  - Logged as `run.latency.samples_per_sec.base` and `run.latency.samples_per_sec.ctrl`.
-- Conceptual `perf.latency_ratio`: ctrl/base latency ratio.
-  - Logged as `run.latency.ms_ratio = run.latency.ms_per_sample.ctrl / run.latency.ms_per_sample.base`.
-- Conceptual `repair.repair_steps`: total repair optimization steps, typically
+- `run.latency.ms_per_sample.ctrl`: controller-on latency (milliseconds per sample) on the same timed passes.
+- `run.latency.samples_per_sec.base`: base throughput (samples/sec) on the timed passes.
+- `run.latency.samples_per_sec.ctrl`: controller-on throughput (samples/sec) on the timed passes.
+- `run.latency.ms_ratio`: controller/base latency ratio,
+  `run.latency.ms_per_sample.ctrl / run.latency.ms_per_sample.base`.
+- `run.repair.steps`: cumulative repair optimization steps, typically
   `epochs * ceil(N_repair / batch_size)`.
-  - Logged as cumulative `run.repair.steps` plus per-fit event keys (`run.repair.steps.exp###` or `run.repair.steps.final`).
-- Conceptual `repair.repair_seconds`: total repair wall-clock fitting time in seconds.
-  - Logged as cumulative `run.repair.seconds` plus per-fit event keys (`run.repair.seconds.exp###` or `run.repair.seconds.final`).
+  - Per-fit event keys are `run.repair.steps.exp###` or `run.repair.steps.final`.
+- `run.repair.seconds`: cumulative repair wall-clock fitting time in seconds.
+  - Per-fit event keys are `run.repair.seconds.exp###` or `run.repair.seconds.final`.
 
 #### Diagnostic-layer metrics (task-level diagnostics)
 
@@ -564,21 +590,19 @@ The definitions below are the normative interpretation of the metric families us
   Higher indicates stronger off-task prediction bias.
 - `run.diagnostics.avg_conf`: Mean of max predicted probability on task `T_i`.
 - `run.diagnostics.avg_entropy`: Mean predictive entropy on task `T_i`; higher indicates less peaked predictions.
-- Conceptual `run.diagnostics.logit_avg_exp`: average logit vector on task `T_i` after training experience `i`.
-- Conceptual `run.diagnostics.logit_avg_base`: average logit vector on task `T_i` at final base evaluation.
-- Conceptual `run.diagnostics.logit_avg_drift_l2`: `||mu_i_exp - mu_i_base||_2`.
-  - Logged as `run.diagnostics.logit_avg_drift`.
+- `run.diagnostics.logit_avg_drift`: `||mu_i_exp - mu_i_base||_2`, the L2 distance between the task-level mean logit
+  vector after training experience `i` and the corresponding task-level mean logit vector at final base evaluation.
+  The mean logit vectors themselves are not logged as standalone metrics.
 - Optional `run.diagnostics.logit_cov_drift_fro`: Frobenius drift between checkpoint and post-sequence logit covariance matrices.
   This metric is not produced in the default pipeline.
 
 #### Analysis outputs
 
-- Conceptual `predict.pearson_r(<pred>, rho)`: Pearson correlation between diagnostic values and `rho(T_i)` over tasks
-  where both are defined. Reported in `predictive_correlations.csv` column `pearson_r`.
-- Conceptual `predict.spearman_r(<pred>, rho)`: Spearman rank correlation between diagnostic values and `rho(T_i)`.
-  Reported in column `spearman_r`.
-- Conceptual `predict.r2(<preds> -> rho)` (optional): coefficient of determination for predicting `rho`.
-  The analysis computes univariate `R^2` per diagnostic, reported in column `r2`.
+- `predictive_correlations.csv` column `pearson_r`: Pearson correlation between diagnostic values and `rho(T_i)` over
+  tasks where both are defined.
+- `predictive_correlations.csv` column `spearman_r`: Spearman rank correlation between diagnostic values and `rho(T_i)`.
+- `predictive_correlations.csv` column `r2` (optional): univariate linear-fit coefficient of determination for
+  predicting `rho`.
 
 ---
 

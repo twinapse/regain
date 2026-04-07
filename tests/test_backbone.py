@@ -11,6 +11,8 @@ import regain.experiments.backbone as backbone_module
 import regain.experiments.logging as logging_module
 from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
 from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
+from regain.constants import RUN_ACC_FINAL_TEST
+from regain.constants import RUN_ACC_REF_TEST
 from regain.constants import RUN_CALIB_AECE
 from regain.constants import RUN_CALIB_ECE
 from regain.constants import RUN_CALIB_NLL
@@ -53,8 +55,8 @@ class TestLoadBackboneAnalysisBaselineFromRun:
     ) -> None:
         run = _make_run(
             metrics={
-                'run.accuracy.exp.exp000.base': 0.80,
-                'run.accuracy.final.exp000.base': 0.55,
+                f'{RUN_ACC_REF_TEST}.exp000.base': 0.80,
+                f'{RUN_ACC_FINAL_TEST}.exp000.base': 0.55,
             },
         )
         monkeypatch.setattr(

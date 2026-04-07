@@ -169,7 +169,7 @@ If you ran analysis without `--show-plots` / `--save-plots`, you can render plot
 ```bash
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --show
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --save
-python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --save --perf-key analysis.accuracy.final.avg.ctrl
+python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --save --perf-key analysis.acc.final.avg.ctrl
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --show --save --output-dir ./plots
 ```
 
