@@ -288,6 +288,7 @@ def _train_and_evaluate_strategy(
                 calibration_plugin=calibration_plugin,
                 repair_after_experience=repair_fit_after_experience,
                 seen_mask_plugin=seen_mask_plugin,
+                prediction_logging_plugin=prediction_logging_plugin,
                 num_epochs_per_experience=backbone_training.num_epochs,
                 context=context,
                 backbone_analysis_baseline=backbone_analysis_baseline,
@@ -413,11 +414,8 @@ def _train_and_evaluate_strategy(
                 controller_type = 'prevention'
             mlflow.log_param(PARAM_CONTROLLER_TYPE, controller_type)
 
-            # Train and evaluate the strategy
-            strategy.train(
-                experiences=benchmark.train_stream,
-                eval_streams=[benchmark.test_stream],
-            )
+            # Train the model
+            strategy.train(experiences=benchmark.train_stream)
 
             checkpoint_paths: list[Path] | None = None
             if checkpoint_writer_plugin is not None:

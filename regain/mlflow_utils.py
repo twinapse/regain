@@ -2,14 +2,16 @@
 MLflow utilities.
 """
 
+from collections.abc import Mapping
 import contextlib
 from datetime import datetime
 from datetime import timezone
 import json
 from pathlib import Path
+import re
 import tempfile
 import traceback
-from typing import Iterator, Sequence
+from typing import Any, Iterator, Sequence
 from urllib.parse import urlparse
 
 import mlflow
@@ -25,6 +27,7 @@ from regain.constants import COLUMN_RUN_NAME
 from regain.constants import COLUMN_START_TIME
 from regain.constants import COLUMN_STATUS
 from regain.constants import MLFLOW_ARTIFACT_ERROR_FILE
+from regain.constants import NS_SEP
 from regain.constants import PARAM_RUN_NAME
 
 __all__ = [
@@ -34,7 +37,9 @@ __all__ = [
     'ensure_experiment',
     'format_timestamp_ms',
     'init_mlflow',
+    'log_scalar_metrics_to_namespace',
     'log_fatal_error_context',
+    'normalize_metric_name',
     'normalize_tracking_uri',
     'resolve_active_runs_by_name',
     'resolve_artifact_location',
@@ -44,8 +49,101 @@ __all__ = [
     'resolve_tracking_uri',
     'search_runs_paginated',
     'set_tracking_uri',
+    'to_scalar_metric_value',
     'write_experiment_meta_yaml',
 ]
+
+_NS_SEP_ESCAPED = re.escape(NS_SEP)
+_NON_ALNUM_SEP = re.compile(rf'[^a-zA-Z0-9_{_NS_SEP_ESCAPED}]+')
+_MULTI_UNDERSCORE = re.compile(r'_+')
+_MULTI_NAMESPACE_SEP = re.compile(rf'{_NS_SEP_ESCAPED}+')
+
+
+############################
+# Metric logging utilities #
+############################
+
+
+def normalize_metric_name(raw: str) -> str:
+    """
+    Normalize a raw metric name into a stable MLflow-safe token.
+
+    Args:
+        raw (str): Raw metric name.
+
+    Returns:
+        str: Normalized metric token.
+    """
+    raw = '' if raw is None else str(raw)
+    norm = raw.replace('/', NS_SEP)
+    norm = _NON_ALNUM_SEP.sub('_', norm)
+    norm = _MULTI_UNDERSCORE.sub('_', norm).strip('_')
+    norm = _MULTI_NAMESPACE_SEP.sub(NS_SEP, norm).strip(NS_SEP)
+    return norm.lower() or 'unnamed_metric'
+
+
+def to_scalar_metric_value(value: Any) -> float | None:
+    """
+    Convert metric-like values to scalar floats when possible.
+
+    Args:
+        value (Any): Candidate metric value.
+
+    Returns:
+        float | None: Scalar metric value, or None when conversion fails.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if hasattr(value, 'item'):
+        try:
+            item_value = value.item()
+            if isinstance(item_value, (int, float)) and not isinstance(item_value, bool):
+                return float(item_value)
+            return float(item_value)
+        except Exception:
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def log_scalar_metrics_to_namespace(
+    *,
+    scalar_metrics: Mapping[str, float],
+    namespace: str,
+    step: int,
+) -> None:
+    """
+    Log scalar metrics under a namespace after normalizing metric names.
+
+    Args:
+        scalar_metrics (Mapping[str, float]): Scalar metrics keyed by raw names.
+        namespace (str): Metric namespace prefix.
+        step (int): Metric step.
+
+    Returns:
+        None
+    """
+    if mlflow.active_run() is None:
+        return
+
+    namespace_prefix = str(namespace).strip()
+    for metric_name, metric_value in scalar_metrics.items():
+        scalar_value = to_scalar_metric_value(metric_value)
+        if scalar_value is None:
+            continue
+        normalized_name = normalize_metric_name(metric_name)
+        metric_key = (
+            f'{namespace_prefix}{NS_SEP}{normalized_name}'
+            if namespace_prefix != ''
+            else normalized_name
+        )
+        mlflow.log_metric(
+            key=metric_key,
+            value=float(scalar_value),
+            step=int(step),
+        )
 
 
 ##########################

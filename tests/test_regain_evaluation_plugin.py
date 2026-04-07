@@ -2,10 +2,12 @@
 Tests for RegainEvaluationPlugin baseline-only calibration scalar policy.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import mlflow
+import numpy as np
 import pytest
 from torch import nn
 from torch.utils.data import Dataset
@@ -130,7 +132,6 @@ class TestRegainEvaluationPluginArtifactsLogging:
         plugin._log_analysis_metric = lambda **kwargs: None
         plugin._log_summary_metric = lambda **kwargs: None
         plugin._log_latency_overhead = lambda **kwargs: None
-        plugin._run_posthoc_eval = lambda **kwargs: None
         plugin._run_eval_with_state = lambda *args, **kwargs: {'ignored': 0.0}
         plugin._diagnostic_vectors_for_artifacts = lambda: {RUN_CALIB_ECE: [0.12]}
         plugin._calibration_max_ece_for_artifacts = lambda: 0.12
@@ -163,6 +164,203 @@ class TestRegainEvaluationPluginArtifactsLogging:
 
         assert plugin.artifacts == expected_artifacts
         assert logged == [(expected_artifacts, MLFLOW_ARTIFACT_ANALYSIS_FILE)]
+
+
+class TestRegainEvaluationPluginCheckpointEval:
+    def test_run_checkpoint_eval_uses_full_stream_and_caches_results(self) -> None:
+        plugin = object.__new__(RegainEvaluationPlugin)
+        plugin._num_experiences = 3
+        plugin.benchmark = SimpleNamespace(test_stream=['exp0', 'exp1', 'exp2'])
+        plugin.controller_plugin = None
+        plugin.last_posthoc_scalar_results = None
+        plugin.last_base_eval_results = None
+        plugin.last_ctrl_eval_results = None
+        plugin.last_posthoc_exp_idx = None
+        captured: dict[str, object] = {}
+
+        def _run_eval_with_logging(
+            *,
+            strategy: object,
+            stream: list[object],
+            mask_enabled: bool,
+            log_namespace: str,
+            log_step: int,
+            eval_tag: str,
+            checkpoint_exp_idx: int,
+        ) -> dict[str, float]:
+            del strategy
+            captured['stream'] = list(stream)
+            captured['mask_enabled'] = bool(mask_enabled)
+            captured['log_namespace'] = str(log_namespace)
+            captured['log_step'] = int(log_step)
+            captured['eval_tag'] = str(eval_tag)
+            captured['checkpoint_exp_idx'] = int(checkpoint_exp_idx)
+            return {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
+
+        plugin._run_eval_with_logging = _run_eval_with_logging  # type: ignore[method-assign]
+
+        scalar_results = plugin._run_checkpoint_eval(
+            strategy=object(),
+            checkpoint_exp_idx=1,
+            log_step=20,
+        )
+
+        assert captured['stream'] == ['exp0', 'exp1', 'exp2']
+        assert captured['mask_enabled'] is False
+        assert captured['log_namespace'] == 'run.eval'
+        assert captured['log_step'] == 20
+        assert captured['eval_tag'] == 'base'
+        assert captured['checkpoint_exp_idx'] == 1
+        assert scalar_results == {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
+        assert plugin.last_posthoc_scalar_results == scalar_results
+        assert plugin.last_base_eval_results == {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
+        assert plugin.last_ctrl_eval_results is None
+        assert plugin.last_posthoc_exp_idx == 1
+
+    def test_acc_exp_base_from_prediction_artifact_masks_unseen_classes(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        plugin = object.__new__(RegainEvaluationPlugin)
+        plugin.controller_plugin = None
+        plugin.prediction_logging_plugin = SimpleNamespace(
+            artifact_root=tmp_path / 'predictions'
+        )
+        plugin._seen_class_ids_by_experience = [[0, 1]]
+        relative_path = plugins_module.PredictionLoggingPlugin._artifact_relative_path(
+            eval_tag='base',
+            checkpoint_exp_idx=0,
+            test_exp_idx=0,
+        )
+        artifact_path = plugin.prediction_logging_plugin.artifact_root / relative_path
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            artifact_path,
+            logits=np.asarray(
+                [
+                    [0.0, 1.0, 9.0],
+                    [2.0, 1.5, 8.0],
+                ],
+                dtype=np.float32,
+            ),
+            targets=np.asarray([1, 0], dtype=np.int32),
+            class_ids=np.asarray([0, 1], dtype=np.int32),
+        )
+
+        acc_exp_base = plugin._acc_exp_base_from_prediction_artifact(exp_idx=0)
+
+        assert acc_exp_base == pytest.approx(1.0)
+
+    def test_after_training_exp_logs_repair_posthoc_metrics_from_single_eval_pass(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        plugin = object.__new__(RegainEvaluationPlugin)
+        plugin.controller_plugin = _make_repair_controller_plugin()
+        plugin.repair_after_experience = True
+        plugin.num_epochs_per_experience = 50
+        plugin._backbone_a_exp_base = [0.81]
+        plugin.a_exp_base = []
+        run_checkpoint_calls: list[int] = []
+        mirrored_namespaces: list[str] = []
+
+        def _run_checkpoint_eval(
+            *,
+            strategy: object,
+            checkpoint_exp_idx: int,
+            log_step: int,
+        ) -> dict[str, float]:
+            del strategy, log_step
+            run_checkpoint_calls.append(int(checkpoint_exp_idx))
+            return {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
+
+        def _log_scalar_metrics_to_namespace(
+            *,
+            scalar_metrics: dict[str, float],
+            namespace: str,
+            step: int,
+        ) -> None:
+            del scalar_metrics, step
+            mirrored_namespaces.append(str(namespace))
+
+        plugin._run_checkpoint_eval = _run_checkpoint_eval  # type: ignore[method-assign]
+        monkeypatch.setattr(
+            plugins_module,
+            'log_scalar_metrics_to_namespace',
+            _log_scalar_metrics_to_namespace,
+        )
+        plugin._log_analysis_metric = lambda **kwargs: None
+
+        strategy = SimpleNamespace(
+            experience=SimpleNamespace(
+                current_experience=0,
+            )
+        )
+
+        plugin.after_training_exp(strategy=strategy)
+
+        assert run_checkpoint_calls == [0]
+        assert mirrored_namespaces == ['run.exp000']
+        assert plugin.a_exp_base == pytest.approx([0.81])
+
+    def test_after_training_logs_run_final_metrics_from_cached_checkpoint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        plugin = object.__new__(RegainEvaluationPlugin)
+        plugin._num_experiences = 1
+        plugin.num_epochs_per_experience = 50
+        plugin.last_posthoc_scalar_results = {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
+        plugin.last_posthoc_exp_idx = 0
+        plugin.controller_plugin = None
+        plugin.calibration_plugin = _StubCalibrationPlugin(latest_max_ece=0.12)
+        plugin.a_exp_base = [0.81]
+        plugin.eps = 0.0
+        plugin.last_base_eval_results = {'ignored': 0.0}
+        plugin.last_ctrl_eval_results = None
+        plugin.benchmark = SimpleNamespace(test_stream=[object()])
+        plugin._run_checkpoint_eval = lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError('Unexpected extra final evaluation pass.')
+        )
+        mirrored_namespaces: list[str] = []
+        monkeypatch.setattr(
+            plugins_module,
+            'log_scalar_metrics_to_namespace',
+            lambda **kwargs: mirrored_namespaces.append(kwargs['namespace']),
+        )
+        plugin._log_analysis_metric = lambda **kwargs: None
+        plugin._log_summary_metric = lambda **kwargs: None
+        plugin._log_latency_overhead = lambda **kwargs: None
+        plugin._run_eval_with_state = lambda *args, **kwargs: {'ignored': 0.0}
+        plugin._diagnostic_vectors_for_artifacts = lambda: {RUN_CALIB_ECE: [0.12]}
+        plugin._calibration_max_ece_for_artifacts = lambda: 0.12
+
+        expected_artifacts = {
+            ARTIFACT_ACC_EXP_BASE: [0.81],
+            ARTIFACT_ACC_FINAL_BASE: [0.73],
+            RUN_CALIB_ECE: [0.12],
+            RUN_CALIB_MAX_ECE: 0.12,
+        }
+
+        monkeypatch.setattr(
+            plugins_module,
+            'ordered_accuracies',
+            lambda eval_results, num_experiences: [0.73],
+        )
+        monkeypatch.setattr(
+            plugins_module,
+            'build_analysis_artifacts',
+            lambda **kwargs: expected_artifacts,
+        )
+        monkeypatch.setattr(
+            mlflow,
+            'log_dict',
+            lambda artifacts, artifact_file: None,
+        )
+
+        plugin.after_training(strategy=object())
+
+        assert mirrored_namespaces == ['run.final']
 
 
 class TestCalibrationDiagnosticsPluginState:
