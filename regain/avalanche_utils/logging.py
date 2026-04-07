@@ -1,4 +1,3 @@
-import re
 from typing import Any
 
 from avalanche.logging import BaseLogger
@@ -7,42 +6,10 @@ import mlflow
 from regain.analysis.metrics import MetricContext
 from regain.analysis.metrics import MetricPhase
 from regain.constants import NS_SEP
+from regain.mlflow_utils import normalize_metric_name
+from regain.mlflow_utils import to_scalar_metric_value
 
-__all__ = ['MLflowLogger', 'normalize_metric_name']
-
-_NS_SEP_ESCAPED = re.escape(NS_SEP)
-_NON_ALNUM_SEP = re.compile(rf'[^a-zA-Z0-9_{_NS_SEP_ESCAPED}]+')
-_MULTI_UNDERSCORE = re.compile(r'_+')
-_MULTI_NAMESPACE_SEP = re.compile(rf'{_NS_SEP_ESCAPED}+')
-
-
-def normalize_metric_name(raw: str) -> str:
-    """
-    Normalize a raw Avalanche metric name into a stable MLflow-safe token.
-    """
-    raw = '' if raw is None else str(raw)
-    norm = raw.replace('/', NS_SEP)  # Avalanche uses '/' in metric names
-    norm = _NON_ALNUM_SEP.sub('_', norm)
-    norm = _MULTI_UNDERSCORE.sub('_', norm).strip('_')
-    norm = _MULTI_NAMESPACE_SEP.sub(NS_SEP, norm).strip(NS_SEP)
-    return norm.lower() or 'unnamed_metric'
-
-
-def _to_scalar(value: Any) -> float | None:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    if hasattr(value, 'item'):
-        try:
-            v = value.item()
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                return float(v)
-            return float(v)
-        except Exception:
-            return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+__all__ = ['MLflowLogger']
 
 
 class MLflowLogger(BaseLogger):
@@ -65,7 +32,7 @@ class MLflowLogger(BaseLogger):
         if not self.context.log_enabled:
             return
 
-        scalar = _to_scalar(value)
+        scalar = to_scalar_metric_value(value)
         if scalar is None:
             return
 

@@ -227,10 +227,12 @@ class TestRegainEvaluationPluginCheckpointEval:
             artifact_root=tmp_path / 'predictions'
         )
         plugin._seen_class_ids_by_experience = [[0, 1]]
-        artifact_path = plugin._prediction_artifact_path(
+        relative_path = plugins_module.PredictionLoggingPlugin._artifact_relative_path(
+            eval_tag='base',
             checkpoint_exp_idx=0,
             test_exp_idx=0,
         )
+        artifact_path = plugin.prediction_logging_plugin.artifact_root / relative_path
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             artifact_path,
@@ -249,7 +251,10 @@ class TestRegainEvaluationPluginCheckpointEval:
 
         assert acc_exp_base == pytest.approx(1.0)
 
-    def test_after_training_exp_logs_repair_posthoc_metrics_from_single_eval_pass(self) -> None:
+    def test_after_training_exp_logs_repair_posthoc_metrics_from_single_eval_pass(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         plugin = object.__new__(RegainEvaluationPlugin)
         plugin.controller_plugin = _make_repair_controller_plugin()
         plugin.repair_after_experience = True
@@ -279,7 +284,11 @@ class TestRegainEvaluationPluginCheckpointEval:
             mirrored_namespaces.append(str(namespace))
 
         plugin._run_checkpoint_eval = _run_checkpoint_eval  # type: ignore[method-assign]
-        plugin._log_scalar_metrics_to_namespace = _log_scalar_metrics_to_namespace  # type: ignore[method-assign]
+        monkeypatch.setattr(
+            plugins_module,
+            'log_scalar_metrics_to_namespace',
+            _log_scalar_metrics_to_namespace,
+        )
         plugin._log_analysis_metric = lambda **kwargs: None
 
         strategy = SimpleNamespace(
@@ -314,8 +323,10 @@ class TestRegainEvaluationPluginCheckpointEval:
             AssertionError('Unexpected extra final evaluation pass.')
         )
         mirrored_namespaces: list[str] = []
-        plugin._log_scalar_metrics_to_namespace = (  # type: ignore[method-assign]
-            lambda **kwargs: mirrored_namespaces.append(kwargs['namespace'])
+        monkeypatch.setattr(
+            plugins_module,
+            'log_scalar_metrics_to_namespace',
+            lambda **kwargs: mirrored_namespaces.append(kwargs['namespace']),
         )
         plugin._log_analysis_metric = lambda **kwargs: None
         plugin._log_summary_metric = lambda **kwargs: None

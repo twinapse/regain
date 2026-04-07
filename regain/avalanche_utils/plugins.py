@@ -35,7 +35,6 @@ from regain.analysis.artifacts import ARTIFACT_RHO
 from regain.analysis.artifacts import ARTIFACT_RHO_AVG
 from regain.analysis.metrics import MetricPhase
 from regain.avalanche_utils.logging import MLflowLogger
-from regain.avalanche_utils.logging import normalize_metric_name
 from regain.constants import COLUMN_STATUS
 from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
@@ -71,6 +70,7 @@ from regain.constants import RUN_RHO
 from regain.constants import RUN_RHO_AVG
 from regain.constants import STREAM_REPAIR
 from regain.experiments.utils import extract_scalar_metrics
+from regain.mlflow_utils import log_scalar_metrics_to_namespace
 from regain.models.controllers import BackboneControllerInterface
 from regain.models.controllers import PreventionController
 from regain.models.controllers import RepairController
@@ -104,6 +104,20 @@ _SUMMARY_ACC_EXP_AVG_BASE = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}exp{NS_
 _SUMMARY_ACC_FINAL_AVG_BASE = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
 _SUMMARY_ACC_FINAL_AVG_CTRL = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
 _SUMMARY_RHO_AVG = f'{NAMESPACE_SUMMARY}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'
+
+
+def _sorted_unique_class_ids_for_experience(experience: object | None) -> list[int]:
+    """
+    Extract sorted unique class ids from one experience.
+
+    Args:
+        experience (object | None): Experience exposing `classes_in_this_experience`.
+
+    Returns:
+        list[int]: Sorted unique class ids.
+    """
+    class_ids = getattr(experience, 'classes_in_this_experience', []) or []
+    return sorted({int(class_id) for class_id in class_ids})
 
 
 class MetricContextPlugin(SupervisedPlugin):
@@ -1035,8 +1049,8 @@ class RepairControllerPlugin(SupervisedPlugin):
         Returns:
             list[int]: Sorted class IDs introduced in the current experience.
         """
-        classes = experience.classes_in_this_experience
-        return sorted({int(c) for c in classes})
+        del repair_dataset
+        return _sorted_unique_class_ids_for_experience(experience)
 
     @staticmethod
     def _resolve_training_classes(experience: object) -> list[int]:
@@ -1049,8 +1063,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         Returns:
             list[int]: Sorted class IDs in the training experience.
         """
-        classes = experience.classes_in_this_experience
-        return sorted({int(c) for c in classes})
+        return _sorted_unique_class_ids_for_experience(experience)
 
     def _combined_repair_dataset(self) -> Dataset | None:
         """
@@ -2299,21 +2312,6 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         }
 
     @staticmethod
-    def _class_ids_for_experience(strategy: BaseTemplate) -> list[int]:
-        """
-        Resolve class ids for the current evaluation experience.
-
-        Args:
-            strategy (BaseTemplate): Strategy currently being evaluated.
-
-        Returns:
-            list[int]: Sorted task class ids.
-        """
-        experience = getattr(strategy, 'experience', None)
-        class_ids = getattr(experience, 'classes_in_this_experience', []) or []
-        return sorted(int(class_id) for class_id in class_ids)
-
-    @staticmethod
     def _artifact_relative_path(
         *,
         eval_tag: str,
@@ -2371,7 +2369,9 @@ class PredictionLoggingPlugin(SupervisedPlugin):
             return
 
         self._current_exp_idx = int(exp_idx)
-        self._current_class_ids = self._class_ids_for_experience(strategy)
+        self._current_class_ids = _sorted_unique_class_ids_for_experience(
+            getattr(strategy, 'experience', None),
+        )
 
     def after_eval_iteration(self, strategy: BaseTemplate, **kwargs) -> None:
         """
@@ -2642,8 +2642,8 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                 seen_class_vectors.append(sorted(seen_class_ids))
                 continue
             experience = self.benchmark.train_stream[exp_idx]
-            class_ids = getattr(experience, 'classes_in_this_experience', []) or []
-            seen_class_ids.update(int(class_id) for class_id in class_ids)
+            class_ids = _sorted_unique_class_ids_for_experience(experience)
+            seen_class_ids.update(class_ids)
             seen_class_vectors.append(sorted(seen_class_ids))
         return seen_class_vectors
 
@@ -2685,37 +2685,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             value=float(value),
             step=int(step),
         )
-
-    @staticmethod
-    def _log_scalar_metrics_to_namespace(
-        *,
-        scalar_metrics: Mapping[str, float],
-        namespace: str,
-        step: int,
-    ) -> None:
-        """
-        Log scalar metrics under a target namespace with Avalanche-compatible key normalization.
-
-        Args:
-            scalar_metrics (Mapping[str, float]): Scalar metrics keyed by raw Avalanche metric names.
-            namespace (str): Target metric namespace.
-            step (int): Metric step.
-        """
-        if mlflow.active_run() is None:
-            return
-        namespace_prefix = str(namespace).strip()
-        for metric_name, metric_value in scalar_metrics.items():
-            normalized_name = normalize_metric_name(metric_name)
-            metric_key = (
-                f'{namespace_prefix}{NS_SEP}{normalized_name}'
-                if namespace_prefix != ''
-                else normalized_name
-            )
-            mlflow.log_metric(
-                key=metric_key,
-                value=float(metric_value),
-                step=int(step),
-            )
 
     def _toggle_mask(self, enable: bool) -> bool:
         previous_state = self.seen_mask_plugin.mask_enabled
@@ -2904,30 +2873,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         self.last_posthoc_exp_idx = checkpoint_exp_idx_int
         return scalar_results
 
-    def _prediction_artifact_path(
-        self,
-        *,
-        checkpoint_exp_idx: int,
-        test_exp_idx: int,
-    ) -> Path:
-        """
-        Resolve a prediction artifact path for one checkpoint/test-experience pair.
-
-        Args:
-            checkpoint_exp_idx (int): Checkpoint experience index.
-            test_exp_idx (int): Evaluated test experience index.
-
-        Returns:
-            Path: Artifact path.
-        """
-        eval_tag = 'ctrl' if self.controller_plugin is not None else 'base'
-        relative_path = PredictionLoggingPlugin._artifact_relative_path(
-            eval_tag=eval_tag,
-            checkpoint_exp_idx=int(checkpoint_exp_idx),
-            test_exp_idx=int(test_exp_idx),
-        )
-        return self.prediction_logging_plugin.artifact_root / relative_path
-
     @staticmethod
     def _masked_top1_accuracy(
         *,
@@ -2978,10 +2923,13 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             float: Seen-class masked top-1 accuracy.
         """
         exp_idx_int = int(exp_idx)
-        artifact_path = self._prediction_artifact_path(
+        eval_tag = 'ctrl' if self.controller_plugin is not None else 'base'
+        relative_path = PredictionLoggingPlugin._artifact_relative_path(
             checkpoint_exp_idx=exp_idx_int,
+            eval_tag=eval_tag,
             test_exp_idx=exp_idx_int,
         )
+        artifact_path = self.prediction_logging_plugin.artifact_root / relative_path
         if not artifact_path.exists():
             raise FileNotFoundError(
                 f'Prediction artifact not found for exp{exp_idx_int:03d}: {artifact_path}'
@@ -2994,31 +2942,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             logits=logits,
             targets=targets,
             seen_class_ids=seen_class_ids,
-        )
-
-    def _log_repair_posthoc_metrics_after_experience(
-        self,
-        *,
-        scalar_results: Mapping[str, float],
-        exp_idx: int,
-        log_step: int,
-    ) -> None:
-        """
-        Log per-experience posthoc scalar metrics for repair-controller runs.
-
-        Args:
-            scalar_results (Mapping[str, float]): Scalar metrics from the checkpoint evaluation pass.
-            exp_idx (int): Experience index.
-            log_step (int): Metric step for this checkpoint.
-        """
-        if not self.repair_after_experience:
-            return
-        if not isinstance(self.controller_plugin, RepairControllerPlugin):
-            return
-        self._log_scalar_metrics_to_namespace(
-            scalar_metrics=scalar_results,
-            namespace=f'{NAMESPACE_RUN}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}',
-            step=int(log_step),
         )
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
@@ -3051,11 +2974,12 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             experience=exp_idx,
             variant='base',
         )
-        self._log_repair_posthoc_metrics_after_experience(
-            scalar_results=scalar_results,
-            exp_idx=exp_idx,
-            log_step=log_step,
-        )
+        if self.repair_after_experience and isinstance(self.controller_plugin, RepairControllerPlugin):
+            log_scalar_metrics_to_namespace(
+                scalar_metrics=scalar_results,
+                namespace=f'{NAMESPACE_RUN}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}',
+                step=int(log_step),
+            )
 
     @staticmethod
     def _extract_batch_inputs(batch: object) -> torch.Tensor | None:
@@ -3318,7 +3242,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             )
         if self.last_posthoc_scalar_results is None:
             raise RuntimeError('Final checkpoint scalar metrics are missing.')
-        self._log_scalar_metrics_to_namespace(
+        log_scalar_metrics_to_namespace(
             scalar_metrics=self.last_posthoc_scalar_results,
             namespace=_NAMESPACE_FINAL,
             step=final_step,

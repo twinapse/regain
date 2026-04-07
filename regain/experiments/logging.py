@@ -13,7 +13,6 @@ from avalanche.benchmarks import AvalancheDataset
 from avalanche.benchmarks.scenarios import NCScenario
 import mlflow
 
-from regain.avalanche_utils.logging import normalize_metric_name
 from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
 from regain.constants import NAMESPACE_SUMMARY
@@ -28,6 +27,7 @@ from regain.constants import PARAM_RUN_NAME
 from regain.constants import PARAM_TORCH_DETERMINISTIC_ALGORITHMS
 from regain.constants import STREAMS
 from regain.experiments.config import ExperimentConfig
+from regain.mlflow_utils import log_scalar_metrics_to_namespace
 from regain.registry import get_controller_path
 
 __all__ = [
@@ -309,13 +309,11 @@ def log_summary_metrics(
     Returns:
         None
     """
-    for metric_name, value in summary_metrics.items():
-        safe_name = normalize_metric_name(metric_name)
-        mlflow.log_metric(
-            f'{NAMESPACE_SUMMARY}{NS_SEP}{safe_name}',
-            float(value),
-            step=int(step),
-        )
+    log_scalar_metrics_to_namespace(
+        scalar_metrics=summary_metrics,
+        namespace=NAMESPACE_SUMMARY,
+        step=int(step),
+    )
 
 
 def extract_dataset_indices(experience_dataset: AvalancheDataset) -> list[int]:
