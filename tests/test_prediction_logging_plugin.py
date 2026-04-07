@@ -2,7 +2,6 @@
 Tests for prediction artifact capture during evaluation.
 """
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,7 +38,7 @@ class _FakeStrategy:
 
 
 class TestPredictionLoggingPlugin:
-    def test_writes_npz_and_manifest_per_experience(
+    def test_writes_npz_per_experience(
         self,
         tmp_path: Path,
     ) -> None:
@@ -86,14 +85,12 @@ class TestPredictionLoggingPlugin:
             tmp_path
             / 'predictions'
             / 'base'
-            / 'ckpt_exp004'
-            / 'test_exp002.npz'
+            / 'test_exp002_after_exp004.npz'
         )
-        manifest_path = tmp_path / 'predictions' / 'manifest.json'
 
         assert plugin.has_artifacts()
         assert output_path.exists()
-        assert manifest_path.exists()
+        assert not (tmp_path / 'predictions' / 'manifest.json').exists()
 
         with np.load(output_path) as payload:
             np.testing.assert_array_equal(
@@ -112,25 +109,9 @@ class TestPredictionLoggingPlugin:
                 ),
             )
             np.testing.assert_array_equal(
-                payload['task_class_ids'],
+                payload['class_ids'],
                 np.asarray([7, 9], dtype=np.int32),
             )
-
-        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-        assert manifest['schema_version'] == 1
-        assert manifest['num_classes'] == 3
-        assert manifest['files'] == [
-            {
-                'checkpoint_exp_idx': 4,
-                'eval_tag': 'base',
-                'mask_enabled': False,
-                'num_classes': 3,
-                'num_samples': 3,
-                'path': 'base/ckpt_exp004/test_exp002.npz',
-                'task_class_ids': [7, 9],
-                'test_exp_idx': 2,
-            },
-        ]
 
     def test_ignores_eval_without_capture_context(
         self,

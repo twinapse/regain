@@ -91,9 +91,8 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 ### Label-space regimes (important!)
 We record accuracies under two different “label space” regimes:
 
-1) **Seen-classes-only evaluation (for reference accuracies)**  
-   Right after learning $T_i$, predictions are restricted to the set of classes seen up to $T_i$.  
-   (Implemented via a seen-classes masking plugin during reference evaluation.)
+1) **Seen-classes-only evaluation (for end-of-experience base accuracy)**  
+   Right after learning $T_i$, predictions are restricted to the set of classes seen up to $T_i$.
 
 2) **All-classes evaluation (for post-sequence + controller accuracies)**  
    After training all experiences, evaluation is performed over all benchmark classes.
@@ -171,26 +170,25 @@ This codebase distinguishes when a controller acts and how evaluation is execute
 
 Evaluation flow per run:
 
-- After each training experience, an end-of-experience base accuracy point ($A_{\text{exp,base}}$) is computed and recorded.
-- For repair-controller runs with `repair.fit_schedule=per_experience`, posthoc raw evaluation also runs after each
-  experience.
-- At training end, final posthoc raw evaluation is guaranteed:
-  - if final checkpoint was already covered by per-experience posthoc evaluation, no extra pass is needed;
-  - otherwise, one final posthoc raw evaluation pass is executed.
+- After each training experience, one full-stream evaluation pass runs over all test experiences.
+- The same checkpoint evaluation pass drives:
+  - `run.eval.*` metrics,
+  - prediction artifact capture under `predictions/`,
+  - end-of-experience base accuracy point logging (`run.accuracy.exp.exp###.base`).
+- For repair-controller runs with `repair.fit_schedule=per_experience`, the same checkpoint pass is also mirrored to
+  `run.exp###.*`.
+- At training end, `run.final.*` metrics are emitted from the final checkpoint evaluation results.
 - In repair-controller runs, base baselines ($A_{\text{exp,base}}$, $A_{\text{base}}$) are inherited from the
   reserved `backbone` run. In backbone/prevention runs, they are computed from the current run.
 
 Within that flow, evaluation cadence is controlled by two knobs:
 
-1. `evaluation.avalanche_schedule` controls only Avalanche built-in evaluation logs (`run.eval.*`):
-   - `per_experience` maps to `eval_every=0` (evaluate after each experience).
-   - `final_only` maps to `eval_every=-1` (evaluate only at the end).
-   - Forward-transfer metrics are emitted only when `evaluation.avalanche_schedule=per_experience`.
+1. `evaluation.avalanche_schedule` controls which Avalanche metric families are enabled for `run.eval.*`:
+   - `per_experience`: includes forward-transfer metrics.
+   - `final_only`: excludes forward-transfer metrics.
 2. `repair.fit_schedule` (repair controllers) controls repair fitting cadence and posthoc raw evaluation cadence:
-   - `per_experience`: fit after each experience; posthoc raw evaluation runs after each experience.
-   - `final_only`: fit once after training; posthoc raw evaluation runs once after training.
-   - If the final checkpoint was not already evaluated in `per_experience` mode, one final posthoc raw evaluation pass
-     is executed.
+   - `per_experience`: fit after each experience; `run.exp###.*` metrics are emitted after each experience.
+   - `final_only`: fit once after training; no per-experience `run.exp###.*` metrics are emitted.
 
 >ℹ️ Metric placement and metric namespaces are defined in [section 7](#7-metric-logging--reporting-mlflow).
 
@@ -387,7 +385,7 @@ This section describes **how metrics are organized in MLflow** and **what we rep
 Metric keys are normalized and namespaced as:
 
 - `run.train.<metric>` for training-time logs
-- `run.eval.<metric>` for Avalanche built-in evaluation logs
+- `run.eval.<metric>` for checkpoint evaluation logs
 - `run.exp###.<metric>` for per-experience posthoc evaluations (repair runs with `per_experience` schedule)
 - `run.final.<metric>` for the final posthoc evaluation
 - `run.calibration.<...>` for calibration metrics (for example per-task `run.calibration.<metric>.exp###` and run-level `run.calibration.max_ece`)
@@ -428,7 +426,7 @@ Metric-family placement summary:
 | Metric family                          | Key pattern                                         |
 |----------------------------------------|-----------------------------------------------------|
 | Training metrics                       | `run.train.<metric>`                                |
-| Avalanche scheduled evaluation metrics | `run.eval.<metric>`                                 |
+| Checkpoint evaluation metrics          | `run.eval.<metric>`                                 |
 | Posthoc raw evaluation metrics         | `run.final.<metric>` or `run.exp###.<metric>`       |
 | Calibration per-task metrics           | `run.calibration.<metric>.exp###`                         |
 | Diagnostic per-task metrics            | `run.diagnostics.<metric>.exp###`                          |
@@ -443,7 +441,7 @@ After each experience, the evaluation plugin logs:
 - Per-task:
   - `run.accuracy.exp.exp###.base`
 
-At the end of training, when reference accuracies are complete, the evaluation plugin logs:
+At the end of training, when all end-of-experience base accuracy points are complete, the evaluation plugin logs:
 
 - Per-task:
   - `run.accuracy.final.exp###.base`
@@ -474,15 +472,13 @@ At the end of training, when reference accuracies are complete, the evaluation p
 - Additional persisted scalar in `analysis_artifacts.json` (when available):
   - `run.calibration.max_ece`
 - Additional prediction artifact family in MLflow:
-  - `predictions/manifest.json`
-  - `predictions/<eval_tag>/ckpt_exp###/test_exp###.npz`
+  - `predictions/<eval_tag>/test_exp###_after_exp###.npz`
   - each `.npz` stores:
     - `logits`: `float32[num_samples, num_classes]`
     - `targets`: `int32[num_samples]`
-    - `task_class_ids`: `int32[num_task_classes]`
+    - `class_ids`: `int32[num_task_classes]`
   - prediction artifacts are emitted only for REGAIN-managed evaluation/test passes, not for online training batches
   - current eval tags are:
-    - `reference` for seen-classes reference evaluation after each experience
     - `base` for controller-off posthoc evaluation
     - `ctrl` for controller-on posthoc evaluation
   - repair-controller runs log their own `ctrl` prediction artifacts; backbone/controller-off prediction artifacts remain on
@@ -501,14 +497,14 @@ At the end of training, when reference accuracies are complete, the evaluation p
   - `run.latency.ms_per_sample.ctrl` (controller runs)
   - `run.latency.samples_per_sec.ctrl` (controller runs)
   - `run.latency.ms_ratio` (controller runs; on/off latency ratio)
-- If reference accuracies are incomplete, the plugin logs no `run.accuracy.final` / `run.repair.rho`
+- If end-of-experience base accuracies are incomplete, the plugin logs no `run.accuracy.final` / `run.repair.rho`
   vectors and instead writes a JSON artifact (`analysis_artifacts.json`) containing:
   - `status` (set to `incomplete_acc_exp_base`)
   - `expected_num_experiences`
   - `observed_num_exp_points`
   - `run.eps`
   - partial `acc.exp.base` vector
-- A flag metric `run.status.incomplete_acc_exp_base=1.0` is logged when reference accuracies are incomplete.
+- A flag metric `run.status.incomplete_acc_exp_base=1.0` is logged when end-of-experience base accuracies are incomplete.
 
 ### 7.4 What gets reported
 We report mean ± std across seeds (common configs use **3 seeds**) for:
@@ -521,12 +517,12 @@ We report mean ± std across seeds (common configs use **3 seeds**) for:
   metrics) in budget/controller-level tables and curves
 
 **Persisted artifacts**
-- Per-task accuracies $(A_{\text{ref}}, A_{\text{post}})$ in runs with complete reference vectors
-- Per-task accuracies $(A_{\text{ctrl}})$ for repair controllers with complete reference vectors
+- Per-task accuracies $(A_{\text{exp}}, A_{\text{post}})$ in runs with complete end-of-experience vectors
+- Per-task accuracies $(A_{\text{ctrl}})$ for repair controllers with complete end-of-experience vectors
 - Per-task $\rho$ for valid tasks in repair-controller runs (invalid tasks are omitted from `run.repair.rho.exp###`)
 - Per-task calibration/diagnostic vectors for base post-sequence behavior (when available)
 - Per-experience prediction artifacts for evaluation/test passes under `predictions/`, storing logits and targets in
-  compressed `.npz` files plus a manifest
+  compressed `.npz` files
 - Aggregate summaries and curve/frontier/predictive inputs
 
 ### Metric definitions (calibration, overhead, diagnostics, analysis)
@@ -572,7 +568,7 @@ The definitions below are the normative interpretation of the metric families us
 - Conceptual `run.diagnostics.logit_avg_base`: average logit vector on task `T_i` at final base evaluation.
 - Conceptual `run.diagnostics.logit_avg_drift_l2`: `||mu_i_exp - mu_i_base||_2`.
   - Logged as `run.diagnostics.logit_avg_drift`.
-- Optional `run.diagnostics.logit_cov_drift_fro`: Frobenius drift between reference and post-sequence logit covariance matrices.
+- Optional `run.diagnostics.logit_cov_drift_fro`: Frobenius drift between checkpoint and post-sequence logit covariance matrices.
   This metric is not produced in the default pipeline.
 
 #### Analysis outputs
