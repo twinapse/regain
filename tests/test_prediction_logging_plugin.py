@@ -139,6 +139,145 @@ class TestPredictionLoggingPlugin:
         assert not plugin.has_artifacts()
         assert not (tmp_path / 'predictions' / 'manifest.json').exists()
 
+    def test_derives_ref_accuracy_from_eval_logits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        plugin = PredictionLoggingPlugin(
+            artifact_root=tmp_path / 'predictions',
+            num_classes=3,
+        )
+        strategy = SimpleNamespace(
+            _regain_prediction_capture_context={
+                'eval_tag': 'base',
+                'checkpoint_exp_idx': 4,
+                'mask_enabled': False,
+                'ref_test_exp_idx': 2,
+                'ref_seen_class_ids': [2],
+                'ref_use_backbone_logits': False,
+                'ref_mask_value': 0.0,
+            },
+            experience=SimpleNamespace(
+                current_experience=2,
+                classes_in_this_experience=[2],
+            ),
+        )
+
+        plugin.before_eval(strategy=strategy)
+        plugin.before_eval_exp(strategy=strategy)
+
+        strategy.mb_output = torch.tensor(
+            [
+                [-1.0, -2.0, -0.5],
+                [-1.0, -2.0, -0.75],
+            ],
+            dtype=torch.float32,
+        )
+        strategy.mb_y = torch.tensor([0, 2], dtype=torch.long)
+        plugin.after_eval_iteration(strategy=strategy)
+
+        plugin.after_eval_exp(strategy=strategy)
+        plugin.after_eval(strategy=strategy)
+
+        assert plugin.pop_derived_ref_test_accuracy(
+            eval_tag='base',
+            checkpoint_exp_idx=4,
+        ) == 0.5
+        assert (
+            plugin.pop_derived_ref_test_accuracy(
+                eval_tag='base',
+                checkpoint_exp_idx=4,
+            )
+            is None
+        )
+
+    def test_derives_ref_accuracy_from_backbone_logits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        plugin = PredictionLoggingPlugin(
+            artifact_root=tmp_path / 'predictions',
+            num_classes=3,
+        )
+        strategy = SimpleNamespace(
+            _regain_prediction_capture_context={
+                'eval_tag': 'ctrl',
+                'checkpoint_exp_idx': 1,
+                'mask_enabled': False,
+                'ref_test_exp_idx': 0,
+                'ref_seen_class_ids': [0, 1],
+                'ref_use_backbone_logits': True,
+                'ref_mask_value': -1e9,
+            },
+            experience=SimpleNamespace(
+                current_experience=0,
+                classes_in_this_experience=[0, 1],
+            ),
+        )
+
+        plugin.before_eval(strategy=strategy)
+        plugin.before_eval_exp(strategy=strategy)
+
+        strategy._regain_ref_backbone_logits = torch.tensor(
+            [
+                [5.0, 0.0, 0.0],
+                [0.0, 5.0, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+        strategy.mb_output = torch.tensor(
+            [
+                [0.0, 5.0, 0.0],
+                [5.0, 0.0, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+        strategy.mb_y = torch.tensor([0, 1], dtype=torch.long)
+        plugin.after_eval_iteration(strategy=strategy)
+
+        plugin.after_eval_exp(strategy=strategy)
+        plugin.after_eval(strategy=strategy)
+
+        assert not hasattr(strategy, '_regain_ref_backbone_logits')
+        assert plugin.pop_derived_ref_test_accuracy(
+            eval_tag='ctrl',
+            checkpoint_exp_idx=1,
+        ) == 1.0
+
+    def test_clears_stale_derived_ref_value_for_active_key(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        plugin = PredictionLoggingPlugin(
+            artifact_root=tmp_path / 'predictions',
+            num_classes=2,
+        )
+        plugin._derived_ref_test_accuracy_cache[('base', 3)] = 0.99
+        strategy = SimpleNamespace(
+            _regain_prediction_capture_context={
+                'eval_tag': 'base',
+                'checkpoint_exp_idx': 3,
+                'mask_enabled': False,
+                'ref_test_exp_idx': 1,
+                'ref_seen_class_ids': [0, 1],
+            },
+            experience=SimpleNamespace(
+                current_experience=0,
+                classes_in_this_experience=[0, 1],
+            ),
+        )
+
+        plugin.before_eval(strategy=strategy)
+        plugin.after_eval(strategy=strategy)
+
+        assert (
+            plugin.pop_derived_ref_test_accuracy(
+                eval_tag='base',
+                checkpoint_exp_idx=3,
+            )
+            is None
+        )
+
 
 class TestRegainEvaluationPredictionCaptureContext:
     def test_run_eval_with_logging_sets_and_restores_capture_context(self) -> None:
@@ -152,7 +291,7 @@ class TestRegainEvaluationPredictionCaptureContext:
             strategy=strategy,
             stream=[object(), object()],
             mask_enabled=False,
-            log_namespace='run.final',
+            log_namespace='run.eval',
             log_step=12,
             eval_tag='ctrl',
             checkpoint_exp_idx=6,
@@ -164,6 +303,8 @@ class TestRegainEvaluationPredictionCaptureContext:
             'eval_tag': 'ctrl',
             'checkpoint_exp_idx': 6,
             'mask_enabled': False,
+            'capture_predictions': True,
+            'capture_auxiliary_metrics': True,
         }
         assert not hasattr(strategy, '_regain_eval_tag')
         assert not hasattr(strategy, '_regain_prediction_capture_context')
@@ -184,16 +325,18 @@ class TestRegainEvaluationPredictionCaptureContext:
             strategy=strategy,
             stream=[object()],
             mask_enabled=True,
-            eval_tag='reference',
+            eval_tag='ref',
             checkpoint_exp_idx=3,
         )
 
         assert results == {'stream_len': 1}
-        assert strategy.captured_eval_tag == 'reference'
+        assert strategy.captured_eval_tag == 'ref'
         assert strategy.captured_context == {
-            'eval_tag': 'reference',
+            'eval_tag': 'ref',
             'checkpoint_exp_idx': 3,
             'mask_enabled': True,
+            'capture_predictions': True,
+            'capture_auxiliary_metrics': True,
         }
         assert not hasattr(strategy, '_regain_eval_tag')
         assert not hasattr(strategy, '_regain_prediction_capture_context')

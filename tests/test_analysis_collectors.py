@@ -15,6 +15,8 @@ from regain.analysis.artifacts import ARTIFACT_RHO
 from regain.analysis.collectors import _extract_repair_set_total_from_splits_artifact
 from regain.analysis.collectors import collect_experiment_tables
 from regain.constants import COLUMN_REPAIR_SET_TOTAL
+from regain.constants import RUN_ACC_FINAL_TEST
+from regain.constants import RUN_ACC_REF_TEST
 from regain.constants import RUN_CALIB_AECE
 from regain.constants import RUN_CALIB_ECE
 from regain.constants import RUN_CALIB_MAX_ECE
@@ -84,8 +86,8 @@ def _patch_collectors(
 
 def _base_metrics_with_exp000() -> dict[str, float]:
     return {
-        'run.accuracy.exp.exp000.base': 0.80,
-        'run.accuracy.final.exp000.base': 0.55,
+        f'{RUN_ACC_REF_TEST}.exp000.base': 0.80,
+        f'{RUN_ACC_FINAL_TEST}.exp000.base': 0.55,
         RUN_CALIB_MAX_ECE: 0.50,
     }
 
@@ -188,7 +190,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             'run.repair.rho.exp000': 0.20,
             RUN_CALIB_MAX_ECE: 0.95,
             RUN_CALIB_ECE + '.exp000': 0.99,
@@ -242,7 +244,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             'run.repair.rho.exp000': 0.20,
             RUN_CALIB_MAX_ECE: 0.95,
             RUN_CALIB_ECE + '.exp000': 0.99,
@@ -293,7 +295,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             RUN_CALIB_MAX_ECE: 0.95,
             RUN_CALIB_ECE + '.exp000': 0.99,
             RUN_CALIB_AECE + '.exp000': 0.88,
@@ -338,7 +340,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             'run.repair.rho.exp000': 0.20,
             RUN_CALIB_MAX_ECE: 0.95,
             RUN_CALIB_ECE + '.exp000': 0.99,
@@ -373,7 +375,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             'run.repair.rho.exp000': 0.20,
             RUN_CALIB_MAX_ECE: 0.95,
             RUN_CALIB_ECE + '.exp000': 0.99,
@@ -456,7 +458,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             'run.repair.rho.exp000': 0.20,
         })
         archive_path = _write_splits_archive(
@@ -506,7 +508,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             'run.repair.rho.exp000': 0.20,
             RUN_CALIB_MAX_ECE: 0.95,
             RUN_CALIB_ECE + '.exp000': 0.99,
@@ -586,7 +588,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         }
         metrics = _base_metrics_with_exp000()
         metrics.update({
-            'run.accuracy.final.exp000.ctrl': 0.60,
+            f'{RUN_ACC_FINAL_TEST}.exp000.ctrl': 0.60,
             'run.repair.rho.exp000': 0.20,
         })
 

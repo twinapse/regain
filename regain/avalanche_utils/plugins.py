@@ -41,13 +41,16 @@ from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import NAMESPACE_EVAL
 from regain.constants import NAMESPACE_RUN
-from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NAMESPACE_TRAIN
 from regain.constants import NS_SEP
-from regain.constants import RUN_ACC_EXP
-from regain.constants import RUN_ACC_FINAL
-from regain.constants import RUN_ACC_FINAL_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_AVG_CTRL
+from regain.constants import RUN_ACC_FINAL_TEST
+from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_TEST_AVG_CTRL
+from regain.constants import RUN_ACC_FINAL_TRAIN
+from regain.constants import RUN_ACC_FINAL_TRAIN_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_TRAIN_AVG_CTRL
+from regain.constants import RUN_ACC_REF_TEST
+from regain.constants import RUN_ACC_REF_TRAIN
 from regain.constants import RUN_CALIB_AECE
 from regain.constants import RUN_CALIB_BRIER
 from regain.constants import RUN_CALIB_ECE
@@ -70,7 +73,6 @@ from regain.constants import RUN_RHO
 from regain.constants import RUN_RHO_AVG
 from regain.constants import STREAM_REPAIR
 from regain.experiments.utils import extract_scalar_metrics
-from regain.mlflow_utils import log_scalar_metrics_to_namespace
 from regain.models.controllers import BackboneControllerInterface
 from regain.models.controllers import PreventionController
 from regain.models.controllers import RepairController
@@ -99,11 +101,11 @@ __all__ = [
 ]
 
 _STATUS_INCOMPLETE_ACC_EXP_BASE = 'incomplete_acc_exp_base'
-_NAMESPACE_FINAL = f'{NAMESPACE_RUN}{NS_SEP}final'
-_SUMMARY_ACC_EXP_AVG_BASE = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}exp{NS_SEP}avg{NS_SEP}base'
-_SUMMARY_ACC_FINAL_AVG_BASE = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
-_SUMMARY_ACC_FINAL_AVG_CTRL = f'{NAMESPACE_SUMMARY}{NS_SEP}accuracy{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
-_SUMMARY_RHO_AVG = f'{NAMESPACE_SUMMARY}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'
+_METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP = 'Top1_Acc_Exp'
+_METRIC_TOKEN_AVALANCHE_TOP1_ACC_STREAM = 'Top1_Acc_Stream'
+_METRIC_TOKEN_AVALANCHE_TEST_STREAM = 'test_stream'
+_METRIC_TOKEN_AVALANCHE_TRAIN_STREAM = 'train_stream'
+_REF_BACKBONE_LOGITS_ATTR = '_regain_ref_backbone_logits'
 
 
 def _sorted_unique_class_ids_for_experience(experience: object | None) -> list[int]:
@@ -553,6 +555,25 @@ class RepairControllerPlugin(SupervisedPlugin):
         self._train_seen_classes: set[int] = set()
         self._repair_seconds_total: float = 0.0
         self._repair_steps_total: int = 0
+        self.eval_correction_enabled: bool = True
+
+    def enable_eval_correction(self) -> None:
+        """
+        Enable controller output correction during evaluation.
+
+        Returns:
+            None.
+        """
+        self.eval_correction_enabled = True
+
+    def disable_eval_correction(self) -> None:
+        """
+        Disable controller output correction during evaluation.
+
+        Returns:
+            None.
+        """
+        self.eval_correction_enabled = False
 
     def initialize_parameters(self, *, model: nn.Module, dataset: Dataset | None) -> None:
         """
@@ -997,14 +1018,50 @@ class RepairControllerPlugin(SupervisedPlugin):
     def after_eval_forward(self, strategy: BaseTemplate, **kwargs) -> None:
         # Apply controller output correction while enforcing anti-cheat invariants.
         del kwargs
+        if not self.eval_correction_enabled:
+            return
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
+        if (
+            self._should_stash_ref_backbone_logits(strategy=strategy)
+            and torch.is_tensor(strategy.mb_output)
+        ):
+            setattr(
+                strategy,
+                _REF_BACKBONE_LOGITS_ATTR,
+                strategy.mb_output.detach().clone(),
+            )
         strategy.mb_output = self.apply_repair_correction(
             model=model,
             inputs=strategy.mb_x,
             backbone_outputs=strategy.mb_output,
         )
+
+    @staticmethod
+    def _should_stash_ref_backbone_logits(strategy: BaseTemplate) -> bool:
+        """
+        Check whether the current evaluation iteration needs backbone logits.
+
+        Args:
+            strategy (BaseTemplate): Strategy currently being evaluated.
+
+        Returns:
+            bool: True when the current minibatch should expose pre-correction
+                backbone logits to downstream prediction capture.
+        """
+        capture_context = getattr(strategy, '_regain_prediction_capture_context', None)
+        if not isinstance(capture_context, Mapping):
+            return False
+        if not bool(capture_context.get('ref_use_backbone_logits', False)):
+            return False
+
+        ref_test_exp_idx = capture_context.get('ref_test_exp_idx')
+        experience = getattr(strategy, 'experience', None)
+        current_exp_idx = getattr(experience, 'current_experience', None)
+        if ref_test_exp_idx is None or current_exp_idx is None:
+            return False
+        return int(ref_test_exp_idx) == int(current_exp_idx)
 
     @staticmethod
     def _resolve_repair_dataset(experience: object) -> Dataset | None:
@@ -1820,6 +1877,7 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
 
         self._eval_tag: str = ''
         self._checkpoint_exp_idx: int | None = None
+        self._capture_auxiliary_metrics: bool = True
         self._current_eval_metrics: dict[int, dict[str, object]] = {}
         self._current_exp_stats: dict[str, object] | None = None
         self._current_exp_idx: int | None = None
@@ -1941,7 +1999,12 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
         capture_context = getattr(strategy, '_regain_prediction_capture_context', None)
         checkpoint_exp_idx_raw = None
         if isinstance(capture_context, Mapping):
+            self._capture_auxiliary_metrics = bool(
+                capture_context.get('capture_auxiliary_metrics', True)
+            )
             checkpoint_exp_idx_raw = capture_context.get('checkpoint_exp_idx')
+        else:
+            self._capture_auxiliary_metrics = True
         self._checkpoint_exp_idx = (
             int(checkpoint_exp_idx_raw)
             if checkpoint_exp_idx_raw is not None
@@ -1953,6 +2016,8 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
 
     def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
         del kwargs
+        if not self._capture_auxiliary_metrics:
+            return
         experience = strategy.experience
         exp_idx = int(experience.current_experience)
         class_ids = {int(class_id) for class_id in experience.classes_in_this_experience}
@@ -1961,6 +2026,8 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
 
     def after_eval_iteration(self, strategy: BaseTemplate, **kwargs) -> None:
         del kwargs
+        if not self._capture_auxiliary_metrics:
+            return
         if self._current_exp_stats is None:
             return
 
@@ -2016,6 +2083,8 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
 
     def after_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
         del kwargs
+        if not self._capture_auxiliary_metrics:
+            return
         if self._current_exp_stats is None or self._current_exp_idx is None:
             return
 
@@ -2103,7 +2172,7 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
                     step=step,
                 )
 
-        if self._eval_tag == 'reference' and metrics_payload['logit_mean'] is not None:
+        if self._eval_tag == 'ref' and metrics_payload['logit_mean'] is not None:
             self._ref_logit_means[exp_idx] = np.asarray(metrics_payload['logit_mean'], dtype=np.float64)
         if (
             self._eval_tag == 'base'
@@ -2129,6 +2198,9 @@ class CalibrationDiagnosticsPlugin(SupervisedPlugin):
 
     def after_eval(self, strategy: BaseTemplate, **kwargs) -> None:
         del kwargs
+        if not self._capture_auxiliary_metrics:
+            self._checkpoint_exp_idx = None
+            return
         self._latest_eval_metrics = {
             int(exp_idx): dict(values)
             for exp_idx, values in self._current_eval_metrics.items()
@@ -2259,6 +2331,14 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         self._current_class_ids: list[int] = []
         self._current_logits_chunks: list[np.ndarray] = []
         self._current_targets_chunks: list[np.ndarray] = []
+        self._derived_ref_test_accuracy_cache: dict[tuple[str, int], float] = {}
+        self._current_ref_cache_key: tuple[str, int] | None = None
+        self._current_ref_enabled: bool = False
+        self._current_ref_seen_class_ids: list[int] = []
+        self._current_ref_use_backbone_logits: bool = False
+        self._current_ref_mask_value: float = -1e9
+        self._current_ref_correct: int = 0
+        self._current_ref_total: int = 0
 
     def has_artifacts(self) -> bool:
         """
@@ -2268,6 +2348,29 @@ class PredictionLoggingPlugin(SupervisedPlugin):
             bool: True when at least one prediction file has been staged.
         """
         return bool(self._written_files)
+
+    def pop_derived_ref_test_accuracy(
+        self,
+        *,
+        eval_tag: str,
+        checkpoint_exp_idx: int,
+    ) -> float | None:
+        """
+        Read and clear one derived current-test reference accuracy value.
+
+        Args:
+            eval_tag (str): Evaluation tag for the source evaluation call.
+            checkpoint_exp_idx (int): Checkpoint experience index for the source
+                evaluation call.
+
+        Returns:
+            float | None: Derived masked current-test reference accuracy, or None
+                when no value is cached for the requested evaluation call.
+        """
+        return self._derived_ref_test_accuracy_cache.pop(
+            (str(eval_tag), int(checkpoint_exp_idx)),
+            None,
+        )
 
     def _reset_current_experience(self) -> None:
         """
@@ -2280,6 +2383,91 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         self._current_class_ids = []
         self._current_logits_chunks = []
         self._current_targets_chunks = []
+        self._current_ref_cache_key = None
+        self._current_ref_enabled = False
+        self._current_ref_seen_class_ids = []
+        self._current_ref_use_backbone_logits = False
+        self._current_ref_mask_value = -1e9
+        self._current_ref_correct = 0
+        self._current_ref_total = 0
+
+    @staticmethod
+    def _ref_cache_key_from_context(
+        capture_context: Mapping[str, object] | None,
+    ) -> tuple[str, int] | None:
+        """
+        Resolve the derived-reference cache key for one evaluation call.
+
+        Args:
+            capture_context (Mapping[str, object] | None): Active prediction
+                capture context.
+
+        Returns:
+            tuple[str, int] | None: `(eval_tag, checkpoint_exp_idx)` when the
+                evaluation call is configured to derive a current-test reference
+                value, else None.
+        """
+        if not isinstance(capture_context, Mapping):
+            return None
+        if capture_context.get('ref_test_exp_idx') is None:
+            return None
+
+        eval_tag = str(capture_context.get('eval_tag') or '').strip()
+        checkpoint_exp_idx = capture_context.get('checkpoint_exp_idx')
+        if eval_tag == '' or checkpoint_exp_idx is None:
+            return None
+        return eval_tag, int(checkpoint_exp_idx)
+
+    @staticmethod
+    def _count_masked_ref_correct(
+        *,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        seen_class_ids: Sequence[int],
+        mask_value: float,
+    ) -> tuple[int, int]:
+        """
+        Count correct predictions after applying seen-class masking semantics.
+
+        Args:
+            logits (torch.Tensor): Unmasked logits for one minibatch.
+            targets (torch.Tensor): Integer class targets aligned to `logits`.
+            seen_class_ids (Sequence[int]): Class ids that remain unmasked.
+            mask_value (float): Logit value written into masked columns.
+
+        Returns:
+            tuple[int, int]: `(num_correct, num_samples)` for the masked top-1
+                predictions.
+        """
+        if logits.ndim != 2:
+            return 0, 0
+
+        targets_vec = targets.reshape(-1).to(device=logits.device, dtype=torch.long)
+        if int(targets_vec.shape[0]) != int(logits.shape[0]):
+            return 0, 0
+        if targets_vec.numel() <= 0:
+            return 0, 0
+
+        num_classes = int(logits.shape[1])
+        seen_class_id_set = {
+            int(class_id)
+            for class_id in seen_class_ids
+            if 0 <= int(class_id) < num_classes
+        }
+        unseen_class_ids = [
+            class_id
+            for class_id in range(num_classes)
+            if class_id not in seen_class_id_set
+        ]
+        if unseen_class_ids:
+            masked_logits = logits.detach().clone()
+            masked_logits[:, unseen_class_ids] = float(mask_value)
+        else:
+            masked_logits = logits
+
+        predictions = torch.argmax(masked_logits, dim=1)
+        num_correct = int(torch.sum(predictions.eq(targets_vec)).item())
+        return num_correct, int(targets_vec.shape[0])
 
     @staticmethod
     def _coerce_capture_context(strategy: BaseTemplate) -> dict[str, object] | None:
@@ -2296,6 +2484,9 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         if not isinstance(context, Mapping):
             return None
 
+        if not bool(context.get('capture_predictions', True)):
+            return None
+
         eval_tag = str(context.get('eval_tag') or '').strip()
         checkpoint_exp_idx = context.get('checkpoint_exp_idx')
         if eval_tag == '' or checkpoint_exp_idx is None:
@@ -2305,11 +2496,31 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         if checkpoint_exp_idx_int < 0:
             return None
 
-        return {
+        capture_context: dict[str, object] = {
             'eval_tag': eval_tag,
             'checkpoint_exp_idx': checkpoint_exp_idx_int,
             'mask_enabled': bool(context.get('mask_enabled', False)),
         }
+        ref_test_exp_idx = context.get('ref_test_exp_idx')
+        if ref_test_exp_idx is not None:
+            ref_seen_class_ids = context.get('ref_seen_class_ids', [])
+            if (
+                not isinstance(ref_seen_class_ids, Sequence)
+                or isinstance(ref_seen_class_ids, (str, bytes))
+            ):
+                raise ValueError('`ref_seen_class_ids` must be a numeric sequence.')
+            capture_context['ref_test_exp_idx'] = int(ref_test_exp_idx)
+            capture_context['ref_seen_class_ids'] = [
+                int(class_id)
+                for class_id in ref_seen_class_ids
+            ]
+            capture_context['ref_use_backbone_logits'] = bool(
+                context.get('ref_use_backbone_logits', False)
+            )
+            capture_context['ref_mask_value'] = float(
+                context.get('ref_mask_value', -1e9)
+            )
+        return capture_context
 
     @staticmethod
     def _artifact_relative_path(
@@ -2346,6 +2557,9 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         """
         del kwargs
         self._capture_context = self._coerce_capture_context(strategy)
+        cache_key = self._ref_cache_key_from_context(self._capture_context)
+        if cache_key is not None:
+            self._derived_ref_test_accuracy_cache.pop(cache_key, None)
         self._reset_current_experience()
 
     def before_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
@@ -2372,6 +2586,25 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         self._current_class_ids = _sorted_unique_class_ids_for_experience(
             getattr(strategy, 'experience', None),
         )
+        ref_test_exp_idx = self._capture_context.get('ref_test_exp_idx')
+        if ref_test_exp_idx is None:
+            return
+        if int(ref_test_exp_idx) != self._current_exp_idx:
+            return
+
+        self._current_ref_cache_key = self._ref_cache_key_from_context(
+            self._capture_context,
+        )
+        self._current_ref_enabled = True
+        self._current_ref_seen_class_ids = list(
+            self._capture_context.get('ref_seen_class_ids', []),
+        )
+        self._current_ref_use_backbone_logits = bool(
+            self._capture_context.get('ref_use_backbone_logits', False),
+        )
+        self._current_ref_mask_value = float(
+            self._capture_context.get('ref_mask_value', -1e9),
+        )
 
     def after_eval_iteration(self, strategy: BaseTemplate, **kwargs) -> None:
         """
@@ -2384,33 +2617,63 @@ class PredictionLoggingPlugin(SupervisedPlugin):
             None.
         """
         del kwargs
-        if self._capture_context is None or self._current_exp_idx is None:
-            return
+        try:
+            if self._capture_context is None or self._current_exp_idx is None:
+                return
 
-        logits = strategy.mb_output
-        targets = strategy.mb_y
-        if not torch.is_tensor(logits) or logits.ndim != 2:
-            return
-        if not torch.is_tensor(targets):
-            return
+            logits = strategy.mb_output
+            targets = strategy.mb_y
+            if not torch.is_tensor(logits) or logits.ndim != 2:
+                return
+            if not torch.is_tensor(targets):
+                return
 
-        targets_vec = targets.reshape(-1).to(device=logits.device, dtype=torch.long)
-        if int(targets_vec.shape[0]) != int(logits.shape[0]):
-            return
-        if int(logits.shape[1]) != self.num_classes:
-            raise ValueError(
-                'Prediction artifact width mismatch. '
-                f'expected={self.num_classes}, observed={int(logits.shape[1])}'
+            targets_vec = targets.reshape(-1).to(device=logits.device, dtype=torch.long)
+            if int(targets_vec.shape[0]) != int(logits.shape[0]):
+                return
+            if int(logits.shape[1]) != self.num_classes:
+                raise ValueError(
+                    'Prediction artifact width mismatch. '
+                    f'expected={self.num_classes}, observed={int(logits.shape[1])}'
+                )
+            if targets_vec.numel() == 0:
+                return
+
+            if self._current_ref_enabled:
+                ref_logits: torch.Tensor | None = logits
+                if self._current_ref_use_backbone_logits:
+                    ref_logits_raw = getattr(
+                        strategy,
+                        _REF_BACKBONE_LOGITS_ATTR,
+                        None,
+                    )
+                    if torch.is_tensor(ref_logits_raw):
+                        ref_logits = ref_logits_raw
+                    else:
+                        ref_logits = None
+                if torch.is_tensor(ref_logits):
+                    ref_targets = targets.reshape(-1).to(
+                        device=ref_logits.device,
+                        dtype=torch.long,
+                    )
+                    num_correct, num_samples = self._count_masked_ref_correct(
+                        logits=ref_logits,
+                        targets=ref_targets,
+                        seen_class_ids=self._current_ref_seen_class_ids,
+                        mask_value=self._current_ref_mask_value,
+                    )
+                    self._current_ref_correct += int(num_correct)
+                    self._current_ref_total += int(num_samples)
+
+            self._current_logits_chunks.append(
+                logits.detach().to(device='cpu', dtype=torch.float32).numpy()
             )
-        if targets_vec.numel() == 0:
-            return
-
-        self._current_logits_chunks.append(
-            logits.detach().to(device='cpu', dtype=torch.float32).numpy()
-        )
-        self._current_targets_chunks.append(
-            targets_vec.detach().to(device='cpu', dtype=torch.int32).numpy()
-        )
+            self._current_targets_chunks.append(
+                targets_vec.detach().to(device='cpu', dtype=torch.int32).numpy()
+            )
+        finally:
+            if hasattr(strategy, _REF_BACKBONE_LOGITS_ATTR):
+                delattr(strategy, _REF_BACKBONE_LOGITS_ATTR)
 
     def after_eval_exp(self, strategy: BaseTemplate, **kwargs) -> None:
         """
@@ -2424,6 +2687,14 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         """
         del strategy
         del kwargs
+        if (
+            self._current_ref_enabled
+            and self._current_ref_cache_key is not None
+            and self._current_ref_total > 0
+        ):
+            self._derived_ref_test_accuracy_cache[self._current_ref_cache_key] = (
+                float(self._current_ref_correct) / float(self._current_ref_total)
+            )
         if self._capture_context is None or self._current_exp_idx is None:
             return
         if not self._current_logits_chunks or not self._current_targets_chunks:
@@ -2459,7 +2730,8 @@ class PredictionLoggingPlugin(SupervisedPlugin):
         Returns:
             None.
         """
-        del strategy
+        if hasattr(strategy, _REF_BACKBONE_LOGITS_ATTR):
+            delattr(strategy, _REF_BACKBONE_LOGITS_ATTR)
         del kwargs
         self._capture_context = None
         self._reset_current_experience()
@@ -2518,7 +2790,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         self.eps = eps
         self.a_exp_base: list[float] = []
         self._num_experiences = len(self.benchmark.test_stream)
-        self._seen_class_ids_by_experience = self._build_seen_class_ids_by_experience()
         self.artifacts: dict[str, object] | None = None
         self.last_posthoc_scalar_results: dict[str, float] | None = None
         self.last_base_eval_results: dict[str, object] | None = None
@@ -2628,40 +2899,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             )
         return vector
 
-    def _build_seen_class_ids_by_experience(self) -> list[list[int]]:
-        """
-        Build cumulative seen-class ids per training experience index.
-
-        Returns:
-            list[list[int]]: Sorted cumulative class-id lists for each experience.
-        """
-        seen_class_ids: set[int] = set()
-        seen_class_vectors: list[list[int]] = []
-        for exp_idx in range(int(self._num_experiences)):
-            if exp_idx >= len(self.benchmark.train_stream):
-                seen_class_vectors.append(sorted(seen_class_ids))
-                continue
-            experience = self.benchmark.train_stream[exp_idx]
-            class_ids = _sorted_unique_class_ids_for_experience(experience)
-            seen_class_ids.update(class_ids)
-            seen_class_vectors.append(sorted(seen_class_ids))
-        return seen_class_vectors
-
-    def _seen_class_ids_until(self, *, exp_idx: int) -> list[int]:
-        """
-        Resolve sorted seen-class ids up to and including one experience.
-
-        Args:
-            exp_idx (int): Experience index.
-
-        Returns:
-            list[int]: Sorted seen-class ids.
-        """
-        exp_idx_int = int(exp_idx)
-        if exp_idx_int < 0 or exp_idx_int >= len(self._seen_class_ids_by_experience):
-            raise ValueError(f'Invalid experience index for seen classes: {exp_idx_int}')
-        return list(self._seen_class_ids_by_experience[exp_idx_int])
-
     @staticmethod
     def _log_analysis_metric(
         *,
@@ -2678,14 +2915,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             full_key += f'{NS_SEP}{variant}'
         mlflow.log_metric(key=full_key, value=float(value), step=int(step))
 
-    @staticmethod
-    def _log_summary_metric(key: str, value: float, step: int) -> None:
-        mlflow.log_metric(
-            key=str(key),
-            value=float(value),
-            step=int(step),
-        )
-
     def _toggle_mask(self, enable: bool) -> bool:
         previous_state = self.seen_mask_plugin.mask_enabled
         if enable:
@@ -2694,29 +2923,77 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             self.seen_mask_plugin.disable_masking()
         return previous_state
 
+    def _toggle_eval_correction(self, *, enable: bool) -> bool | None:
+        """
+        Toggle repair-controller output correction for a scoped evaluation run.
+
+        Args:
+            enable (bool): Whether evaluation-time correction should be enabled.
+
+        Returns:
+            bool | None: Previous correction state for repair controllers, else `None`.
+        """
+        controller_plugin = getattr(self, 'controller_plugin', None)
+        if not isinstance(controller_plugin, RepairControllerPlugin):
+            return None
+        previous_state = bool(controller_plugin.eval_correction_enabled)
+        if enable:
+            controller_plugin.enable_eval_correction()
+        else:
+            controller_plugin.disable_eval_correction()
+        return previous_state
+
     @staticmethod
     def _prediction_capture_context(
         *,
         eval_tag: str,
         checkpoint_exp_idx: int,
         mask_enabled: bool,
+        capture_predictions: bool = True,
+        capture_auxiliary_metrics: bool = True,
+        ref_test_exp_idx: int | None = None,
+        ref_seen_class_ids: Sequence[int] | None = None,
+        ref_use_backbone_logits: bool = False,
+        ref_mask_value: float | None = None,
     ) -> dict[str, object]:
         """
         Build evaluation metadata for prediction artifact capture.
 
         Args:
-            eval_tag (str): Evaluation tag such as `reference`, `base`, or `ctrl`.
+            eval_tag (str): Evaluation tag such as `ref`, `base`, or `ctrl`.
             checkpoint_exp_idx (int): Checkpoint experience index being evaluated.
             mask_enabled (bool): Whether seen-class masking is enabled.
+            ref_test_exp_idx (int | None): Optional current test experience
+                whose masked reference accuracy should be derived from this eval call.
+            ref_seen_class_ids (Sequence[int] | None): Seen class ids used to
+                reproduce reference masking semantics.
+            ref_use_backbone_logits (bool): Whether to read pre-correction
+                backbone logits from the repair-controller handoff.
+            ref_mask_value (float | None): Mask value used when reproducing the
+                seen-class masking semantics.
 
         Returns:
             dict[str, object]: JSON-serializable capture metadata.
         """
-        return {
+        capture_context: dict[str, object] = {
             'eval_tag': str(eval_tag),
             'checkpoint_exp_idx': int(checkpoint_exp_idx),
             'mask_enabled': bool(mask_enabled),
+            'capture_predictions': bool(capture_predictions),
+            'capture_auxiliary_metrics': bool(capture_auxiliary_metrics),
         }
+        if ref_test_exp_idx is not None:
+            capture_context['ref_test_exp_idx'] = int(ref_test_exp_idx)
+            capture_context['ref_seen_class_ids'] = [
+                int(class_id)
+                for class_id in (ref_seen_class_ids or [])
+            ]
+            capture_context['ref_use_backbone_logits'] = bool(
+                ref_use_backbone_logits
+            )
+            if ref_mask_value is not None:
+                capture_context['ref_mask_value'] = float(ref_mask_value)
+        return capture_context
 
     def _run_eval_with_state(
         self,
@@ -2726,8 +3003,16 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         mask_enabled: bool,
         eval_tag: str,
         checkpoint_exp_idx: int,
+        capture_predictions: bool = True,
+        capture_auxiliary_metrics: bool = True,
+        controller_enabled: bool = True,
+        ref_test_exp_idx: int | None = None,
+        ref_seen_class_ids: Sequence[int] | None = None,
+        ref_use_backbone_logits: bool = False,
+        ref_mask_value: float | None = None,
     ) -> dict[str, object]:
         prev_mask_state = self._toggle_mask(mask_enabled)
+        prev_controller_state = self._toggle_eval_correction(enable=controller_enabled)
         prev_phase = self.context.phase
         prev_log_namespace = self.context.log_namespace
         prev_log_step = self.context.log_step
@@ -2743,6 +3028,12 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                     eval_tag=eval_tag,
                     checkpoint_exp_idx=checkpoint_exp_idx,
                     mask_enabled=mask_enabled,
+                    capture_predictions=capture_predictions,
+                    capture_auxiliary_metrics=capture_auxiliary_metrics,
+                    ref_test_exp_idx=ref_test_exp_idx,
+                    ref_seen_class_ids=ref_seen_class_ids,
+                    ref_use_backbone_logits=ref_use_backbone_logits,
+                    ref_mask_value=ref_mask_value,
                 ),
             )
             self.context.set_phase(MetricPhase.EVAL)
@@ -2764,6 +3055,8 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             self.context.set_log_namespace(prev_log_namespace)
             self.context.set_log_step(prev_log_step)
             self.context.set_log_enabled(prev_log_enabled)
+            if prev_controller_state is not None:
+                self._toggle_eval_correction(enable=bool(prev_controller_state))
             self._toggle_mask(prev_mask_state)
 
     def _run_eval_with_logging(
@@ -2776,6 +3069,13 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         log_step: int,
         eval_tag: str,
         checkpoint_exp_idx: int,
+        capture_predictions: bool = True,
+        capture_auxiliary_metrics: bool = True,
+        controller_enabled: bool = True,
+        ref_test_exp_idx: int | None = None,
+        ref_seen_class_ids: Sequence[int] | None = None,
+        ref_use_backbone_logits: bool = False,
+        ref_mask_value: float | None = None,
     ) -> dict[str, object]:
         """
         Run evaluation with toggled mask state and metric logging enabled.
@@ -2787,11 +3087,20 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             log_namespace (str): Namespace to apply to logged metrics.
             log_step (int): Step to assign to logged metrics.
             checkpoint_exp_idx (int): Checkpoint experience index being evaluated.
+            ref_test_exp_idx (int | None): Optional current test experience
+                whose masked reference accuracy should be derived from this eval call.
+            ref_seen_class_ids (Sequence[int] | None): Seen class ids used to
+                reproduce reference masking semantics.
+            ref_use_backbone_logits (bool): Whether to read pre-correction
+                backbone logits from the repair-controller handoff.
+            ref_mask_value (float | None): Mask value used when reproducing the
+                seen-class masking semantics.
 
         Returns:
             dict[str, object]: Avalanche evaluation results.
         """
         prev_mask_state = self._toggle_mask(mask_enabled)
+        prev_controller_state = self._toggle_eval_correction(enable=controller_enabled)
         prev_phase = self.context.phase
         prev_log_namespace = self.context.log_namespace
         prev_log_step = self.context.log_step
@@ -2807,6 +3116,12 @@ class RegainEvaluationPlugin(SupervisedPlugin):
                     eval_tag=eval_tag,
                     checkpoint_exp_idx=checkpoint_exp_idx,
                     mask_enabled=mask_enabled,
+                    capture_predictions=capture_predictions,
+                    capture_auxiliary_metrics=capture_auxiliary_metrics,
+                    ref_test_exp_idx=ref_test_exp_idx,
+                    ref_seen_class_ids=ref_seen_class_ids,
+                    ref_use_backbone_logits=ref_use_backbone_logits,
+                    ref_mask_value=ref_mask_value,
                 ),
             )
             self.context.set_phase(MetricPhase.EVAL)
@@ -2829,6 +3144,8 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             self.context.set_log_namespace(prev_log_namespace)
             self.context.set_log_step(prev_log_step)
             self.context.set_log_enabled(prev_log_enabled)
+            if prev_controller_state is not None:
+                self._toggle_eval_correction(enable=bool(prev_controller_state))
             self._toggle_mask(prev_mask_state)
 
     def _run_checkpoint_eval(
@@ -2837,6 +3154,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         strategy: BaseTemplate,
         checkpoint_exp_idx: int,
         log_step: int,
+        derive_current_test_ref: bool = False,
     ) -> dict[str, float]:
         """
         Run one full-stream evaluation pass for a checkpoint and cache its scalar results.
@@ -2845,6 +3163,8 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             strategy (BaseTemplate): Avalanche strategy to evaluate.
             checkpoint_exp_idx (int): Checkpoint index represented by the current model state.
             log_step (int): Metric step for the evaluation pass.
+            derive_current_test_ref (bool): Whether to derive the masked
+                current-test reference accuracy from this full-stream pass.
 
         Returns:
             dict[str, float]: Scalar metric results from this checkpoint evaluation pass.
@@ -2853,6 +3173,25 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         stream = [self.benchmark.test_stream[i] for i in range(self._num_experiences)]
         has_controller = self.controller_plugin is not None
         eval_tag = 'ctrl' if has_controller else 'base'
+        ref_test_exp_idx = (
+            checkpoint_exp_idx_int
+            if derive_current_test_ref
+            else None
+        )
+        ref_seen_class_ids = (
+            sorted(int(class_id) for class_id in self.seen_mask_plugin.seen_classes)
+            if derive_current_test_ref
+            else None
+        )
+        ref_use_backbone_logits = (
+            derive_current_test_ref
+            and isinstance(self.controller_plugin, RepairControllerPlugin)
+        )
+        ref_mask_value = (
+            float(self.seen_mask_plugin.mask_value)
+            if derive_current_test_ref
+            else None
+        )
         eval_results = self._run_eval_with_logging(
             strategy=strategy,
             stream=stream,
@@ -2861,6 +3200,10 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             log_step=int(log_step),
             eval_tag=eval_tag,
             checkpoint_exp_idx=checkpoint_exp_idx_int,
+            ref_test_exp_idx=ref_test_exp_idx,
+            ref_seen_class_ids=ref_seen_class_ids,
+            ref_use_backbone_logits=ref_use_backbone_logits,
+            ref_mask_value=ref_mask_value,
         )
         scalar_results = extract_scalar_metrics(eval_results)
         self.last_posthoc_scalar_results = scalar_results
@@ -2874,74 +3217,135 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         return scalar_results
 
     @staticmethod
-    def _masked_top1_accuracy(
+    def _extract_current_experience_accuracy(
         *,
-        logits: np.ndarray,
-        targets: np.ndarray,
-        seen_class_ids: Sequence[int],
+        scalar_results: Mapping[str, float],
+        exp_idx: int,
+        stream_name: str,
     ) -> float:
         """
-        Compute top-1 accuracy after masking logits outside seen classes.
+        Extract top-1 accuracy for one experience from a single-stream evaluation pass.
 
         Args:
-            logits (np.ndarray): Logits of shape `(num_samples, num_classes)`.
-            targets (np.ndarray): Target labels of shape `(num_samples,)`.
-            seen_class_ids (Sequence[int]): Seen class ids allowed for prediction.
+            scalar_results (Mapping[str, float]): Raw scalar evaluation results.
+            exp_idx (int): Experience index to resolve.
+            stream_name (str): Expected stream token such as `train_stream`.
 
         Returns:
-            float: Seen-class masked top-1 accuracy.
+            float: Current-experience top-1 accuracy.
+
+        Raises:
+            RuntimeError: If no matching accuracy metric is present.
         """
-        logits_arr = np.asarray(logits, dtype=np.float32)
-        targets_arr = np.asarray(targets, dtype=np.int64).reshape(-1)
-        if logits_arr.ndim != 2:
-            raise ValueError(f'Expected 2D logits, got shape={logits_arr.shape!r}.')
-        if int(logits_arr.shape[0]) != int(targets_arr.shape[0]):
-            raise ValueError(
-                'Logits/targets sample-size mismatch. '
-                f'logits={int(logits_arr.shape[0])}, targets={int(targets_arr.shape[0])}'
-            )
-        valid_seen_class_ids = sorted(
-            int(class_id)
-            for class_id in seen_class_ids
-            if 0 <= int(class_id) < int(logits_arr.shape[1])
+        exp_token = f'Exp{int(exp_idx):03d}'
+        for key, value in scalar_results.items():
+            key_str = str(key)
+            if (
+                _METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP in key_str
+                and stream_name in key_str
+                and exp_token in key_str
+            ):
+                return float(value)
+
+        for key, value in scalar_results.items():
+            key_str = str(key)
+            if (
+                _METRIC_TOKEN_AVALANCHE_TOP1_ACC_STREAM in key_str
+                and stream_name in key_str
+            ):
+                return float(value)
+
+        raise RuntimeError(
+            'Missing current-experience accuracy metric. '
+            f'exp_idx={int(exp_idx)}, stream={stream_name}'
         )
-        if not valid_seen_class_ids:
-            raise ValueError('Seen-class mask is empty for masked top-1 computation.')
-        masked_logits = np.full_like(logits_arr, fill_value=-np.inf)
-        masked_logits[:, valid_seen_class_ids] = logits_arr[:, valid_seen_class_ids]
-        predictions = np.argmax(masked_logits, axis=1).astype(np.int64, copy=False)
-        return float(np.mean(predictions == targets_arr))
 
-    def _acc_exp_base_from_prediction_artifact(self, *, exp_idx: int) -> float:
+    def _run_current_experience_ref_eval(
+        self,
+        *,
+        strategy: BaseTemplate,
+        stream: Sequence[object],
+        exp_idx: int,
+        stream_name: str,
+    ) -> float:
         """
-        Compute `acc.exp.base` from the checkpoint prediction artifact for one experience.
+        Evaluate one experience under seen-class masking and return its base accuracy.
 
         Args:
-            exp_idx (int): Experience index.
+            strategy (BaseTemplate): Avalanche strategy to evaluate.
+            stream (Sequence[object]): Single-experience stream to evaluate.
+            exp_idx (int): Experience index represented by the stream.
+            stream_name (str): Expected stream token such as `train_stream`.
 
         Returns:
-            float: Seen-class masked top-1 accuracy.
+            float: Reference accuracy for the requested experience.
         """
         exp_idx_int = int(exp_idx)
-        eval_tag = 'ctrl' if self.controller_plugin is not None else 'base'
-        relative_path = PredictionLoggingPlugin._artifact_relative_path(
+        eval_results = self._run_eval_with_state(
+            strategy=strategy,
+            stream=stream,
+            mask_enabled=True,
+            eval_tag='ref',
             checkpoint_exp_idx=exp_idx_int,
-            eval_tag=eval_tag,
-            test_exp_idx=exp_idx_int,
+            capture_predictions=False,
+            capture_auxiliary_metrics=False,
+            controller_enabled=not isinstance(self.controller_plugin, RepairControllerPlugin),
         )
-        artifact_path = self.prediction_logging_plugin.artifact_root / relative_path
-        if not artifact_path.exists():
-            raise FileNotFoundError(
-                f'Prediction artifact not found for exp{exp_idx_int:03d}: {artifact_path}'
-            )
-        with np.load(artifact_path) as payload:
-            logits = np.asarray(payload['logits'], dtype=np.float32)
-            targets = np.asarray(payload['targets'], dtype=np.int64)
-        seen_class_ids = self._seen_class_ids_until(exp_idx=exp_idx_int)
-        return self._masked_top1_accuracy(
-            logits=logits,
-            targets=targets,
-            seen_class_ids=seen_class_ids,
+        scalar_results = extract_scalar_metrics(eval_results)
+        return self._extract_current_experience_accuracy(
+            scalar_results=scalar_results,
+            exp_idx=exp_idx_int,
+            stream_name=stream_name,
+        )
+
+    def _run_current_train_ref_eval(
+        self,
+        *,
+        strategy: BaseTemplate,
+        exp_idx: int,
+    ) -> float:
+        """
+        Evaluate the current training experience and return reference accuracy.
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy to evaluate.
+            exp_idx (int): Experience index to evaluate.
+
+        Returns:
+            float: Seen-class masked training accuracy for the current experience.
+        """
+        exp_idx_int = int(exp_idx)
+        train_experience = self.benchmark.train_stream[exp_idx_int]
+        return self._run_current_experience_ref_eval(
+            strategy=strategy,
+            stream=[train_experience],
+            exp_idx=exp_idx_int,
+            stream_name=_METRIC_TOKEN_AVALANCHE_TRAIN_STREAM,
+        )
+
+    def _run_current_test_ref_eval(
+        self,
+        *,
+        strategy: BaseTemplate,
+        exp_idx: int,
+    ) -> float:
+        """
+        Evaluate the current test experience and return reference accuracy.
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy to evaluate.
+            exp_idx (int): Experience index to evaluate.
+
+        Returns:
+            float: Seen-class masked test accuracy for the current experience.
+        """
+        exp_idx_int = int(exp_idx)
+        test_experience = self.benchmark.test_stream[exp_idx_int]
+        return self._run_current_experience_ref_eval(
+            strategy=strategy,
+            stream=[test_experience],
+            exp_idx=exp_idx_int,
+            stream_name=_METRIC_TOKEN_AVALANCHE_TEST_STREAM,
         )
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
@@ -2954,32 +3358,41 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             raise ValueError('Strategy experience index is missing.')
         exp_idx = int(exp_idx_raw)
         log_step = int((exp_idx + 1) * self.num_epochs_per_experience)
-        scalar_results = self._run_checkpoint_eval(
+        self._run_checkpoint_eval(
             strategy=strategy,
             checkpoint_exp_idx=exp_idx,
             log_step=log_step,
+            derive_current_test_ref=True,
         )
-        # Select backbone baseline values for repair runs; otherwise compute live.
-        if isinstance(self.controller_plugin, RepairControllerPlugin):
-            # Repair runs inherit end-of-experience base accuracies from the reserved backbone run.
-            if self._backbone_a_exp_base is None:
-                raise RuntimeError('Missing backbone `acc.exp.base` baseline for repair-controller run.')
-            self.a_exp_base.append(float(self._backbone_a_exp_base[exp_idx]))
-        else:
-            self.a_exp_base.append(self._acc_exp_base_from_prediction_artifact(exp_idx=exp_idx))
+        ref_test_accuracy = self.prediction_logging_plugin.pop_derived_ref_test_accuracy(
+            eval_tag='ctrl' if self.controller_plugin is not None else 'base',
+            checkpoint_exp_idx=exp_idx,
+        )
+        if ref_test_accuracy is None:
+            raise RuntimeError(
+                'Missing derived current-test reference accuracy. '
+                f'eval_tag={"ctrl" if self.controller_plugin is not None else "base"}, '
+                f'checkpoint_exp_idx={exp_idx}'
+            )
+        ref_train_accuracy = self._run_current_train_ref_eval(
+            strategy=strategy,
+            exp_idx=exp_idx,
+        )
+        self.a_exp_base.append(float(ref_test_accuracy))
         self._log_analysis_metric(
-            key=RUN_ACC_EXP,
-            value=float(self.a_exp_base[-1]),
+            key=RUN_ACC_REF_TEST,
+            value=float(ref_test_accuracy),
             step=log_step,
             experience=exp_idx,
             variant='base',
         )
-        if self.repair_after_experience and isinstance(self.controller_plugin, RepairControllerPlugin):
-            log_scalar_metrics_to_namespace(
-                scalar_metrics=scalar_results,
-                namespace=f'{NAMESPACE_RUN}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}',
-                step=int(log_step),
-            )
+        self._log_analysis_metric(
+            key=RUN_ACC_REF_TRAIN,
+            value=float(ref_train_accuracy),
+            step=log_step,
+            experience=exp_idx,
+            variant='base',
+        )
 
     @staticmethod
     def _extract_batch_inputs(batch: object) -> torch.Tensor | None:
@@ -3224,6 +3637,82 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             raise RuntimeError('Missing `calib.max_ece` from the latest evaluation pass.')
         return float(max_ece)
 
+    @staticmethod
+    def _mean_accuracy(values: Sequence[float]) -> float:
+        """
+        Compute the arithmetic mean of an accuracy vector.
+
+        Args:
+            values (Sequence[float]): Accuracy values.
+
+        Returns:
+            float: Mean accuracy.
+        """
+        return float(sum(values) / max(1, len(values)))
+
+    def _log_accuracy_vector(
+        self,
+        *,
+        key: str,
+        values: Sequence[float],
+        variant: str,
+        step: int,
+    ) -> None:
+        """
+        Log one per-experience accuracy vector under a unified namespace.
+
+        Args:
+            key (str): Metric prefix without experience or variant suffixes.
+            values (Sequence[float]): Per-experience accuracies.
+            variant (str): Accuracy variant such as `base` or `ctrl`.
+            step (int): MLflow metric step.
+
+        Returns:
+            None.
+        """
+        for exp_idx, value in enumerate(values):
+            self._log_analysis_metric(
+                key=key,
+                value=float(value),
+                step=step,
+                experience=int(exp_idx),
+                variant=variant,
+            )
+
+    def _evaluate_stream_accuracies(
+        self,
+        *,
+        strategy: BaseTemplate,
+        stream: Sequence[object],
+        eval_tag: str,
+        checkpoint_exp_idx: int,
+        controller_enabled: bool,
+    ) -> list[float]:
+        """
+        Evaluate a full stream and return ordered per-experience accuracies.
+
+        Args:
+            strategy (BaseTemplate): Avalanche strategy to evaluate.
+            stream (Sequence[object]): Stream to evaluate.
+            eval_tag (str): Evaluation tag such as `base` or `ctrl`.
+            checkpoint_exp_idx (int): Checkpoint experience index represented by the model state.
+            controller_enabled (bool): Whether repair correction should be enabled.
+
+        Returns:
+            list[float]: Ordered top-1 accuracies for the evaluated stream.
+        """
+        eval_results = self._run_eval_with_state(
+            strategy=strategy,
+            stream=stream,
+            mask_enabled=False,
+            eval_tag=eval_tag,
+            checkpoint_exp_idx=int(checkpoint_exp_idx),
+            capture_predictions=False,
+            capture_auxiliary_metrics=False,
+            controller_enabled=controller_enabled,
+        )
+        return ordered_accuracies(eval_results, self._num_experiences)
+
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
         # Finalize posthoc evaluation state and validate baseline completeness.
         del kwargs
@@ -3233,6 +3722,10 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         should_run_final = (
             self.last_posthoc_scalar_results is None
             or self.last_posthoc_exp_idx != self._num_experiences - 1
+            or (
+                isinstance(self.controller_plugin, RepairControllerPlugin)
+                and not self.repair_after_experience
+            )
         )
         if should_run_final:
             self._run_checkpoint_eval(
@@ -3242,11 +3735,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             )
         if self.last_posthoc_scalar_results is None:
             raise RuntimeError('Final checkpoint scalar metrics are missing.')
-        log_scalar_metrics_to_namespace(
-            scalar_metrics=self.last_posthoc_scalar_results,
-            namespace=_NAMESPACE_FINAL,
-            step=final_step,
-        )
 
         # Emit an incomplete artifact payload when reference points are missing.
         if have != expected:
@@ -3265,41 +3753,67 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             mlflow.log_dict(self.artifacts, MLFLOW_ARTIFACT_ANALYSIS_FILE)
             return
 
-        # Build final base accuracies from inherited or current evaluations.
+        final_test_base: list[float]
         if isinstance(self.controller_plugin, RepairControllerPlugin):
-            # Repair runs inherit final base baselines from the reserved backbone run.
-            if self._backbone_a_base is None:
-                raise RuntimeError('Missing backbone `acc.final.base` baseline for repair-controller run.')
-            a_base = [float(value) for value in self._backbone_a_base]
+            final_test_base = self._evaluate_stream_accuracies(
+                strategy=strategy,
+                stream=self.benchmark.test_stream,
+                eval_tag='base',
+                checkpoint_exp_idx=self._num_experiences - 1,
+                controller_enabled=False,
+            )
         else:
-            a_base_results = self.last_base_eval_results
-            if a_base_results is None and self.controller_plugin is not None:
-                if not isinstance(self.controller_plugin, RepairControllerPlugin):
-                    a_base_results = self.last_ctrl_eval_results
-            if a_base_results is None:
-                a_base_results = self._run_eval_with_state(
-                    strategy,
-                    self.benchmark.test_stream,
+            base_results = self.last_base_eval_results
+            if base_results is None and self.controller_plugin is not None:
+                base_results = self.last_ctrl_eval_results
+            if base_results is None:
+                base_results = self._run_eval_with_state(
+                    strategy=strategy,
+                    stream=self.benchmark.test_stream,
                     mask_enabled=False,
                     eval_tag='base',
                     checkpoint_exp_idx=self._num_experiences - 1,
+                    capture_predictions=False,
+                    capture_auxiliary_metrics=False,
+                    controller_enabled=True,
                 )
-            a_base = ordered_accuracies(a_base_results, self._num_experiences)
+            final_test_base = ordered_accuracies(base_results, self._num_experiences)
 
-        # Build final ctrl accuracies for downstream analysis.
-        if self.controller_plugin is None:
-            a_final_ctrl = list(a_base)
-        else:
-            a_final_ctrl_results = self.last_ctrl_eval_results
-            if a_final_ctrl_results is None:
-                a_final_ctrl_results = self._run_eval_with_state(
-                    strategy,
-                    self.benchmark.test_stream,
+        final_train_base = self._evaluate_stream_accuracies(
+            strategy=strategy,
+            stream=self.benchmark.train_stream,
+            eval_tag='base',
+            checkpoint_exp_idx=self._num_experiences - 1,
+            controller_enabled=not isinstance(self.controller_plugin, RepairControllerPlugin),
+        )
+
+        log_ctrl_metrics = isinstance(self.controller_plugin, RepairControllerPlugin)
+        if log_ctrl_metrics:
+            ctrl_results = self.last_ctrl_eval_results
+            if ctrl_results is None:
+                ctrl_results = self._run_eval_with_state(
+                    strategy=strategy,
+                    stream=self.benchmark.test_stream,
                     mask_enabled=False,
                     eval_tag='ctrl',
                     checkpoint_exp_idx=self._num_experiences - 1,
+                    capture_predictions=False,
+                    capture_auxiliary_metrics=False,
+                    controller_enabled=True,
                 )
-            a_final_ctrl = ordered_accuracies(a_final_ctrl_results, self._num_experiences)
+            final_test_ctrl = ordered_accuracies(ctrl_results, self._num_experiences)
+            final_train_ctrl = self._evaluate_stream_accuracies(
+                strategy=strategy,
+                stream=self.benchmark.train_stream,
+                eval_tag='ctrl',
+                checkpoint_exp_idx=self._num_experiences - 1,
+                controller_enabled=True,
+            )
+            a_final_ctrl = list(final_test_ctrl)
+        else:
+            final_test_ctrl = None
+            final_train_ctrl = None
+            a_final_ctrl = list(final_test_base)
 
         # Compute and persist full analysis artifact payload.
         diagnostic_vectors = self._diagnostic_vectors_for_artifacts()
@@ -3308,7 +3822,7 @@ class RegainEvaluationPlugin(SupervisedPlugin):
 
         artifacts = build_analysis_artifacts(
             a_exp_base=self.a_exp_base,
-            a_base=a_base,
+            a_base=final_test_base,
             a_final_ctrl=a_final_ctrl,
             eps=self.eps,
             extra_vectors=diagnostic_vectors,
@@ -3317,42 +3831,54 @@ class RegainEvaluationPlugin(SupervisedPlugin):
 
         self.artifacts = artifacts
         mlflow.log_dict(self.artifacts, MLFLOW_ARTIFACT_ANALYSIS_FILE)
-        log_ctrl_metrics = isinstance(self.controller_plugin, RepairControllerPlugin)
-        final_step = int(self._num_experiences * self.num_epochs_per_experience)
-        # Log per-experience final base vectors.
-        for i, value in enumerate(a_base):
-            self._log_analysis_metric(
-                key=RUN_ACC_FINAL,
-                value=float(value),
-                step=final_step,
-                experience=i,
-                variant='base',
-            )
+        self._log_accuracy_vector(
+            key=RUN_ACC_FINAL_TEST,
+            values=final_test_base,
+            variant='base',
+            step=final_step,
+        )
         self._log_analysis_metric(
-            key=RUN_ACC_FINAL_AVG_BASE,
-            value=float(sum(a_base) / max(1, len(a_base))),
+            key=RUN_ACC_FINAL_TEST_AVG_BASE,
+            value=self._mean_accuracy(final_test_base),
             step=final_step,
         )
-        self._log_summary_metric(
-            key=_SUMMARY_ACC_FINAL_AVG_BASE,
-            value=float(sum(a_base) / max(1, len(a_base))),
+        self._log_accuracy_vector(
+            key=RUN_ACC_FINAL_TRAIN,
+            values=final_train_base,
+            variant='base',
             step=final_step,
         )
-        self._log_summary_metric(
-            key=_SUMMARY_ACC_EXP_AVG_BASE,
-            value=float(sum(self.a_exp_base) / max(1, len(self.a_exp_base))),
+        self._log_analysis_metric(
+            key=RUN_ACC_FINAL_TRAIN_AVG_BASE,
+            value=self._mean_accuracy(final_train_base),
             step=final_step,
         )
 
         if log_ctrl_metrics:
-            for i, value in enumerate(a_final_ctrl):
-                self._log_analysis_metric(
-                    key=RUN_ACC_FINAL,
-                    value=float(value),
-                    step=final_step,
-                    experience=i,
-                    variant='ctrl',
-                )
+            if final_test_ctrl is None or final_train_ctrl is None:
+                raise RuntimeError('Repair-controller final accuracy vectors are missing.')
+            self._log_accuracy_vector(
+                key=RUN_ACC_FINAL_TEST,
+                values=final_test_ctrl,
+                variant='ctrl',
+                step=final_step,
+            )
+            self._log_analysis_metric(
+                key=RUN_ACC_FINAL_TEST_AVG_CTRL,
+                value=self._mean_accuracy(final_test_ctrl),
+                step=final_step,
+            )
+            self._log_accuracy_vector(
+                key=RUN_ACC_FINAL_TRAIN,
+                values=final_train_ctrl,
+                variant='ctrl',
+                step=final_step,
+            )
+            self._log_analysis_metric(
+                key=RUN_ACC_FINAL_TRAIN_AVG_CTRL,
+                value=self._mean_accuracy(final_train_ctrl),
+                step=final_step,
+            )
             for i, value in enumerate(artifacts[ARTIFACT_RHO]):
                 if value is None:
                     continue
@@ -3369,21 +3895,6 @@ class RegainEvaluationPlugin(SupervisedPlugin):
             self._log_analysis_metric(
                 key=RUN_RHO_AVG,
                 value=float(rho_avg),
-                step=final_step,
-            )
-            self._log_summary_metric(
-                key=_SUMMARY_RHO_AVG,
-                value=float(rho_avg),
-                step=final_step,
-            )
-            self._log_analysis_metric(
-                key=RUN_ACC_FINAL_AVG_CTRL,
-                value=float(sum(a_final_ctrl) / max(1, len(a_final_ctrl))),
-                step=final_step,
-            )
-            self._log_summary_metric(
-                key=_SUMMARY_ACC_FINAL_AVG_CTRL,
-                value=float(sum(a_final_ctrl) / max(1, len(a_final_ctrl))),
                 step=final_step,
             )
 

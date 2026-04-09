@@ -15,7 +15,6 @@ import mlflow
 
 from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
-from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NS_SEP
 from regain.constants import PARAM_AVALANCHE_VERSION
 from regain.constants import PARAM_BACKBONE
@@ -27,7 +26,6 @@ from regain.constants import PARAM_RUN_NAME
 from regain.constants import PARAM_TORCH_DETERMINISTIC_ALGORITHMS
 from regain.constants import STREAMS
 from regain.experiments.config import ExperimentConfig
-from regain.mlflow_utils import log_scalar_metrics_to_namespace
 from regain.registry import get_controller_path
 
 __all__ = [
@@ -38,7 +36,6 @@ __all__ = [
     'is_param_parent_present',
     'log_dataset_indices',
     'log_run_params',
-    'log_summary_metrics',
     'update_run_params_with_prefixed_children',
 ]
 
@@ -292,29 +289,6 @@ def log_run_params(
 
     # Log all params to MLflow (sorted by key for consistent ordering)
     mlflow.log_params({k: run_params[k] for k in sorted(run_params)})
-
-
-def log_summary_metrics(
-    *,
-    summary_metrics: Mapping[str, float],
-    step: int,
-) -> None:
-    """
-    Log summary scalar metrics to MLflow.
-
-    Args:
-        summary_metrics (Mapping[str, float]): Summary metric mapping.
-        step (int): Global metric step.
-
-    Returns:
-        None
-    """
-    log_scalar_metrics_to_namespace(
-        scalar_metrics=summary_metrics,
-        namespace=NAMESPACE_SUMMARY,
-        step=int(step),
-    )
-
 
 def extract_dataset_indices(experience_dataset: AvalancheDataset) -> list[int]:
     """

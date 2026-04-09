@@ -29,8 +29,8 @@ from regain.constants import COLUMN_REPAIR_SET_TOTAL
 from regain.constants import COLUMN_REPAIR_SPLIT_FRACTION
 from regain.constants import COLUMN_SEED
 from regain.constants import COLUMN_TASK_AGE
-from regain.constants import RUN_ACC_FINAL_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_AVG_CTRL
+from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_TEST_AVG_CTRL
 from regain.constants import RUN_CALIB_MAX_ECE
 from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_BASE
 from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_CTRL
@@ -46,9 +46,9 @@ _COLUMN_N_ROWS = 'n_rows'
 _COLUMN_N_RUNS = 'n_runs'
 _COLUMN_N_SEEDS = 'n_seeds'
 
-_ANALYSIS_ACC_FINAL_AVG_BASE = 'analysis.accuracy.final.avg.base'
-_ANALYSIS_ACC_FINAL_STD_BASE = 'analysis.accuracy.final.std.base'
-_ANALYSIS_ACC_FINAL_STD_CTRL = 'analysis.accuracy.final.std.ctrl'
+_ANALYSIS_ACC_FINAL_AVG_BASE = 'analysis.acc.final.avg.base'
+_ANALYSIS_ACC_FINAL_STD_BASE = 'analysis.acc.final.std.base'
+_ANALYSIS_ACC_FINAL_STD_CTRL = 'analysis.acc.final.std.ctrl'
 _ANALYSIS_CALIB_MAX_ECE_AVG = 'analysis.calibration.max_ece.avg'
 _ANALYSIS_CALIB_MAX_ECE_STD = 'analysis.calibration.max_ece.std'
 _ANALYSIS_LATENCY_MS_PER_SAMPLE_AVG_BASE = 'analysis.latency.ms_per_sample.avg.base'
@@ -97,8 +97,8 @@ def write_recoverability_curves(
     curve_rows: list[dict[str, Any]] = []
     for (controller, budget), rows in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
         rho_vals = [to_float(row.get(RUN_RHO_AVG)) for row in rows]
-        acc_ctrl_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_CTRL)) for row in rows]
-        acc_base_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_BASE)) for row in rows]
+        acc_ctrl_vals = [to_float(row.get(RUN_ACC_FINAL_TEST_AVG_CTRL)) for row in rows]
+        acc_base_vals = [to_float(row.get(RUN_ACC_FINAL_TEST_AVG_BASE)) for row in rows]
 
         curve_rows.append({
             COLUMN_CONTROLLER_NAME: controller,

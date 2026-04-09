@@ -60,7 +60,6 @@ from regain.experiments.config import RunConfig
 from regain.experiments.config import TrainingConfig
 from regain.experiments.logging import log_dataset_indices
 from regain.experiments.logging import log_run_params
-from regain.experiments.logging import log_summary_metrics
 from regain.experiments.utils import count_parameters
 from regain.experiments.utils import enable_determinism
 from regain.experiments.utils import resolve_backbone_training_config
@@ -444,12 +443,6 @@ def _train_and_evaluate_strategy(
             eval_scalar_results = regain_evaluation_plugin.last_posthoc_scalar_results
             if eval_scalar_results is None:
                 raise RuntimeError('Posthoc evaluation results missing from evaluation plugin.')
-
-            final_step = int(experiment_config.num_experiences * backbone_training.num_epochs)
-            log_summary_metrics(
-                summary_metrics=eval_scalar_results,
-                step=final_step,
-            )
 
             # Log the configuration used for the run to MLflow
             config_path = Path(artifacts_dir) / MLFLOW_ARTIFACT_CONFIG_FILE

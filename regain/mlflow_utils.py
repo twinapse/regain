@@ -26,9 +26,12 @@ from regain.constants import COLUMN_RUN_ID
 from regain.constants import COLUMN_RUN_NAME
 from regain.constants import COLUMN_START_TIME
 from regain.constants import COLUMN_STATUS
+from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ERROR_FILE
+from regain.constants import NAMESPACE_EVAL
 from regain.constants import NS_SEP
 from regain.constants import PARAM_RUN_NAME
+from regain.constants import RUN_ACC_REF_TEST
 
 __all__ = [
     'build_mlflow_run_columns',
@@ -37,7 +40,6 @@ __all__ = [
     'ensure_experiment',
     'format_timestamp_ms',
     'init_mlflow',
-    'log_scalar_metrics_to_namespace',
     'log_fatal_error_context',
     'normalize_metric_name',
     'normalize_tracking_uri',
@@ -57,6 +59,15 @@ _NS_SEP_ESCAPED = re.escape(NS_SEP)
 _NON_ALNUM_SEP = re.compile(rf'[^a-zA-Z0-9_{_NS_SEP_ESCAPED}]+')
 _MULTI_UNDERSCORE = re.compile(r'_+')
 _MULTI_NAMESPACE_SEP = re.compile(rf'{_NS_SEP_ESCAPED}+')
+_HISTORY_BEARING_EVAL_METRIC_PREFIXES = (
+    f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}',
+    f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}',
+)
+_REF_TEST_METRIC_RE = re.compile(
+    rf'^{re.escape(RUN_ACC_REF_TEST)}'
+    rf'{_NS_SEP_ESCAPED}{re.escape(EXPERIENCE_KEY_PREFIX)}(?P<idx>\d+)'
+    rf'{_NS_SEP_ESCAPED}base$'
+)
 
 
 ############################
@@ -106,45 +117,6 @@ def to_scalar_metric_value(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def log_scalar_metrics_to_namespace(
-    *,
-    scalar_metrics: Mapping[str, float],
-    namespace: str,
-    step: int,
-) -> None:
-    """
-    Log scalar metrics under a namespace after normalizing metric names.
-
-    Args:
-        scalar_metrics (Mapping[str, float]): Scalar metrics keyed by raw names.
-        namespace (str): Metric namespace prefix.
-        step (int): Metric step.
-
-    Returns:
-        None
-    """
-    if mlflow.active_run() is None:
-        return
-
-    namespace_prefix = str(namespace).strip()
-    for metric_name, metric_value in scalar_metrics.items():
-        scalar_value = to_scalar_metric_value(metric_value)
-        if scalar_value is None:
-            continue
-        normalized_name = normalize_metric_name(metric_name)
-        metric_key = (
-            f'{namespace_prefix}{NS_SEP}{normalized_name}'
-            if namespace_prefix != ''
-            else normalized_name
-        )
-        mlflow.log_metric(
-            key=metric_key,
-            value=float(scalar_value),
-            step=int(step),
-        )
-
 
 ##########################
 # URI/path normalization #
@@ -593,7 +565,7 @@ def resolve_mlflow_run_name(*, run: Run) -> str:
     if info_name:
         return str(info_name)
 
-    tags = dict(run.data.tags or {})
+    tags = dict(getattr(run.data, 'tags', {}) or {})
     tag_name = tags.get('mlflow.runName')
     if tag_name:
         return str(tag_name)
@@ -620,9 +592,219 @@ def format_timestamp_ms(timestamp_ms: int | None) -> str:
     return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc).isoformat()
 
 
+def _is_history_bearing_eval_metric(*, metric_key: str) -> bool:
+    """
+    Check whether an eval metric must be materialized from MLflow step history.
+
+    Args:
+        metric_key (str): Metric key stored in MLflow.
+
+    Returns:
+        bool: True when the exporter should inject an `after_exp###` token.
+    """
+    metric_key_str = str(metric_key)
+    return any(
+        metric_key_str.startswith(prefix)
+        for prefix in _HISTORY_BEARING_EVAL_METRIC_PREFIXES
+    )
+
+
+def _insert_after_experience_token(
+    *,
+    metric_key: str,
+    after_exp_idx: int,
+) -> str:
+    """
+    Insert an `after_exp###` token into a retained eval metric key.
+
+    Args:
+        metric_key (str): Canonical metric key such as `run.eval.forgetting.exp000`.
+        after_exp_idx (int): History ordinal derived from MLflow steps.
+
+    Returns:
+        str: Flattened export key with checkpoint identity materialized.
+    """
+    parts = str(metric_key).split(NS_SEP)
+    if len(parts) < 4:
+        return str(metric_key)
+    after_token = f'after_exp{int(after_exp_idx):03d}'
+    return NS_SEP.join(parts[:3] + [after_token] + parts[3:])
+
+
+def _require_metric_history(
+    *,
+    client: MlflowClient | None,
+    run_id: str,
+    metric_key: str,
+) -> list[Any]:
+    """
+    Fetch metric history required for strict export materialization.
+
+    Args:
+        client (MlflowClient | None): MLflow client used to fetch history.
+        run_id (str): Source run identifier.
+        metric_key (str): Metric key stored in MLflow.
+
+    Returns:
+        list[Any]: Raw MLflow metric history entries.
+
+    Raises:
+        ValueError: If the client is missing, the lookup fails, or no history exists.
+    """
+    if client is None:
+        raise ValueError(
+            'History-bearing eval metric export requires an MLflow client. '
+            f'run_id={run_id}, metric_key={metric_key}'
+        )
+
+    try:
+        history = list(client.get_metric_history(str(run_id), str(metric_key)))
+    except Exception as exc:
+        raise ValueError(
+            'Failed to fetch required MLflow metric history. '
+            f'run_id={run_id}, metric_key={metric_key}'
+        ) from exc
+
+    if not history:
+        raise ValueError(
+            'Missing required MLflow metric history. '
+            f'run_id={run_id}, metric_key={metric_key}'
+        )
+    return history
+
+
+def _ref_checkpoint_step_map(
+    *,
+    run: Run,
+    client: MlflowClient | None,
+) -> dict[int, int]:
+    """
+    Resolve checkpoint identity from reference test-accuracy histories.
+
+    Args:
+        run (Run): MLflow run whose metrics are being exported.
+        client (MlflowClient | None): MLflow client used to fetch history.
+
+    Returns:
+        dict[int, int]: Mapping from MLflow step to `after_exp###` index.
+
+    Raises:
+        ValueError: If required reference histories are missing or ambiguous.
+    """
+    run_id = str(run.info.run_id)
+    metrics = dict(getattr(run.data, 'metrics', {}) or {})
+    ref_metric_pairs: list[tuple[int, str]] = []
+    for metric_key in metrics:
+        match = _REF_TEST_METRIC_RE.match(str(metric_key))
+        if match is None:
+            continue
+        ref_metric_pairs.append((int(match.group('idx')), str(metric_key)))
+
+    if not ref_metric_pairs:
+        raise ValueError(
+            'Missing required reference accuracy metrics for history-bearing export. '
+            f'run_id={run_id}, required_prefix={RUN_ACC_REF_TEST}'
+        )
+
+    observed_exp_indices = sorted(exp_idx for exp_idx, _ in ref_metric_pairs)
+    expected_exp_indices = list(range(observed_exp_indices[-1] + 1))
+    if observed_exp_indices != expected_exp_indices:
+        missing_exp_indices = sorted(set(expected_exp_indices) - set(observed_exp_indices))
+        missing_tokens = ', '.join(f'exp{exp_idx:03d}' for exp_idx in missing_exp_indices)
+        raise ValueError(
+            'Missing required reference accuracy metrics for history-bearing export. '
+            f'run_id={run_id}, missing={missing_tokens}'
+        )
+
+    step_map: dict[int, int] = {}
+    for exp_idx, metric_key in sorted(ref_metric_pairs):
+        history = _require_metric_history(
+            client=client,
+            run_id=run_id,
+            metric_key=metric_key,
+        )
+        distinct_steps = {
+            int(getattr(metric, 'step', 0) or 0)
+            for metric in history
+        }
+        if len(distinct_steps) != 1:
+            raise ValueError(
+                'Reference accuracy history must map to exactly one checkpoint step. '
+                f'run_id={run_id}, metric_key={metric_key}, steps={sorted(distinct_steps)}'
+            )
+        step = next(iter(distinct_steps))
+        if step in step_map:
+            raise ValueError(
+                'Reference accuracy histories map multiple experiences to the same checkpoint step. '
+                f'run_id={run_id}, step={step}, after_exp_existing={step_map[step]:03d}, '
+                f'after_exp_new={exp_idx:03d}'
+            )
+        step_map[step] = exp_idx
+    return step_map
+
+
+def _materialize_metric_history_columns(
+    *,
+    client: MlflowClient | None,
+    run_id: str,
+    metric_key: str,
+    checkpoint_step_map: Mapping[int, int],
+) -> dict[str, float]:
+    """
+    Expand one history-bearing eval metric into `after_exp###` export columns.
+
+    Args:
+        client (MlflowClient | None): MLflow client used to fetch metric history.
+        run_id (str): Source run identifier.
+        metric_key (str): Metric key stored in MLflow.
+        checkpoint_step_map (Mapping[int, int]): Mapping from MLflow step to checkpoint identity.
+
+    Returns:
+        dict[str, float]: Export columns keyed by materialized metric names.
+
+    Raises:
+        ValueError: If the metric history is missing or cannot be mapped to checkpoints.
+    """
+    history = _require_metric_history(
+        client=client,
+        run_id=run_id,
+        metric_key=metric_key,
+    )
+
+    latest_value_by_step: dict[int, float] = {}
+    for metric in history:
+        step = int(getattr(metric, 'step', 0) or 0)
+        latest_value_by_step[step] = float(metric.value)
+
+    flattened_columns: dict[str, float] = {}
+    ordered_steps = sorted(latest_value_by_step)
+    for step in ordered_steps:
+        if step not in checkpoint_step_map:
+            # Avalanche emits a pre-training bootstrap history point at step=0 for both
+            # stream- and per-experience forgetting/transfer metrics, because their reporter
+            # uses `strategy.clock.train_iterations` which is 0 before the first training
+            # iteration. Reference test accuracies are only logged after each training
+            # experience completes (step >= num_epochs), so step=0 can never appear in the
+            # checkpoint step map. Drop the bootstrap point — there is no recoverable signal
+            # before training begins — but keep raising on any other unmapped step.
+            if step == 0:
+                continue
+            raise ValueError(
+                'History-bearing eval metric uses a step with no matching checkpoint identity. '
+                f'run_id={run_id}, metric_key={metric_key}, step={step}'
+            )
+        flattened_key = _insert_after_experience_token(
+            metric_key=str(metric_key),
+            after_exp_idx=int(checkpoint_step_map[step]),
+        )
+        flattened_columns[flattened_key] = float(latest_value_by_step[step])
+    return flattened_columns
+
+
 def build_mlflow_run_columns(
     *,
     run: Run,
+    client: MlflowClient | None = None,
     include_params: bool = True,
     include_metrics: bool = True,
 ) -> dict[str, object]:
@@ -631,6 +813,7 @@ def build_mlflow_run_columns(
 
     Args:
         run (Run): MLflow run to flatten.
+        client (MlflowClient | None): Optional MLflow client for metric history expansion.
         include_params (bool): Whether to include parameter columns.
         include_metrics (bool): Whether to include metric columns.
 
@@ -659,8 +842,23 @@ def build_mlflow_run_columns(
                 continue
             columns[param_key] = param_value
     if include_metrics:
+        checkpoint_step_map: dict[int, int] | None = None
         for metric_key, metric_value in run.data.metrics.items():
             if metric_key in reserved_keys:
+                continue
+            if _is_history_bearing_eval_metric(metric_key=metric_key):
+                if checkpoint_step_map is None:
+                    checkpoint_step_map = _ref_checkpoint_step_map(
+                        run=run,
+                        client=client,
+                    )
+                history_columns = _materialize_metric_history_columns(
+                    client=client,
+                    run_id=str(run.info.run_id),
+                    metric_key=str(metric_key),
+                    checkpoint_step_map=checkpoint_step_map,
+                )
+                columns.update(history_columns)
                 continue
             columns[metric_key] = metric_value
     return columns

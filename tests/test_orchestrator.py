@@ -83,7 +83,6 @@ class TestTrainInvocation:
         )
         monkeypatch.setattr(orchestrator_module, 'make_strategy', lambda **kwargs: strategy)
         monkeypatch.setattr(orchestrator_module, 'log_run_params', lambda **kwargs: None)
-        monkeypatch.setattr(orchestrator_module, 'log_summary_metrics', lambda **kwargs: None)
         monkeypatch.setattr(orchestrator_module, 'log_dataset_indices', lambda **kwargs: None)
         monkeypatch.setattr(orchestrator_module.mlflow, 'log_param', lambda *args, **kwargs: None)
         monkeypatch.setattr(orchestrator_module.mlflow, 'log_artifacts', lambda *args, **kwargs: None)

@@ -2,12 +2,10 @@
 Tests for RegainEvaluationPlugin baseline-only calibration scalar policy.
 """
 
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import mlflow
-import numpy as np
 import pytest
 from torch import nn
 from torch.utils.data import Dataset
@@ -16,11 +14,18 @@ from torch.utils.data import Dataset
 import regain.experiments.orchestrator  # noqa: F401
 import regain.avalanche_utils.plugins as plugins_module
 from regain.avalanche_utils.plugins import CalibrationDiagnosticsPlugin
+from regain.avalanche_utils.plugins import PredictionLoggingPlugin
 from regain.avalanche_utils.plugins import RegainEvaluationPlugin
 from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
 from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
+from regain.constants import RUN_ACC_FINAL_TEST
+from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_TRAIN
+from regain.constants import RUN_ACC_FINAL_TRAIN_AVG_BASE
+from regain.constants import RUN_ACC_REF_TEST
+from regain.constants import RUN_ACC_REF_TRAIN
 from regain.constants import RUN_CALIB_ECE
 from regain.constants import RUN_CALIB_MAX_ECE
 from regain.models.controllers import RepairController
@@ -56,6 +61,23 @@ class _StubCalibrationPlugin:
 
     def latest_max_ece(self) -> float | None:
         return self._latest_max_ece
+
+
+class _StubPredictionLoggingPlugin:
+    def __init__(self, *, derived_ref_accuracy: float | None) -> None:
+        self._derived_ref_accuracy = derived_ref_accuracy
+        self.pop_calls: list[tuple[str, int]] = []
+
+    def pop_derived_ref_test_accuracy(
+        self,
+        *,
+        eval_tag: str,
+        checkpoint_exp_idx: int,
+    ) -> float | None:
+        self.pop_calls.append((str(eval_tag), int(checkpoint_exp_idx)))
+        value = self._derived_ref_accuracy
+        self._derived_ref_accuracy = None
+        return value
 
 
 def _make_repair_controller_plugin() -> RepairControllerPlugin:
@@ -128,11 +150,11 @@ class TestRegainEvaluationPluginArtifactsLogging:
         plugin.eps = 0.0
         plugin.last_base_eval_results = {'ignored': 0.0}
         plugin.last_ctrl_eval_results = None
-        plugin.benchmark = SimpleNamespace(test_stream=[object()])
+        plugin.benchmark = SimpleNamespace(test_stream=[object()], train_stream=[object()])
         plugin._log_analysis_metric = lambda **kwargs: None
-        plugin._log_summary_metric = lambda **kwargs: None
         plugin._log_latency_overhead = lambda **kwargs: None
         plugin._run_eval_with_state = lambda *args, **kwargs: {'ignored': 0.0}
+        plugin._evaluate_stream_accuracies = lambda **kwargs: [0.69]  # type: ignore[method-assign]
         plugin._diagnostic_vectors_for_artifacts = lambda: {RUN_CALIB_ECE: [0.12]}
         plugin._calibration_max_ece_for_artifacts = lambda: 0.12
 
@@ -187,6 +209,10 @@ class TestRegainEvaluationPluginCheckpointEval:
             log_step: int,
             eval_tag: str,
             checkpoint_exp_idx: int,
+            ref_test_exp_idx: int | None = None,
+            ref_seen_class_ids: list[int] | None = None,
+            ref_use_backbone_logits: bool = False,
+            ref_mask_value: float | None = None,
         ) -> dict[str, float]:
             del strategy
             captured['stream'] = list(stream)
@@ -195,6 +221,10 @@ class TestRegainEvaluationPluginCheckpointEval:
             captured['log_step'] = int(log_step)
             captured['eval_tag'] = str(eval_tag)
             captured['checkpoint_exp_idx'] = int(checkpoint_exp_idx)
+            captured['ref_test_exp_idx'] = ref_test_exp_idx
+            captured['ref_seen_class_ids'] = ref_seen_class_ids
+            captured['ref_use_backbone_logits'] = bool(ref_use_backbone_logits)
+            captured['ref_mask_value'] = ref_mask_value
             return {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
 
         plugin._run_eval_with_logging = _run_eval_with_logging  # type: ignore[method-assign]
@@ -211,85 +241,55 @@ class TestRegainEvaluationPluginCheckpointEval:
         assert captured['log_step'] == 20
         assert captured['eval_tag'] == 'base'
         assert captured['checkpoint_exp_idx'] == 1
+        assert captured['ref_test_exp_idx'] is None
+        assert captured['ref_seen_class_ids'] is None
+        assert captured['ref_use_backbone_logits'] is False
+        assert captured['ref_mask_value'] is None
         assert scalar_results == {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
         assert plugin.last_posthoc_scalar_results == scalar_results
         assert plugin.last_base_eval_results == {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
         assert plugin.last_ctrl_eval_results is None
         assert plugin.last_posthoc_exp_idx == 1
 
-    def test_acc_exp_base_from_prediction_artifact_masks_unseen_classes(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        plugin = object.__new__(RegainEvaluationPlugin)
-        plugin.controller_plugin = None
-        plugin.prediction_logging_plugin = SimpleNamespace(
-            artifact_root=tmp_path / 'predictions'
-        )
-        plugin._seen_class_ids_by_experience = [[0, 1]]
-        relative_path = plugins_module.PredictionLoggingPlugin._artifact_relative_path(
-            eval_tag='base',
-            checkpoint_exp_idx=0,
-            test_exp_idx=0,
-        )
-        artifact_path = plugin.prediction_logging_plugin.artifact_root / relative_path
-        artifact_path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            artifact_path,
-            logits=np.asarray(
-                [
-                    [0.0, 1.0, 9.0],
-                    [2.0, 1.5, 8.0],
-                ],
-                dtype=np.float32,
-            ),
-            targets=np.asarray([1, 0], dtype=np.int32),
-            class_ids=np.asarray([0, 1], dtype=np.int32),
-        )
-
-        acc_exp_base = plugin._acc_exp_base_from_prediction_artifact(exp_idx=0)
-
-        assert acc_exp_base == pytest.approx(1.0)
-
     def test_after_training_exp_logs_repair_posthoc_metrics_from_single_eval_pass(
         self,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         plugin = object.__new__(RegainEvaluationPlugin)
         plugin.controller_plugin = _make_repair_controller_plugin()
+        plugin.prediction_logging_plugin = _StubPredictionLoggingPlugin(
+            derived_ref_accuracy=0.81,
+        )
         plugin.repair_after_experience = True
         plugin.num_epochs_per_experience = 50
-        plugin._backbone_a_exp_base = [0.81]
         plugin.a_exp_base = []
-        run_checkpoint_calls: list[int] = []
-        mirrored_namespaces: list[str] = []
+        run_checkpoint_calls: list[tuple[int, bool]] = []
+        train_eval_calls: list[int] = []
+        logged_analysis_metrics: list[dict[str, object]] = []
 
         def _run_checkpoint_eval(
             *,
             strategy: object,
             checkpoint_exp_idx: int,
             log_step: int,
+            derive_current_test_ref: bool = False,
         ) -> dict[str, float]:
             del strategy, log_step
-            run_checkpoint_calls.append(int(checkpoint_exp_idx))
+            run_checkpoint_calls.append(
+                (int(checkpoint_exp_idx), bool(derive_current_test_ref))
+            )
             return {'Top1_Acc_Stream/eval_phase/test_stream': 0.73}
 
-        def _log_scalar_metrics_to_namespace(
-            *,
-            scalar_metrics: dict[str, float],
-            namespace: str,
-            step: int,
-        ) -> None:
-            del scalar_metrics, step
-            mirrored_namespaces.append(str(namespace))
-
         plugin._run_checkpoint_eval = _run_checkpoint_eval  # type: ignore[method-assign]
-        monkeypatch.setattr(
-            plugins_module,
-            'log_scalar_metrics_to_namespace',
-            _log_scalar_metrics_to_namespace,
+        plugin._run_current_train_ref_eval = (
+            lambda *, strategy, exp_idx: (
+                train_eval_calls.append(int(exp_idx)),
+                0.79,
+            )[1]
         )
-        plugin._log_analysis_metric = lambda **kwargs: None
+        plugin._run_current_test_ref_eval = lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError('Unexpected extra current-test reference evaluation.')
+        )
+        plugin._log_analysis_metric = lambda **kwargs: logged_analysis_metrics.append(kwargs)
 
         strategy = SimpleNamespace(
             experience=SimpleNamespace(
@@ -299,9 +299,119 @@ class TestRegainEvaluationPluginCheckpointEval:
 
         plugin.after_training_exp(strategy=strategy)
 
-        assert run_checkpoint_calls == [0]
-        assert mirrored_namespaces == ['run.exp000']
+        assert run_checkpoint_calls == [(0, True)]
+        assert plugin.prediction_logging_plugin.pop_calls == [('ctrl', 0)]
+        assert train_eval_calls == [0]
         assert plugin.a_exp_base == pytest.approx([0.81])
+        assert len(logged_analysis_metrics) == 2
+        assert logged_analysis_metrics[0]['key'] == RUN_ACC_REF_TEST
+        assert logged_analysis_metrics[0]['experience'] == 0
+        assert logged_analysis_metrics[0]['variant'] == 'base'
+        assert logged_analysis_metrics[0]['step'] == 50
+        assert logged_analysis_metrics[0]['value'] == pytest.approx(0.81)
+        assert logged_analysis_metrics[1]['key'] == RUN_ACC_REF_TRAIN
+        assert logged_analysis_metrics[1]['experience'] == 0
+        assert logged_analysis_metrics[1]['variant'] == 'base'
+        assert logged_analysis_metrics[1]['step'] == 50
+        assert logged_analysis_metrics[1]['value'] == pytest.approx(0.79)
+
+    def test_after_training_exp_raises_when_derived_current_test_ref_is_missing(
+        self,
+    ) -> None:
+        plugin = object.__new__(RegainEvaluationPlugin)
+        plugin.controller_plugin = None
+        plugin.prediction_logging_plugin = _StubPredictionLoggingPlugin(
+            derived_ref_accuracy=None,
+        )
+        plugin.num_epochs_per_experience = 50
+        plugin.a_exp_base = []
+        run_checkpoint_calls: list[tuple[int, bool]] = []
+        train_eval_calls: list[int] = []
+        plugin._run_checkpoint_eval = (
+            lambda *,
+            strategy,
+            checkpoint_exp_idx,
+            log_step,
+            derive_current_test_ref=False: (
+                run_checkpoint_calls.append(
+                    (int(checkpoint_exp_idx), bool(derive_current_test_ref))
+                ),
+                {'Top1_Acc_Stream/eval_phase/test_stream': 0.73},
+            )[1]
+        )
+        plugin._run_current_train_ref_eval = (
+            lambda *, strategy, exp_idx: (
+                train_eval_calls.append(int(exp_idx)),
+                0.79,
+            )[1]
+        )
+        plugin._log_analysis_metric = lambda **kwargs: None
+
+        strategy = SimpleNamespace(
+            experience=SimpleNamespace(
+                current_experience=1,
+            )
+        )
+
+        with pytest.raises(RuntimeError, match='Missing derived current-test reference accuracy'):
+            plugin.after_training_exp(strategy=strategy)
+
+        assert run_checkpoint_calls == [(1, True)]
+        assert plugin.prediction_logging_plugin.pop_calls == [('base', 1)]
+        assert train_eval_calls == []
+        assert plugin.a_exp_base == []
+
+    def test_run_current_train_ref_eval_returns_ref_train_accuracy(
+        self,
+    ) -> None:
+        plugin = object.__new__(RegainEvaluationPlugin)
+        plugin.benchmark = SimpleNamespace(train_stream=['exp0', 'exp1'])
+        plugin.controller_plugin = None
+        captured_eval: dict[str, object] = {}
+
+        def _run_eval_with_state(
+            *,
+            strategy: object,
+            stream: list[object],
+            mask_enabled: bool,
+            eval_tag: str,
+            checkpoint_exp_idx: int,
+            capture_predictions: bool,
+            capture_auxiliary_metrics: bool,
+            controller_enabled: bool,
+        ) -> dict[str, float]:
+            del strategy
+            captured_eval['stream'] = list(stream)
+            captured_eval['mask_enabled'] = bool(mask_enabled)
+            captured_eval['eval_tag'] = str(eval_tag)
+            captured_eval['checkpoint_exp_idx'] = int(checkpoint_exp_idx)
+            captured_eval['capture_predictions'] = bool(capture_predictions)
+            captured_eval['capture_auxiliary_metrics'] = bool(capture_auxiliary_metrics)
+            captured_eval['controller_enabled'] = bool(controller_enabled)
+            return {
+                'Top1_Acc_Exp/eval_phase/train_stream/Exp001': 0.77,
+                'Loss_Exp/eval_phase/train_stream/Exp001': 0.23,
+                'Top1_Acc_Stream/eval_phase/train_stream': 0.77,
+                'Top1_Acc_Exp/eval_phase/test_stream/Exp001': 0.66,
+            }
+
+        plugin._run_eval_with_state = _run_eval_with_state  # type: ignore[method-assign]
+
+        train_eval_accuracy = plugin._run_current_train_ref_eval(
+            strategy=object(),
+            exp_idx=1,
+        )
+
+        assert captured_eval == {
+            'stream': ['exp1'],
+            'mask_enabled': True,
+            'eval_tag': 'ref',
+            'checkpoint_exp_idx': 1,
+            'capture_predictions': False,
+            'capture_auxiliary_metrics': False,
+            'controller_enabled': True,
+        }
+        assert train_eval_accuracy == pytest.approx(0.77)
 
     def test_after_training_logs_run_final_metrics_from_cached_checkpoint(
         self,
@@ -318,20 +428,15 @@ class TestRegainEvaluationPluginCheckpointEval:
         plugin.eps = 0.0
         plugin.last_base_eval_results = {'ignored': 0.0}
         plugin.last_ctrl_eval_results = None
-        plugin.benchmark = SimpleNamespace(test_stream=[object()])
+        plugin.benchmark = SimpleNamespace(test_stream=[object()], train_stream=[object()])
         plugin._run_checkpoint_eval = lambda **kwargs: (_ for _ in ()).throw(
             AssertionError('Unexpected extra final evaluation pass.')
         )
-        mirrored_namespaces: list[str] = []
-        monkeypatch.setattr(
-            plugins_module,
-            'log_scalar_metrics_to_namespace',
-            lambda **kwargs: mirrored_namespaces.append(kwargs['namespace']),
-        )
-        plugin._log_analysis_metric = lambda **kwargs: None
-        plugin._log_summary_metric = lambda **kwargs: None
+        logged_analysis_metrics: list[dict[str, object]] = []
+        plugin._log_analysis_metric = lambda **kwargs: logged_analysis_metrics.append(kwargs)
         plugin._log_latency_overhead = lambda **kwargs: None
         plugin._run_eval_with_state = lambda *args, **kwargs: {'ignored': 0.0}
+        plugin._evaluate_stream_accuracies = lambda **kwargs: [0.69]  # type: ignore[method-assign]
         plugin._diagnostic_vectors_for_artifacts = lambda: {RUN_CALIB_ECE: [0.12]}
         plugin._calibration_max_ece_for_artifacts = lambda: 0.12
 
@@ -360,7 +465,11 @@ class TestRegainEvaluationPluginCheckpointEval:
 
         plugin.after_training(strategy=object())
 
-        assert mirrored_namespaces == ['run.final']
+        logged_keys = [entry['key'] for entry in logged_analysis_metrics]
+        assert RUN_ACC_FINAL_TEST in logged_keys
+        assert RUN_ACC_FINAL_TEST_AVG_BASE in logged_keys
+        assert RUN_ACC_FINAL_TRAIN in logged_keys
+        assert RUN_ACC_FINAL_TRAIN_AVG_BASE in logged_keys
 
 
 class TestCalibrationDiagnosticsPluginState:
@@ -372,3 +481,37 @@ class TestCalibrationDiagnosticsPluginState:
         plugin.after_eval(strategy=object())
 
         assert plugin.latest_max_ece() is None
+
+    def test_train_probe_does_not_override_latest_eval_metrics(self) -> None:
+        plugin = CalibrationDiagnosticsPlugin(num_bins=10)
+        plugin._latest_eval_metrics = {0: {RUN_CALIB_ECE: 0.55}}
+
+        strategy = SimpleNamespace(
+            _regain_eval_tag='base',
+            _regain_prediction_capture_context={
+                'eval_tag': 'base',
+                'checkpoint_exp_idx': 0,
+                'capture_auxiliary_metrics': False,
+            },
+            _regain_metric_context=SimpleNamespace(log_step=50),
+        )
+
+        plugin.before_eval(strategy=strategy)
+        plugin.after_eval(strategy=strategy)
+
+        assert plugin.latest_max_ece() == pytest.approx(0.55)
+
+
+class TestPredictionLoggingPluginCaptureContext:
+    def test_capture_context_can_disable_prediction_artifacts(self) -> None:
+        strategy = SimpleNamespace(
+            _regain_prediction_capture_context={
+                'eval_tag': 'base',
+                'checkpoint_exp_idx': 0,
+                'capture_predictions': False,
+            }
+        )
+
+        capture_context = PredictionLoggingPlugin._coerce_capture_context(strategy)
+
+        assert capture_context is None

@@ -5,11 +5,137 @@ import mlflow
 
 from regain.analysis.metrics import MetricContext
 from regain.analysis.metrics import MetricPhase
+from regain.constants import NAMESPACE_EVAL
+from regain.constants import NAMESPACE_TRAIN
 from regain.constants import NS_SEP
 from regain.mlflow_utils import normalize_metric_name
 from regain.mlflow_utils import to_scalar_metric_value
 
 __all__ = ['MLflowLogger']
+
+
+_IGNORED_METRIC_TOKENS = {
+    'eval_phase',
+    'test_stream',
+    'train_phase',
+    'train_stream',
+}
+
+
+def _simplify_metric_tokens(*, normalized_name: str) -> list[str]:
+    """
+    Drop phase/stream/task tokens from a normalized Avalanche metric name.
+
+    Args:
+        normalized_name (str): Normalized metric token from Avalanche.
+
+    Returns:
+        list[str]: Simplified tokens used for canonicalization.
+    """
+    tokens: list[str] = []
+    for token in str(normalized_name).split(NS_SEP):
+        token_str = str(token).strip()
+        if token_str == '':
+            continue
+        if token_str in _IGNORED_METRIC_TOKENS:
+            continue
+        if token_str.startswith('task'):
+            continue
+        tokens.append(token_str)
+    return tokens
+
+
+def _canonicalize_train_metric(*, normalized_name: str) -> str | None:
+    """
+    Canonicalize retained Avalanche training metrics.
+
+    Args:
+        normalized_name (str): Normalized Avalanche metric token.
+
+    Returns:
+        str | None: Canonical MLflow key or `None` when the metric is dropped.
+    """
+    tokens = _simplify_metric_tokens(normalized_name=normalized_name)
+    if not tokens:
+        return None
+
+    head = tokens[0]
+    tail = tokens[1:]
+    if head.startswith('loss_'):
+        family_tokens = ['loss', head[len('loss_'):]]
+        family_tokens.extend(tail)
+        return f'{NAMESPACE_TRAIN}{NS_SEP}{NS_SEP.join(family_tokens)}'
+
+    if head.startswith('time_'):
+        family_tokens = ['time', head[len('time_'):]]
+        family_tokens.extend(tail)
+        return f'{NAMESPACE_TRAIN}{NS_SEP}{NS_SEP.join(family_tokens)}'
+
+    return None
+
+
+def _canonicalize_eval_metric(*, normalized_name: str) -> str | None:
+    """
+    Canonicalize retained Avalanche evaluation metrics.
+
+    Args:
+        normalized_name (str): Normalized Avalanche metric token.
+
+    Returns:
+        str | None: Canonical MLflow key or `None` when the metric is dropped.
+    """
+    tokens = _simplify_metric_tokens(normalized_name=normalized_name)
+    if not tokens:
+        return None
+
+    head = tokens[0]
+    tail = tokens[1:]
+    if head == 'experienceforgetting':
+        if not tail:
+            return None
+        return f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}{tail[0]}'
+
+    if head == 'streamforgetting':
+        return f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}stream'
+
+    if head == 'experienceforwardtransfer':
+        if not tail:
+            return None
+        return f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}{tail[0]}'
+
+    if head == 'streamforwardtransfer':
+        return f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}stream'
+
+    # Ensure train loss reported during eval phase is retained instead of dropped.
+    if head.startswith('loss_'):
+        family_tokens = ['loss', head[len('loss_'):]]
+        family_tokens.extend(tail)
+        return f'{NAMESPACE_TRAIN}{NS_SEP}{NS_SEP.join(family_tokens)}'
+
+    return None
+
+
+def _canonicalize_metric_key(
+    *,
+    normalized_name: str,
+    log_namespace: str,
+) -> str | None:
+    """
+    Canonicalize retained Avalanche metrics into stable MLflow namespaces.
+
+    Args:
+        normalized_name (str): Normalized Avalanche metric token.
+        log_namespace (str): Active logging namespace.
+
+    Returns:
+        str | None: Canonical metric key or `None` when the metric should be dropped.
+    """
+    namespace = str(log_namespace).strip()
+    if namespace == NAMESPACE_TRAIN:
+        return _canonicalize_train_metric(normalized_name=normalized_name)
+    if namespace == NAMESPACE_EVAL:
+        return _canonicalize_eval_metric(normalized_name=normalized_name)
+    return None
 
 
 class MLflowLogger(BaseLogger):
@@ -38,10 +164,12 @@ class MLflowLogger(BaseLogger):
 
         normalized = normalize_metric_name(name)
         log_namespace = str(self.context.log_namespace or '').strip()
-        if log_namespace:
-            metric_key = f'{log_namespace}{NS_SEP}{normalized}'
-        else:
-            metric_key = normalized
+        metric_key = _canonicalize_metric_key(
+            normalized_name=normalized,
+            log_namespace=log_namespace,
+        )
+        if metric_key is None:
+            return
 
         try:
             step = self._compute_step()

@@ -18,11 +18,10 @@ from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR
-from regain.constants import NAMESPACE_SUMMARY
 from regain.constants import NS_SEP
 from regain.constants import PARAM_BACKBONE
-from regain.constants import RUN_ACC_EXP
-from regain.constants import RUN_ACC_FINAL
+from regain.constants import RUN_ACC_FINAL_TEST
+from regain.constants import RUN_ACC_REF_TEST
 from regain.constants import RUN_NAME_BACKBONE
 from regain.experiments.config import LRSchedulerConfig
 from regain.experiments.config import OptimizerConfig
@@ -42,7 +41,6 @@ __all__ = [
     'extract_backbone_name_from_run',
     'extract_backbone_training_config_from_run',
     'extract_required_float_vector',
-    'extract_summary_metrics_from_run',
     'find_backbone_runs',
     'load_backbone_from_existing_run',
     'load_backbone_analysis_baseline_from_run',
@@ -69,7 +67,7 @@ def load_backbone_from_source_experiment(
 
     Returns:
         tuple[list[Path], dict[str, float], dict[str, list[float | None]], Run]:
-            (checkpoint paths, summary metrics, baseline vectors, source run).
+            (checkpoint paths, scalar evaluation metrics, baseline vectors, source run).
     """
     try:
         backbone_runs = find_backbone_runs(
@@ -108,7 +106,10 @@ def load_backbone_from_source_experiment(
         run=backbone_run,
         expected_num_experiences=expected_num_experiences,
     )
-    eval_results = extract_summary_metrics_from_run(run=backbone_run)
+    eval_results = {
+        str(key): float(value)
+        for key, value in dict(backbone_run.data.metrics or {}).items()
+    }
     return checkpoint_paths, eval_results, analysis_baseline, backbone_run
 
 
@@ -644,7 +645,10 @@ def load_backbone_from_existing_run(
         tuple[list[Path] | None, dict[str, float], dict[str, list[float | None]] | None]:
             (checkpoint paths, scalar evaluation metrics, backbone analysis baseline vectors).
     """
-    eval_results = extract_summary_metrics_from_run(run=backbone_run)
+    eval_results = {
+        str(key): float(value)
+        for key, value in dict(backbone_run.data.metrics or {}).items()
+    }
     if not include_checkpoints_and_baseline:
         return None, eval_results, None
 
@@ -770,8 +774,8 @@ def extract_backbone_analysis_baseline_from_metrics(
     """
     baseline: dict[str, list[float]] = {}
     key_to_prefix = {
-        ARTIFACT_ACC_EXP_BASE: RUN_ACC_EXP,
-        ARTIFACT_ACC_FINAL_BASE: RUN_ACC_FINAL,
+        ARTIFACT_ACC_EXP_BASE: RUN_ACC_REF_TEST,
+        ARTIFACT_ACC_FINAL_BASE: RUN_ACC_FINAL_TEST,
     }
     for key, metric_prefix in key_to_prefix.items():
         values: list[float] = []
@@ -838,25 +842,3 @@ def load_backbone_analysis_baseline_from_run(
         baseline[diag_key] = vector
 
     return baseline
-
-
-def extract_summary_metrics_from_run(*, run: Run) -> dict[str, float]:
-    """
-    Extract summary-namespace scalar metrics from an MLflow run.
-
-    Args:
-        run (Run): Source run.
-
-    Returns:
-        dict[str, float]: Summary metrics without the summary namespace prefix.
-    """
-    metrics_payload = dict(run.data.metrics or {})
-    prefix = f'{NAMESPACE_SUMMARY}{NS_SEP}'
-    summary_metrics: dict[str, float] = {}
-    for key, value in metrics_payload.items():
-        key_str = str(key)
-        if not key_str.startswith(prefix):
-            continue
-        summary_key = key_str[len(prefix):]
-        summary_metrics[summary_key] = float(value)
-    return summary_metrics
