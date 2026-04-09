@@ -11,6 +11,7 @@ import regain.experiments.backbone as backbone_module
 import regain.experiments.logging as logging_module
 from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
 from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
+from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import RUN_ACC_FINAL_TEST
 from regain.constants import RUN_ACC_REF_TEST
 from regain.constants import RUN_CALIB_AECE
@@ -31,6 +32,9 @@ from regain.experiments.config import StrategyConfig
 from regain.experiments.config import TrainingConfig
 from regain.experiments.config import LRSchedulerConfig
 from regain.experiments.logging import log_run_params
+from regain.avalanche_utils.plugins import RegainEvaluationPlugin
+from regain.avalanche_utils.plugins import SeenClassesObserver
+from regain.experiments.backbone import extract_backbone_analysis_baseline
 from regain.experiments.backbone import load_backbone_analysis_baseline_from_run
 
 
@@ -335,3 +339,39 @@ class TestBackboneTrainingLoggingRoundTrip:
         assert training.lr_scheduler is not None
         assert training.lr_scheduler.name == 'warmup_cosine'
         assert training.grad_clip_max_norm == pytest.approx(1.0)
+
+
+class _FakeEvaluator:
+    def __init__(self, artifacts: dict[str, object]) -> None:
+        self.artifacts = artifacts
+        self.last_posthoc_scalar_results = None
+
+
+class TestExtractBackboneAnalysisBaseline:
+    def test_reads_artifacts_from_rewritten_regain_evaluation_plugin(self) -> None:
+        artifacts: dict[str, object] = {
+            ARTIFACT_ACC_EXP_BASE: [0.75],
+            ARTIFACT_ACC_FINAL_BASE: [0.55],
+            RUN_DIAG_OUT_OF_TASK_RATE: [0.20],
+            RUN_DIAG_AVG_CONF: [0.30],
+            RUN_DIAG_AVG_ENTROPY: [0.40],
+            RUN_CALIB_ECE: [0.10],
+            RUN_CALIB_AECE: [0.11],
+            RUN_CALIB_NLL: [0.12],
+            RUN_DIAG_LOGIT_AVG_DRIFT: [0.13],
+        }
+        plugin = RegainEvaluationPlugin(
+            evaluator=_FakeEvaluator(artifacts=artifacts),
+            seen_classes_observer=SeenClassesObserver(),
+        )
+        strategy = SimpleNamespace(plugins=[plugin])
+
+        baseline = extract_backbone_analysis_baseline(
+            strategy=strategy,
+            expected_num_experiences=1,
+        )
+
+        assert baseline[ARTIFACT_ACC_EXP_BASE] == pytest.approx([0.75])
+        assert baseline[ARTIFACT_ACC_FINAL_BASE] == pytest.approx([0.55])
+        for key in DIAG_VECTOR_KEYS:
+            assert baseline[key] == pytest.approx(artifacts[key])

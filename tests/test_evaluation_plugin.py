@@ -1,40 +1,37 @@
 """
-Tests for evaluation plugin.
+Tests for the slim Avalanche strategy-side evaluator factory.
 """
 
-# Ensure a stable import order for plugin module initialization.
-import regain.experiments.orchestrator  # noqa: F401
 from regain.analysis import MetricContext
-from regain.avalanche_utils.plugins import make_evaluation_plugin
+from regain.avalanche_utils.plugins import make_training_evaluation_plugin
 
 
-###############################
-# Evaluation factory coverage #
-###############################
-
-class TestEvaluationPluginFactory:
-    def test_includes_forward_transfer_metrics_when_enabled(self) -> None:
-        plugin = make_evaluation_plugin(
+class TestTrainingEvaluationPluginFactory:
+    def test_keeps_only_loss_and_timing_metrics(self) -> None:
+        plugin = make_training_evaluation_plugin(
             context=MetricContext(),
             keep_timestep_results=True,
             log_to_console=True,
             log_to_mlflow=False,
-            include_forward_transfer=True,
         )
 
         metric_names = {type(metric).__name__ for metric in plugin.metrics}
-        assert 'ExperienceForwardTransfer' in metric_names
-        assert 'StreamForwardTransfer' in metric_names
-
-    def test_excludes_forward_transfer_metrics_when_disabled(self) -> None:
-        plugin = make_evaluation_plugin(
-            context=MetricContext(),
-            keep_timestep_results=True,
-            log_to_console=True,
-            log_to_mlflow=False,
-            include_forward_transfer=False,
-        )
-
-        metric_names = {type(metric).__name__ for metric in plugin.metrics}
+        assert 'EpochLoss' in metric_names
+        assert 'ExperienceLoss' in metric_names
+        assert 'StreamLoss' in metric_names
+        assert 'EpochTime' in metric_names
+        assert 'ExperienceForgetting' not in metric_names
+        assert 'StreamForgetting' not in metric_names
         assert 'ExperienceForwardTransfer' not in metric_names
         assert 'StreamForwardTransfer' not in metric_names
+
+    def test_uses_avalanche_logger_when_enabled(self) -> None:
+        plugin = make_training_evaluation_plugin(
+            context=MetricContext(),
+            keep_timestep_results=True,
+            log_to_console=False,
+            log_to_mlflow=True,
+        )
+
+        logger_names = {type(logger).__name__ for logger in plugin.loggers}
+        assert logger_names == {'MLflowTrainingLogger'}

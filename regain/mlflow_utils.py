@@ -32,6 +32,7 @@ from regain.constants import NAMESPACE_EVAL
 from regain.constants import NS_SEP
 from regain.constants import PARAM_RUN_NAME
 from regain.constants import RUN_ACC_REF_TEST
+from regain.constants import RUN_EVAL_LOSS
 
 __all__ = [
     'build_mlflow_run_columns',
@@ -60,6 +61,7 @@ _NON_ALNUM_SEP = re.compile(rf'[^a-zA-Z0-9_{_NS_SEP_ESCAPED}]+')
 _MULTI_UNDERSCORE = re.compile(r'_+')
 _MULTI_NAMESPACE_SEP = re.compile(rf'{_NS_SEP_ESCAPED}+')
 _HISTORY_BEARING_EVAL_METRIC_PREFIXES = (
+    f'{RUN_EVAL_LOSS}{NS_SEP}',
     f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}',
     f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}',
 )

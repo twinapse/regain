@@ -1,5 +1,5 @@
 """
-Tests for the Avalanche MLflow logger canonicalization policy.
+Tests for the retained Avalanche training logger.
 """
 
 import mlflow
@@ -7,7 +7,7 @@ import pytest
 
 from regain.analysis import MetricContext
 from regain.analysis.metrics import MetricPhase
-from regain.avalanche_utils.logging import MLflowLogger
+from regain.avalanche_utils.logging import MLflowTrainingLogger
 from regain.constants import NAMESPACE_EVAL
 from regain.constants import NAMESPACE_TRAIN
 
@@ -18,8 +18,8 @@ def _make_context(*, namespace: str, phase: MetricPhase, step: int) -> MetricCon
 
     Args:
         namespace (str): Logging namespace.
-        phase (MetricPhase): Active metric phase.
-        step (int): Step to expose through the context.
+        phase (MetricPhase): Active phase.
+        step (int): Training and log step.
 
     Returns:
         MetricContext: Configured context.
@@ -33,65 +33,13 @@ def _make_context(*, namespace: str, phase: MetricPhase, step: int) -> MetricCon
     return context
 
 
-class TestMlflowLogger:
-    def test_canonicalizes_eval_forgetting_metrics(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        logged_metrics: list[tuple[str, float, int]] = []
-        logger = MLflowLogger(
-            context=_make_context(
-                namespace=NAMESPACE_EVAL,
-                phase=MetricPhase.EVAL,
-                step=20,
-            )
-        )
-
-        monkeypatch.setattr(mlflow, 'active_run', lambda: object())
-        monkeypatch.setattr(
-            mlflow,
-            'log_metric',
-            lambda key, value, step: logged_metrics.append((str(key), float(value), int(step))),
-        )
-
-        logger.log_single_metric(
-            name='ExperienceForgetting/eval_phase/test_stream/Exp002',
-            value=0.31,
-            x_plot=0,
-        )
-
-        assert logged_metrics == [('run.eval.forgetting.exp002', pytest.approx(0.31), 20)]
-
-    def test_drops_eval_accuracy_metrics(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        logger = MLflowLogger(
-            context=_make_context(
-                namespace=NAMESPACE_EVAL,
-                phase=MetricPhase.EVAL,
-                step=30,
-            )
-        )
-        called = False
-
-        monkeypatch.setattr(mlflow, 'active_run', lambda: object())
-
-        def _log_metric(*args, **kwargs) -> None:
-            del args, kwargs
-            nonlocal called
-            called = True
-
-        monkeypatch.setattr(mlflow, 'log_metric', _log_metric)
-
-        logger.log_single_metric(
-            name='Top1_Acc_Exp/eval_phase/test_stream/Exp001',
-            value=0.73,
-            x_plot=0,
-        )
-
-        assert called is False
-
+class TestMlflowTrainingLogger:
     def test_canonicalizes_train_loss_and_time_metrics(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         logged_metrics: list[tuple[str, float, int]] = []
-        logger = MLflowLogger(
+        logger = MLflowTrainingLogger(
             context=_make_context(
                 namespace=NAMESPACE_TRAIN,
                 phase=MetricPhase.TRAIN,
@@ -122,18 +70,18 @@ class TestMlflowLogger:
             ('run.train.time.epoch', pytest.approx(1.5), 7),
         ]
 
-    def test_canonicalizes_eval_phase_loss_to_train_namespace(
+    def test_ignores_eval_namespace_metrics(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        logged_metrics: list[tuple[str, float, int]] = []
-        logger = MLflowLogger(
+        logger = MLflowTrainingLogger(
             context=_make_context(
                 namespace=NAMESPACE_EVAL,
                 phase=MetricPhase.EVAL,
                 step=5,
             )
         )
+        logged_metrics: list[tuple[str, float, int]] = []
 
         monkeypatch.setattr(mlflow, 'active_run', lambda: object())
         monkeypatch.setattr(
@@ -143,9 +91,24 @@ class TestMlflowLogger:
         )
 
         logger.log_single_metric(
-            name='Loss_Exp/eval_phase/test_stream/Exp003',
-            value=0.45,
+            name='ExperienceForgetting',
+            value=0.31,
+            x_plot=0,
+        )
+        logger.log_single_metric(
+            name='ExperienceForwardTransfer',
+            value=0.12,
+            x_plot=0,
+        )
+        logger.log_single_metric(
+            name='Loss_Stream',
+            value=1.75,
+            x_plot=0,
+        )
+        logger.log_single_metric(
+            name='Top1_Acc_Stream',
+            value=0.9,
             x_plot=0,
         )
 
-        assert logged_metrics == [('run.train.loss.exp.exp003', pytest.approx(0.45), 5)]
+        assert logged_metrics == []

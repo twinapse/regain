@@ -17,18 +17,16 @@ from torch.nn import CrossEntropyLoss
 import yaml
 
 from regain.analysis.metrics import MetricContext
+from regain.avalanche_utils.evaluation import RegainEvaluator
 from regain.avalanche_utils.plugins import BackboneCheckpointLoaderPlugin
 from regain.avalanche_utils.plugins import BackboneCheckpointWriterPlugin
-from regain.avalanche_utils.plugins import CalibrationDiagnosticsPlugin
 from regain.avalanche_utils.plugins import ControllerPlugin
-from regain.avalanche_utils.plugins import EvaluationIntegrityPlugin
-from regain.avalanche_utils.plugins import make_evaluation_plugin
+from regain.avalanche_utils.plugins import make_training_evaluation_plugin
 from regain.avalanche_utils.plugins import MetricContextPlugin
 from regain.avalanche_utils.plugins import NumericalStabilityGuardPlugin
-from regain.avalanche_utils.plugins import PredictionLoggingPlugin
 from regain.avalanche_utils.plugins import RegainEvaluationPlugin
 from regain.avalanche_utils.plugins import RepairControllerPlugin
-from regain.avalanche_utils.plugins import SeenClassesMaskPlugin
+from regain.avalanche_utils.plugins import SeenClassesObserver
 from regain.constants import MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR
 from regain.constants import MLFLOW_ARTIFACT_CONFIG_FILE
 from regain.constants import MLFLOW_ARTIFACT_PREDICTIONS_DIR
@@ -38,6 +36,8 @@ from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import PARAM_CONTROLLER_TYPE
 from regain.constants import RUN_NAME_BACKBONE
+from regain.evaluation import CalibrationCollector
+from regain.evaluation import PredictionRecorder
 from regain.experiments.backbone import extract_backbone_analysis_baseline
 from regain.experiments.backbone import extract_backbone_kwargs_from_run
 from regain.experiments.backbone import extract_backbone_name_from_run
@@ -226,25 +226,22 @@ def _train_and_evaluate_strategy(
             context = MetricContext()
             context_plugin = MetricContextPlugin(context=context)
 
-            # Build the evaluation plugin
-            eval_plugin = make_evaluation_plugin(
+            # Build the slim Avalanche evaluator retained on the training strategy.
+            eval_plugin = make_training_evaluation_plugin(
                 context=context,
                 keep_timestep_results=True,
                 log_to_console=True,
                 log_to_mlflow=True,
-                include_forward_transfer=(
-                    experiment_config.evaluation.avalanche_schedule == 'per_experience'
-                ),
             )
 
-            # Build the seen classes mask plugin
-            seen_mask_plugin = SeenClassesMaskPlugin()
+            # Track seen classes for posthoc masked reference accuracy.
+            seen_classes_observer = SeenClassesObserver()
 
-            # Build the calibration metric plugin
-            calibration_plugin = CalibrationDiagnosticsPlugin(num_bins=15)
+            # Build the posthoc calibration collector.
+            calibration_collector = CalibrationCollector(num_bins=15)
 
-            # Build the prediction logging plugin
-            prediction_logging_plugin = PredictionLoggingPlugin(
+            # Build the prediction artifact recorder used by the custom evaluator.
+            prediction_recorder = PredictionRecorder(
                 artifact_root=Path(artifacts_dir) / MLFLOW_ARTIFACT_PREDICTIONS_DIR,
                 num_classes=benchmark.n_classes,
             )
@@ -280,25 +277,8 @@ def _train_and_evaluate_strategy(
             else:
                 controller_plugin: ControllerPlugin | None = None
 
-            # Build the evaluation plugin
-            regain_evaluation_plugin = RegainEvaluationPlugin(
-                benchmark=benchmark,
-                controller_plugin=controller_plugin,
-                calibration_plugin=calibration_plugin,
-                repair_after_experience=repair_fit_after_experience,
-                seen_mask_plugin=seen_mask_plugin,
-                prediction_logging_plugin=prediction_logging_plugin,
-                num_epochs_per_experience=backbone_training.num_epochs,
-                context=context,
-                backbone_analysis_baseline=backbone_analysis_baseline,
-                eps=1e-4,
-            )
-            eval_integrity_plugin = EvaluationIntegrityPlugin(
-                controller_plugin=controller_plugin,
-            )
-
             # Save the plugins that will be used in the strategy
-            strategy_plugins = [context_plugin, seen_mask_plugin]
+            strategy_plugins = [context_plugin, seen_classes_observer]
             checkpoint_writer_plugin: BackboneCheckpointWriterPlugin | None = None
             if checkpoint_dir is not None:
                 checkpoint_writer_plugin = BackboneCheckpointWriterPlugin(checkpoint_dir=checkpoint_dir)
@@ -312,10 +292,6 @@ def _train_and_evaluate_strategy(
             if controller_plugin is not None:
                 strategy_plugins.append(controller_plugin)
             strategy_plugins.append(numerical_stability_guard_plugin)
-            strategy_plugins.append(calibration_plugin)
-            strategy_plugins.append(prediction_logging_plugin)
-            strategy_plugins.append(regain_evaluation_plugin)
-            strategy_plugins.append(eval_integrity_plugin)
 
             # Build the backbone model
             backbone_name = (
@@ -353,6 +329,33 @@ def _train_and_evaluate_strategy(
                 optimizer_config=backbone_training.optimizer,
             )
             criterion = CrossEntropyLoss()
+
+            # Build the custom REGAIN evaluator and its thin Avalanche hook adapter.
+            custom_evaluator = RegainEvaluator(
+                benchmark=benchmark,
+                model=backbone,
+                controller=controller_plugin.controller if controller_plugin is not None else None,
+                seen_classes=seen_classes_observer.seen_classes,
+                device=experiment_config.device,
+                criterion=criterion,
+                num_classes=benchmark.n_classes,
+                calibration=calibration_collector,
+                prediction_recorder=prediction_recorder,
+                context=context,
+                batch_size=experiment_config.evaluation.batch_size,
+                num_epochs_per_experience=backbone_training.num_epochs,
+                repair_after_experience=repair_fit_after_experience,
+                include_forward_transfer=(
+                    experiment_config.evaluation.avalanche_schedule == 'per_experience'
+                ),
+                backbone_analysis_baseline=backbone_analysis_baseline,
+                eps=1e-4,
+            )
+            regain_evaluation_plugin = RegainEvaluationPlugin(
+                evaluator=custom_evaluator,
+                seen_classes_observer=seen_classes_observer,
+            )
+            strategy_plugins.append(regain_evaluation_plugin)
 
             # Attach LR scheduler plugin if configured
             if (
@@ -427,9 +430,9 @@ def _train_and_evaluate_strategy(
                     raise ValueError('Checkpoint artifacts requested but no checkpoint directory was provided.')
                 mlflow.log_artifacts(str(checkpoint_dir), artifact_path=MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR)
 
-            if prediction_logging_plugin.has_artifacts():
+            if prediction_recorder.has_artifacts():
                 mlflow.log_artifacts(
-                    str(prediction_logging_plugin.artifact_root),
+                    str(prediction_recorder.artifact_root),
                     artifact_path=MLFLOW_ARTIFACT_PREDICTIONS_DIR,
                 )
 
