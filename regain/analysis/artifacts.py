@@ -1,16 +1,15 @@
 """
-Helpers for extracting analysis accuracies from evaluation results.
+Helpers for assembling `analysis_artifacts.json`.
 """
 
 from collections.abc import Mapping
-import re
-from typing import Dict, List, Sequence
+from typing import Sequence, TypeAlias
 
 from regain.analysis.metrics import mean_ignore_invalid
 from regain.analysis.metrics import retrieval_correctable_fractions
-from regain.analysis.utils import to_float
 
 __all__ = [
+    'AnalysisArtifacts',
     'ARTIFACT_ACC_EXP_BASE',
     'ARTIFACT_ACC_FINAL_BASE',
     'ARTIFACT_ACC_FINAL_CTRL',
@@ -21,8 +20,6 @@ __all__ = [
     'ARTIFACT_RHO',
     'ARTIFACT_RHO_AVG',
     'build_analysis_artifacts',
-    'extract_top1_by_experience',
-    'ordered_accuracies',
 ]
 
 # Artifact JSON keys (not MLflow metric keys — no run. prefix).
@@ -38,88 +35,10 @@ ARTIFACT_DELTA_A = 'delta_a'
 ARTIFACT_F_RES = 'f_res'
 ARTIFACT_F_TOTAL = 'f_total'
 
-_METRIC_TOKEN_AVALANCHE_EVAL_PHASE = 'eval_phase'
-_METRIC_TOKEN_AVALANCHE_TEST_STREAM = 'test_stream'
-_METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP = 'Top1_Acc_Exp'
-
-
-_EXP_RE = re.compile(r'(?:^|/|\b)Exp(\d+)(?:\b|/|$)')
-
-
-def _parse_exp_idx(key: str) -> int | None:
-    m = _EXP_RE.search(key)
-    return int(m.group(1)) if m else None
-
-
-# TODO: Make it Avalanche-agnostic by passing expected metric name patterns
-def extract_top1_by_experience(
-    eval_results: dict[str, object],
-    num_experiences: int,
-) -> Dict[int, float]:
-    """
-    Extract Top1 accuracy per experience from Avalanche eval results.
-
-    Args:
-        eval_results: Evaluation results mapping metric names to values.
-        num_experiences: Number of experiences to expect.
-
-    Returns:
-        Mapping from experience index to Top1 accuracy.
-    """
-    acc_by_exp: dict[int, float] = {}
-    def _maybe_record(items: dict[str, object]) -> None:
-        for key, value in items.items():
-            exp_idx = _parse_exp_idx(key)
-            if exp_idx is None or exp_idx < 0 or exp_idx >= num_experiences:
-                continue
-            score = to_float(value, allow_bool=True, require_finite=False)
-            if score is None:
-                continue
-            acc_by_exp[exp_idx] = score
-
-    preferred_keys = {
-        key: value
-        for key, value in eval_results.items()
-        if _METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP in key
-        and (_METRIC_TOKEN_AVALANCHE_EVAL_PHASE in key)
-        and (_METRIC_TOKEN_AVALANCHE_TEST_STREAM in key)
-    }
-    if preferred_keys:
-        _maybe_record(preferred_keys)
-    else:
-        candidates = {
-            key: value
-            for key, value in eval_results.items()
-            if _METRIC_TOKEN_AVALANCHE_TOP1_ACC_EXP in key
-        }
-        _maybe_record(candidates)
-    return acc_by_exp
-
-
-def ordered_accuracies(
-    eval_results: dict[str, object],
-    num_experiences: int,
-) -> List[float]:
-    """
-    Produce an ordered list of Top1 accuracies across experiences.
-
-    Args:
-        eval_results: Evaluation results mapping metric names to values.
-        num_experiences: Number of experiences to expect.
-
-    Returns:
-        List of accuracies ordered by experience index.
-
-    Raises:
-        ValueError: If an experience accuracy is missing.
-    """
-    acc_map = extract_top1_by_experience(eval_results, num_experiences)
-    accuracies: list[float] = []
-    for exp_idx in range(num_experiences):
-        if exp_idx not in acc_map:
-            raise ValueError(f'Missing Top1 accuracy for experience {exp_idx}.')
-        accuracies.append(acc_map[exp_idx])
-    return accuracies
+AnalysisArtifactScalar: TypeAlias = str | int | float | None
+AnalysisArtifactVector: TypeAlias = list[float] | list[float | None]
+AnalysisArtifactValue: TypeAlias = AnalysisArtifactScalar | AnalysisArtifactVector
+AnalysisArtifacts: TypeAlias = dict[str, AnalysisArtifactValue]
 
 
 def build_analysis_artifacts(
@@ -129,7 +48,7 @@ def build_analysis_artifacts(
     eps: float = 1e-4,
     extra_vectors: Mapping[str, Sequence[float | None]] | None = None,
     extra_scalars: Mapping[str, float] | None = None,
-) -> dict[str, object]:
+) -> AnalysisArtifacts:
     """
     Construct a JSON-serializable bundle of analysis metrics.
 
@@ -160,7 +79,7 @@ def build_analysis_artifacts(
     rho = retrieval_correctable_fractions(zip(a_exp_base_list, a_base_list, a_final_ctrl_list), eps)
     rho_avg = mean_ignore_invalid(rho)
 
-    payload: dict[str, object] = {
+    payload: AnalysisArtifacts = {
         ARTIFACT_ACC_EXP_BASE: a_exp_base_list,
         ARTIFACT_ACC_FINAL_BASE: a_base_list,
         ARTIFACT_ACC_FINAL_CTRL: a_final_ctrl_list,

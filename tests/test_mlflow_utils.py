@@ -156,6 +156,7 @@ class TestBuildMlflowRunColumns:
                 f'{RUN_ACC_REF_TEST}.exp000.base': 0.91,
                 f'{RUN_ACC_REF_TEST}.exp001.base': 0.82,
                 f'{RUN_ACC_REF_TEST}.exp002.base': 0.73,
+                'run.eval.loss.exp.exp000': 1.23,
                 'run.eval.forgetting.exp000': 0.22,
                 'run.eval.transfer.stream': 0.44,
                 'run.eval.acc.final.test.avg.base': 0.77,
@@ -166,6 +167,10 @@ class TestBuildMlflowRunColumns:
                 f'{RUN_ACC_REF_TEST}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
                 f'{RUN_ACC_REF_TEST}.exp001.base': [SimpleNamespace(step=20, value=0.82)],
                 f'{RUN_ACC_REF_TEST}.exp002.base': [SimpleNamespace(step=30, value=0.73)],
+                'run.eval.loss.exp.exp000': [
+                    SimpleNamespace(step=20, value=1.11),
+                    SimpleNamespace(step=30, value=1.23),
+                ],
                 'run.eval.forgetting.exp000': [
                     SimpleNamespace(step=20, value=0.11),
                     SimpleNamespace(step=30, value=0.22),
@@ -182,10 +187,13 @@ class TestBuildMlflowRunColumns:
             client=client,
         )
 
+        assert columns['run.eval.loss.after_exp001.exp.exp000'] == pytest.approx(1.11)
+        assert columns['run.eval.loss.after_exp002.exp.exp000'] == pytest.approx(1.23)
         assert columns['run.eval.forgetting.after_exp001.exp000'] == pytest.approx(0.11)
         assert columns['run.eval.forgetting.after_exp002.exp000'] == pytest.approx(0.22)
         assert columns['run.eval.transfer.after_exp001.stream'] == pytest.approx(0.33)
         assert columns['run.eval.transfer.after_exp002.stream'] == pytest.approx(0.44)
+        assert 'run.eval.loss.exp.exp000' not in columns
         assert 'run.eval.forgetting.exp000' not in columns
         assert 'run.eval.transfer.stream' not in columns
         assert columns['run.eval.acc.final.test.avg.base'] == pytest.approx(0.77)

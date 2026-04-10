@@ -38,6 +38,7 @@ __all__ = [
     'fit_repair_controller',
     'log_gain_max',
     'mean_l2_distance_to_one',
+    'apply_repair_correction',
     'maybe_correct_outputs',
     'prepare_repair_fit_context',
     'resolve_backbone_or_raise',
@@ -536,6 +537,82 @@ def maybe_correct_outputs(
         # Optionally strip auxiliary outputs from the controller forward.
         return extract_logits_fn(result)
     return result
+
+
+def apply_repair_correction(
+    *,
+    controller: RepairController,
+    model: nn.Module,
+    inputs: torch.Tensor,
+    backbone_outputs: torch.Tensor,
+    train_seen_classes: set[int],
+) -> torch.Tensor:
+    """
+    Apply controller correction while enforcing anti-cheat invariants.
+
+    Args:
+        controller (RepairController): Repair controller to apply.
+        model (nn.Module): Backbone model.
+        inputs (torch.Tensor): Batch inputs.
+        backbone_outputs (torch.Tensor): Backbone outputs.
+        train_seen_classes (set[int]): Class ids seen during training so far.
+
+    Returns:
+        torch.Tensor: Corrected outputs.
+    """
+    corrected_outputs = controller.correct_outputs(
+        outputs=backbone_outputs,
+        model=model,
+        inputs=inputs,
+    )
+    if not (torch.is_tensor(backbone_outputs) and torch.is_tensor(corrected_outputs)):
+        return corrected_outputs
+    if backbone_outputs.ndim != 2 or corrected_outputs.ndim != 2:
+        return corrected_outputs
+
+    # Normalize device/dtype and validate batch compatibility.
+    if int(corrected_outputs.shape[0]) != int(backbone_outputs.shape[0]):
+        raise RuntimeError(
+            'Repair controller output batch dimension mismatch. '
+            f'backbone_batch={int(backbone_outputs.shape[0])}, '
+            f'controller_batch={int(corrected_outputs.shape[0])}'
+        )
+    if corrected_outputs.device != backbone_outputs.device:
+        corrected_outputs = corrected_outputs.to(device=backbone_outputs.device)
+    if corrected_outputs.dtype != backbone_outputs.dtype:
+        corrected_outputs = corrected_outputs.to(dtype=backbone_outputs.dtype)
+
+    # Enforce anti-cheat constraints for output width and seen-class coverage.
+    backbone_width = int(backbone_outputs.shape[1])
+    corrected_width = int(corrected_outputs.shape[1])
+    if corrected_width > backbone_width:
+        raise RuntimeError(
+            'Repair controller output width exceeds backbone output width. '
+            f'backbone_width={backbone_width}, controller_width={corrected_width}'
+        )
+
+    if train_seen_classes:
+        max_seen_class = int(max(train_seen_classes))
+        if max_seen_class >= backbone_width:
+            raise RuntimeError(
+                'Seen class ID exceeds backbone output width. '
+                f'max_seen_class={max_seen_class}, backbone_width={backbone_width}'
+            )
+        if max_seen_class >= corrected_width:
+            raise RuntimeError(
+                'Repair controller output does not cover all seen classes. '
+                f'max_seen_class={max_seen_class}, controller_width={corrected_width}'
+            )
+
+    # Merge only seen-class columns so unseen classes remain backbone-owned.
+    merged_outputs = backbone_outputs.clone()
+    seen_class_ids = sorted(
+        cls for cls in train_seen_classes
+        if 0 <= int(cls) < backbone_width and int(cls) < corrected_width
+    )
+    if seen_class_ids:
+        merged_outputs[:, seen_class_ids] = corrected_outputs[:, seen_class_ids]
+    return merged_outputs
 
 
 def _is_resnet_block(module: nn.Module) -> bool:

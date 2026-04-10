@@ -31,8 +31,13 @@ class _FakeRegainEvaluationPlugin:
     def __init__(self, **kwargs) -> None:
         del kwargs
         self.last_posthoc_scalar_results = {
-            'Top1_Acc_Stream/eval_phase/test_stream': 0.73,
+            'run.eval.acc.final.test.avg.base': 0.73,
         }
+
+
+class _FakeRegainEvaluator:
+    def __init__(self, **kwargs) -> None:
+        del kwargs
 
 
 class _DummyContextManager:
@@ -70,7 +75,16 @@ class TestTrainInvocation:
                 test_stream=[SimpleNamespace(dataset=[0, 1])],
             ),
         )
-        monkeypatch.setattr(orchestrator_module, 'make_evaluation_plugin', lambda **kwargs: object())
+        monkeypatch.setattr(
+            orchestrator_module,
+            'make_training_evaluation_plugin',
+            lambda **kwargs: object(),
+        )
+        monkeypatch.setattr(
+            orchestrator_module,
+            'RegainEvaluator',
+            _FakeRegainEvaluator,
+        )
         monkeypatch.setattr(orchestrator_module, 'RegainEvaluationPlugin', _FakeRegainEvaluationPlugin)
         monkeypatch.setattr(orchestrator_module, 'build_backbone', lambda **kwargs: nn.Linear(1, 2))
         monkeypatch.setattr(

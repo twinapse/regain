@@ -51,23 +51,10 @@ class TestNumericalStabilityGuardPlugin:
         assert 'phase=run.train' in error_msg
         assert 'exp_idx=3' in error_msg
 
-    def test_after_eval_forward_raises_with_context_on_non_finite_logits(self) -> None:
-        context = MetricContext()
-        context.set_phase(MetricPhase.EVAL)
-        context.set_log_step(42)
-        plugin = NumericalStabilityGuardPlugin(context=context)
-        strategy = _DummyStrategy(
-            mb_output=torch.tensor([[0.0, float('inf'), 1.0]], dtype=torch.float32),
-            experience_idx=5,
-            eval_tag='base',
-        )
+    def test_exposes_only_training_time_hooks(self) -> None:
+        plugin = NumericalStabilityGuardPlugin(context=MetricContext())
 
-        with pytest.raises(RuntimeError) as exc_info:
-            plugin.after_eval_forward(strategy)
-        error_msg = str(exc_info.value)
-        assert 'tensor=mb_output' in error_msg
-        assert 'phase=run.eval' in error_msg
-        assert 'step=42' in error_msg
+        assert 'after_eval_forward' not in type(plugin).__dict__
 
     def test_after_training_epoch_raises_on_non_finite_parameters(self) -> None:
         context = MetricContext()

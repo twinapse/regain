@@ -5,13 +5,14 @@ import mlflow
 
 from regain.analysis.metrics import MetricContext
 from regain.analysis.metrics import MetricPhase
-from regain.constants import NAMESPACE_EVAL
 from regain.constants import NAMESPACE_TRAIN
 from regain.constants import NS_SEP
 from regain.mlflow_utils import normalize_metric_name
 from regain.mlflow_utils import to_scalar_metric_value
 
-__all__ = ['MLflowLogger']
+__all__ = [
+    'MLflowTrainingLogger',
+]
 
 
 _IGNORED_METRIC_TOKENS = {
@@ -74,47 +75,6 @@ def _canonicalize_train_metric(*, normalized_name: str) -> str | None:
     return None
 
 
-def _canonicalize_eval_metric(*, normalized_name: str) -> str | None:
-    """
-    Canonicalize retained Avalanche evaluation metrics.
-
-    Args:
-        normalized_name (str): Normalized Avalanche metric token.
-
-    Returns:
-        str | None: Canonical MLflow key or `None` when the metric is dropped.
-    """
-    tokens = _simplify_metric_tokens(normalized_name=normalized_name)
-    if not tokens:
-        return None
-
-    head = tokens[0]
-    tail = tokens[1:]
-    if head == 'experienceforgetting':
-        if not tail:
-            return None
-        return f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}{tail[0]}'
-
-    if head == 'streamforgetting':
-        return f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}stream'
-
-    if head == 'experienceforwardtransfer':
-        if not tail:
-            return None
-        return f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}{tail[0]}'
-
-    if head == 'streamforwardtransfer':
-        return f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}stream'
-
-    # Ensure train loss reported during eval phase is retained instead of dropped.
-    if head.startswith('loss_'):
-        family_tokens = ['loss', head[len('loss_'):]]
-        family_tokens.extend(tail)
-        return f'{NAMESPACE_TRAIN}{NS_SEP}{NS_SEP.join(family_tokens)}'
-
-    return None
-
-
 def _canonicalize_metric_key(
     *,
     normalized_name: str,
@@ -133,14 +93,12 @@ def _canonicalize_metric_key(
     namespace = str(log_namespace).strip()
     if namespace == NAMESPACE_TRAIN:
         return _canonicalize_train_metric(normalized_name=normalized_name)
-    if namespace == NAMESPACE_EVAL:
-        return _canonicalize_eval_metric(normalized_name=normalized_name)
     return None
 
 
-class MLflowLogger(BaseLogger):
+class MLflowTrainingLogger(BaseLogger):
     """
-    MLflow logger.
+    MLflow logger for retained Avalanche training metrics.
     """
 
     def __init__(self, *, context: MetricContext) -> None:

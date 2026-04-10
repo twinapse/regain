@@ -172,7 +172,7 @@ Evaluation flow per run:
 
 - After each training experience, one full-stream evaluation pass runs over all test experiences.
 - That checkpoint evaluation pass drives:
-  - canonical `run.eval.forgetting.*` / `run.eval.transfer.*` histories,
+  - canonical `run.eval.loss.*`, `run.eval.forgetting.*`, and `run.eval.transfer.*` histories,
   - prediction artifact capture under `predictions/`.
 - After each training experience, explicit single-experience reference probes log
   `run.eval.acc.ref.<stream>.exp###.base`, where `<stream>` is `train` or `test`.
@@ -387,9 +387,9 @@ This section describes **how metrics are organized in MLflow** and **what we rep
 ### 7.1 Metric namespaces
 Metric keys are normalized and namespaced as:
 
-- `run.train.loss.*` for Avalanche training-loss metrics
+- `run.train.loss.*` for Avalanche training-loss metrics only
 - `run.train.time.*` for Avalanche time metrics
-- `run.eval.forgetting.*` / `run.eval.transfer.*` for Avalanche eval histories
+- `run.eval.loss.*` / `run.eval.forgetting.*` / `run.eval.transfer.*` for checkpoint eval histories
 - `run.eval.acc.ref.*` / `run.eval.acc.final.*` for reference/final accuracy metrics
 - `run.calibration.<...>` for calibration metrics (for example per-task `run.calibration.<metric>.exp###` and run-level `run.calibration.max_ece`)
 - `run.diagnostics.<...>` for task-level diagnostic metrics (for example `run.diagnostics.<metric>.exp###`)
@@ -420,7 +420,7 @@ Runs that do not satisfy these analysis requirements are skipped during collecti
 When zero runs are successfully collected, analysis outputs are not published and the command exits with failure.
 
 All metrics live on the run. Unique reference/final accuracy metrics are logged directly under `run.eval.acc.*`.
-Eval-history families such as forgetting and forward transfer stay under `run.eval.*` and use MLflow steps to
+Eval-history families such as checkpoint loss, forgetting, and forward transfer stay under `run.eval.*` and use MLflow steps to
 identify the checkpoint that produced each value.
 
 Metric-family placement summary:
@@ -428,7 +428,7 @@ Metric-family placement summary:
 | Metric family                          | Key pattern                                         |
 |----------------------------------------|-----------------------------------------------------|
 | Training metrics                       | `run.train.loss.*`, `run.train.time.*`              |
-| Eval-history metrics                   | `run.eval.forgetting.*`, `run.eval.transfer.*`      |
+| Eval-history metrics                   | `run.eval.loss.*`, `run.eval.forgetting.*`, `run.eval.transfer.*` |
 | Reference/final accuracies             | `run.eval.acc.ref.*`, `run.eval.acc.final.*`        |
 | Calibration per-task metrics           | `run.calibration.<metric>.exp###`                         |
 | Diagnostic per-task metrics            | `run.diagnostics.<metric>.exp###`                          |
@@ -526,9 +526,10 @@ For step-history eval metrics exported to flat tables, the exporter inserts `aft
     any reference checkpoint exists) is dropped — there is no recoverable signal before the
     first training experience completes;
   - history-bearing eval families must raise when MLflow history lookup fails.
-- The exporter does not fall back to raw latest-value `run.eval.forgetting.*` / `run.eval.transfer.*` columns when
+- The exporter does not fall back to raw latest-value `run.eval.loss.*` / `run.eval.forgetting.*` / `run.eval.transfer.*` columns when
   strict history materialization fails.
 - Example exported columns:
+  - `run.eval.loss.after_exp002.exp.exp001`
   - `run.eval.forgetting.after_exp003.exp001`
   - `run.eval.transfer.after_exp002.stream`
 
