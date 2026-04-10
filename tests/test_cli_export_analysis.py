@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-import regain.cli.export_analysis as export_analysis_cli
 from regain.cli._utils.output_helpers import CliFailure
+import regain.cli.export_analysis as export_analysis_cli
 
 
 def test_export_analysis_uses_analysis_and_output_roots(

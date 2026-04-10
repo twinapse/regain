@@ -9,7 +9,6 @@ from regain.registry import get_scenario_builder_path
 from regain.registry import list_lr_schedulers
 from regain.registry import list_scenarios
 
-
 ##########################
 # Scenario registry tests #
 ##########################

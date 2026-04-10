@@ -1412,7 +1412,7 @@ def make_training_evaluation_plugin(
         loggers.append(MLflowTrainingLogger(context=context))
 
     metrics = [
-        loss_metrics(epoch=True, experience=True, stream=True),
+        loss_metrics(epoch=True),
         timing_metrics(epoch=True),
     ]
     return EvaluationPlugin(*metrics, loggers=loggers, collect_all=keep_timestep_results)

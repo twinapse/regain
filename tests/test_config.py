@@ -8,9 +8,8 @@ import pytest
 import yaml
 
 from regain.experiments.config import EvaluationConfig
-from regain.experiments.config import TransformsConfig
 from regain.experiments.config import load_experiment_config
-
+from regain.experiments.config import TransformsConfig
 
 ################
 # Test helpers #

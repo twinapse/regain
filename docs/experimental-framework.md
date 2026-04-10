@@ -172,11 +172,16 @@ Evaluation flow per run:
 
 - After each training experience, one full-stream evaluation pass runs over all test experiences.
 - That checkpoint evaluation pass drives:
-  - canonical `run.eval.loss.*`, `run.eval.forgetting.*`, and `run.eval.transfer.*` histories,
+  - canonical `run.eval.forgetting.*` and `run.eval.transfer.*` histories,
+  - reference accuracy logging under `run.eval.acc.ref.exp###.base`,
   - prediction artifact capture under `predictions/`.
-- After each training experience, explicit single-experience reference probes log
-  `run.eval.acc.ref.<stream>.exp###.base`, where `<stream>` is `train` or `test`.
-- Raw checkpoint-by-checkpoint posthoc accuracy history is not logged under generic `run.eval.*`.
+- In repair-controller runs, that checkpoint pass captures both controller-on logits and controller-off backbone logits.
+  `run.eval.acc.ref.exp###.base` is derived from the controller-off backbone logits.
+- After each training experience, explicit single-experience loss probes log:
+  - `run.train.loss.exp###.train`
+  - `run.train.loss.exp###.test`
+- In repair-controller runs, those loss probes execute with controller correction disabled.
+- `run.eval.*` is test-data-only by definition. It never includes loss keys or `train` / `test` tokens.
 - At training end, final accuracy metrics are emitted under `run.eval.acc.final.*`.
 - In repair-controller runs, base accuracies are measured with controller correction disabled on the shared backbone
   trajectory, while baseline diagnostic/calibration artifact vectors still come from the reserved `backbone` run.
@@ -334,7 +339,7 @@ $$
 A_{\text{final}} = \text{Acc}\Big(\text{test}(\{0,\dots,C-1\})\Big)
 $$
 >ℹ️ In practice this corresponds to the posthoc stream accuracy (e.g., `Top1_Acc_Stream`). It is also surfaced as a
-> normalized `run.eval.acc.final.test.avg.base`; see [section 7](#7-metric-logging--reporting-mlflow).
+> normalized `run.eval.acc.final.avg.base`; see [section 7](#7-metric-logging--reporting-mlflow).
 
 ---
 
@@ -387,9 +392,10 @@ This section describes **how metrics are organized in MLflow** and **what we rep
 ### 7.1 Metric namespaces
 Metric keys are normalized and namespaced as:
 
-- `run.train.loss.*` for Avalanche training-loss metrics only
+- `run.train.loss.epoch` for Avalanche epoch-loss metrics
+- `run.train.loss.exp###.<stage>` for single-experience loss probes, where `<stage>` is `train` or `test`
 - `run.train.time.*` for Avalanche time metrics
-- `run.eval.loss.*` / `run.eval.forgetting.*` / `run.eval.transfer.*` for checkpoint eval histories
+- `run.eval.forgetting.*` / `run.eval.transfer.*` for test-side checkpoint histories
 - `run.eval.acc.ref.*` / `run.eval.acc.final.*` for reference/final accuracy metrics
 - `run.calibration.<...>` for calibration metrics (for example per-task `run.calibration.<metric>.exp###` and run-level `run.calibration.max_ece`)
 - `run.diagnostics.<...>` for task-level diagnostic metrics (for example `run.diagnostics.<metric>.exp###`)
@@ -401,6 +407,11 @@ Examples: `analysis.repair.rho.avg`, `analysis.acc.final.avg.ctrl`, `analysis.la
 
 **Important implications**
 - Runs emit posthoc accuracy streams through `run.eval.acc.ref.*` and `run.eval.acc.final.*`.
+- `run.eval.*` is test-data-only by contract and never includes loss keys or `train` / `test` tokens.
+- `run.train.loss.*` uses the shape `run.train.loss.exp###.<stage>` for single-experience probes, and
+  `run.train.*` has no `stream` keys.
+- In repair-controller runs, `run.eval.acc.ref.*` is derived from controller-off backbone logits from the checkpoint
+  pass, and `run.train.loss.exp###.train` / `run.train.loss.exp###.test` use controller-off evaluation.
 - In repair-controller runs, base analysis diagnostics come from the reserved `backbone` artifact payload, while
   `run.eval.acc.*` base accuracies are logged from controller-off evaluation on the shared backbone trajectory.
 - `run.train.*` metrics always correspond to the training procedure applied in the run:
@@ -420,15 +431,15 @@ Runs that do not satisfy these analysis requirements are skipped during collecti
 When zero runs are successfully collected, analysis outputs are not published and the command exits with failure.
 
 All metrics live on the run. Unique reference/final accuracy metrics are logged directly under `run.eval.acc.*`.
-Eval-history families such as checkpoint loss, forgetting, and forward transfer stay under `run.eval.*` and use MLflow steps to
-identify the checkpoint that produced each value.
+Eval-history families such as forgetting and forward transfer stay under `run.eval.*` and use MLflow steps to identify
+the checkpoint that produced each value.
 
 Metric-family placement summary:
 
 | Metric family                          | Key pattern                                         |
 |----------------------------------------|-----------------------------------------------------|
-| Training metrics                       | `run.train.loss.*`, `run.train.time.*`              |
-| Eval-history metrics                   | `run.eval.loss.*`, `run.eval.forgetting.*`, `run.eval.transfer.*` |
+| Training metrics                       | `run.train.loss.epoch`, `run.train.loss.exp###.<stage>`, `run.train.time.*` |
+| Eval-history metrics                   | `run.eval.forgetting.*`, `run.eval.transfer.*`      |
 | Reference/final accuracies             | `run.eval.acc.ref.*`, `run.eval.acc.final.*`        |
 | Calibration per-task metrics           | `run.calibration.<metric>.exp###`                         |
 | Diagnostic per-task metrics            | `run.diagnostics.<metric>.exp###`                          |
@@ -439,25 +450,29 @@ Metric-family placement summary:
 ### 7.3 Where the analysis artifacts live
 Accuracy metric names follow:
 
-- `run.eval.acc.<stage>.<stream>.<target>.<mode>`
+- `run.eval.acc.<stage>.<target>.<mode>`
 - `<stage>` is `ref` or `final`
-- `<stream>` is `train` or `test`
 - `<target>` is `exp###` (per-task) or `avg` (aggregate)
 - `<mode>` is `base` or `ctrl`
+- `run.eval.*` is test-data-only, so no data-source token appears in the key shape
   - `ctrl` is emitted only for repair controllers
   - `ref` metrics use `exp###.base` only
+  - on repair-controller runs, `ref` base values are derived from captured backbone logits from the same checkpoint pass
 
 After each experience, the evaluation plugin logs:
 
-- Per-task reference accuracies: `run.eval.acc.ref.<stream>.exp###.base`
+- Per-task reference accuracies: `run.eval.acc.ref.exp###.base`
+- Current-experience train loss probes: `run.train.loss.exp###.train`
+- Current-experience test loss probes: `run.train.loss.exp###.test`
+- On repair-controller runs, these three metrics use controller-off evaluation.
 
 At the end of training, when all end-of-experience base accuracy points are complete, the evaluation plugin logs:
 
-- Per-task final accuracies: `run.eval.acc.final.<stream>.exp###.base`
-- Per-task final accuracies for repair controllers: `run.eval.acc.final.<stream>.exp###.ctrl`
+- Per-task final accuracies: `run.eval.acc.final.exp###.base`
+- Per-task final accuracies for repair controllers: `run.eval.acc.final.exp###.ctrl`
 - Per-task repairability for repair controllers: `run.repair.rho.exp###` (only for valid tasks)
-- Aggregate final accuracies: `run.eval.acc.final.<stream>.avg.base`
-- Aggregate final accuracies for repair controllers: `run.eval.acc.final.<stream>.avg.ctrl`
+- Aggregate final accuracies: `run.eval.acc.final.avg.base`
+- Aggregate final accuracies for repair controllers: `run.eval.acc.final.avg.ctrl`
 - Aggregate repairability for repair controllers: `run.repair.rho.avg`
 - Calibration aggregates:
   - `run.calibration.max_ece`:
@@ -515,7 +530,7 @@ For step-history eval metrics exported to flat tables, the exporter inserts `aft
 
 - `exp###` keeps its original meaning as the evaluated experience.
 - `after_exp###` denotes the checkpoint/current-experience identity derived from MLflow step history.
-- The checkpoint identity map is anchored only by `run.eval.acc.ref.test.exp###.base` metric histories.
+- The checkpoint identity map is anchored only by `run.eval.acc.ref.exp###.base` metric histories.
 - Export materialization is strict and fail-fast:
   - each reference metric must resolve to exactly one unique MLflow step;
   - history-bearing eval families must raise when reference history is missing or incomplete;
@@ -526,10 +541,9 @@ For step-history eval metrics exported to flat tables, the exporter inserts `aft
     any reference checkpoint exists) is dropped — there is no recoverable signal before the
     first training experience completes;
   - history-bearing eval families must raise when MLflow history lookup fails.
-- The exporter does not fall back to raw latest-value `run.eval.loss.*` / `run.eval.forgetting.*` / `run.eval.transfer.*` columns when
-  strict history materialization fails.
+- The exporter does not fall back to raw latest-value `run.eval.forgetting.*` / `run.eval.transfer.*` columns when strict
+  history materialization fails.
 - Example exported columns:
-  - `run.eval.loss.after_exp002.exp.exp001`
   - `run.eval.forgetting.after_exp003.exp001`
   - `run.eval.transfer.after_exp002.stream`
 

@@ -31,8 +31,7 @@ from regain.constants import MLFLOW_ARTIFACT_ERROR_FILE
 from regain.constants import NAMESPACE_EVAL
 from regain.constants import NS_SEP
 from regain.constants import PARAM_RUN_NAME
-from regain.constants import RUN_ACC_REF_TEST
-from regain.constants import RUN_EVAL_LOSS
+from regain.constants import RUN_ACC_REF
 
 __all__ = [
     'build_mlflow_run_columns',
@@ -61,12 +60,11 @@ _NON_ALNUM_SEP = re.compile(rf'[^a-zA-Z0-9_{_NS_SEP_ESCAPED}]+')
 _MULTI_UNDERSCORE = re.compile(r'_+')
 _MULTI_NAMESPACE_SEP = re.compile(rf'{_NS_SEP_ESCAPED}+')
 _HISTORY_BEARING_EVAL_METRIC_PREFIXES = (
-    f'{RUN_EVAL_LOSS}{NS_SEP}',
     f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}',
     f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}',
 )
-_REF_TEST_METRIC_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_REF_TEST)}'
+_REF_METRIC_RE = re.compile(
+    rf'^{re.escape(RUN_ACC_REF)}'
     rf'{_NS_SEP_ESCAPED}{re.escape(EXPERIENCE_KEY_PREFIX)}(?P<idx>\d+)'
     rf'{_NS_SEP_ESCAPED}base$'
 )
@@ -697,7 +695,7 @@ def _ref_checkpoint_step_map(
     metrics = dict(getattr(run.data, 'metrics', {}) or {})
     ref_metric_pairs: list[tuple[int, str]] = []
     for metric_key in metrics:
-        match = _REF_TEST_METRIC_RE.match(str(metric_key))
+        match = _REF_METRIC_RE.match(str(metric_key))
         if match is None:
             continue
         ref_metric_pairs.append((int(match.group('idx')), str(metric_key)))
@@ -705,7 +703,7 @@ def _ref_checkpoint_step_map(
     if not ref_metric_pairs:
         raise ValueError(
             'Missing required reference accuracy metrics for history-bearing export. '
-            f'run_id={run_id}, required_prefix={RUN_ACC_REF_TEST}'
+            f'run_id={run_id}, required_prefix={RUN_ACC_REF}'
         )
 
     observed_exp_indices = sorted(exp_idx for exp_idx, _ in ref_metric_pairs)

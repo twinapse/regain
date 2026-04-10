@@ -20,8 +20,8 @@ from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR
 from regain.constants import NS_SEP
 from regain.constants import PARAM_BACKBONE
-from regain.constants import RUN_ACC_FINAL_TEST
-from regain.constants import RUN_ACC_REF_TEST
+from regain.constants import RUN_ACC_FINAL
+from regain.constants import RUN_ACC_REF
 from regain.constants import RUN_NAME_BACKBONE
 from regain.experiments.config import LRSchedulerConfig
 from regain.experiments.config import OptimizerConfig
@@ -774,8 +774,8 @@ def extract_backbone_analysis_baseline_from_metrics(
     """
     baseline: dict[str, list[float]] = {}
     key_to_prefix = {
-        ARTIFACT_ACC_EXP_BASE: RUN_ACC_REF_TEST,
-        ARTIFACT_ACC_FINAL_BASE: RUN_ACC_FINAL_TEST,
+        ARTIFACT_ACC_EXP_BASE: RUN_ACC_REF,
+        ARTIFACT_ACC_FINAL_BASE: RUN_ACC_FINAL,
     }
     for key, metric_prefix in key_to_prefix.items():
         values: list[float] = []

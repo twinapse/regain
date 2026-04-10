@@ -24,8 +24,8 @@ from regain.constants import COLUMN_REPAIR_SET_TOTAL
 from regain.constants import COLUMN_REPAIR_SPLIT_FRACTION
 from regain.constants import COLUMN_SEED
 from regain.constants import COLUMN_TASK_AGE
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_CTRL
+from regain.constants import RUN_ACC_FINAL_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_AVG_CTRL
 from regain.constants import RUN_CALIB_ECE
 from regain.constants import RUN_CALIB_MAX_ECE
 from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_BASE
@@ -62,8 +62,8 @@ class TestWriteRecoverabilityCurves:
                 COLUMN_CONTROLLER_MODEL_PARAM_COUNT: 100,
                 COLUMN_SEED: 1,
                 RUN_RHO_AVG: 0.20,
-                RUN_ACC_FINAL_TEST_AVG_CTRL: 0.60,
-                RUN_ACC_FINAL_TEST_AVG_BASE: 0.50,
+                RUN_ACC_FINAL_AVG_CTRL: 0.60,
+                RUN_ACC_FINAL_AVG_BASE: 0.50,
                 RUN_CALIB_MAX_ECE: 0.30,
                 RUN_LATENCY_MS_PER_SAMPLE_BASE: 1.00,
                 RUN_LATENCY_MS_PER_SAMPLE_CTRL: 2.00,
@@ -80,8 +80,8 @@ class TestWriteRecoverabilityCurves:
                 COLUMN_CONTROLLER_MODEL_PARAM_COUNT: 100,
                 COLUMN_SEED: 2,
                 RUN_RHO_AVG: 0.40,
-                RUN_ACC_FINAL_TEST_AVG_CTRL: 0.80,
-                RUN_ACC_FINAL_TEST_AVG_BASE: 0.70,
+                RUN_ACC_FINAL_AVG_CTRL: 0.80,
+                RUN_ACC_FINAL_AVG_BASE: 0.70,
                 RUN_CALIB_MAX_ECE: 0.50,
                 RUN_LATENCY_MS_PER_SAMPLE_BASE: 1.20,
                 RUN_LATENCY_MS_PER_SAMPLE_CTRL: 2.40,

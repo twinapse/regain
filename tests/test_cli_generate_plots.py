@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-import regain.cli.generate_plots as generate_plots_cli
 from regain.cli._utils.output_helpers import CliFailure
+import regain.cli.generate_plots as generate_plots_cli
 
 
 def test_generate_plots_uses_output_root_per_experiment(

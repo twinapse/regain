@@ -29,8 +29,8 @@ from regain.constants import COLUMN_REPAIR_SET_TOTAL
 from regain.constants import COLUMN_REPAIR_SPLIT_FRACTION
 from regain.constants import COLUMN_SEED
 from regain.constants import COLUMN_TASK_AGE
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_CTRL
+from regain.constants import RUN_ACC_FINAL_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_AVG_CTRL
 from regain.constants import RUN_CALIB_MAX_ECE
 from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_BASE
 from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_CTRL
@@ -97,8 +97,8 @@ def write_recoverability_curves(
     curve_rows: list[dict[str, Any]] = []
     for (controller, budget), rows in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
         rho_vals = [to_float(row.get(RUN_RHO_AVG)) for row in rows]
-        acc_ctrl_vals = [to_float(row.get(RUN_ACC_FINAL_TEST_AVG_CTRL)) for row in rows]
-        acc_base_vals = [to_float(row.get(RUN_ACC_FINAL_TEST_AVG_BASE)) for row in rows]
+        acc_ctrl_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_CTRL)) for row in rows]
+        acc_base_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_BASE)) for row in rows]
 
         curve_rows.append({
             COLUMN_CONTROLLER_NAME: controller,

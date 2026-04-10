@@ -5,12 +5,12 @@ Tests for experiment builders.
 import pytest
 import torch
 
-import regain.experiments.builders as builders_module
 from regain.experiments.builders import build_backbone
 from regain.experiments.builders import build_benchmark
 from regain.experiments.builders import build_controller
 from regain.experiments.builders import build_lr_scheduler_plugin
 from regain.experiments.builders import build_optimizer
+import regain.experiments.builders as builders_module
 from regain.experiments.config import BackboneConfig
 from regain.experiments.config import ControllerConfig
 from regain.experiments.config import EvaluationConfig
@@ -19,7 +19,6 @@ from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import RepairConfig
 from regain.experiments.config import TransformsConfig
 from regain.models.controllers import PreventionController
-
 
 ###############################
 # Controller replay contracts #

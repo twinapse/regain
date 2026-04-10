@@ -38,14 +38,10 @@ __all__ = [
     'NAMESPACE_TRAIN',
     'NS_SEP',
     # ---- Per-run metric keys (MLflow) ----
-    'RUN_ACC_FINAL_TEST',
-    'RUN_ACC_FINAL_TEST_AVG_BASE',
-    'RUN_ACC_FINAL_TEST_AVG_CTRL',
-    'RUN_ACC_FINAL_TRAIN',
-    'RUN_ACC_FINAL_TRAIN_AVG_BASE',
-    'RUN_ACC_FINAL_TRAIN_AVG_CTRL',
-    'RUN_ACC_REF_TEST',
-    'RUN_ACC_REF_TRAIN',
+    'RUN_ACC_FINAL',
+    'RUN_ACC_FINAL_AVG_BASE',
+    'RUN_ACC_FINAL_AVG_CTRL',
+    'RUN_ACC_REF',
     'RUN_CALIB_AECE',
     'RUN_CALIB_BRIER',
     'RUN_CALIB_ECE',
@@ -59,9 +55,6 @@ __all__ = [
     'RUN_EPS',
     'RUN_EVAL_FORGETTING',
     'RUN_EVAL_FORGETTING_STREAM',
-    'RUN_EVAL_LOSS',
-    'RUN_EVAL_LOSS_EXP',
-    'RUN_EVAL_LOSS_STREAM',
     'RUN_EVAL_TRANSFER',
     'RUN_EVAL_TRANSFER_STREAM',
     'RUN_LATENCY_MS_PER_SAMPLE_BASE',
@@ -75,8 +68,6 @@ __all__ = [
     'RUN_RHO_AVG',
     'RUN_STATUS_INCOMPLETE_ACC_EXP_BASE',
     'RUN_TRAIN_LOSS',
-    'RUN_TRAIN_LOSS_EXP',
-    'RUN_TRAIN_LOSS_STREAM',
     # ---- Cross-run metric keys (CSV / analysis) ----
     'ANALYSIS_ACC_FINAL_AVG_CTRL',
     'ANALYSIS_RHO_AVG',
@@ -216,37 +207,24 @@ COLUMN_TOTAL_COST = 'total_cost'
 
 _RUN = NAMESPACE_RUN  # shorthand for building metric strings
 
-# Unified accuracy metrics under `run.eval.acc.*`.
-RUN_ACC_REF_TEST = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}ref{NS_SEP}test'
-RUN_ACC_REF_TRAIN = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}ref{NS_SEP}train'
-RUN_ACC_FINAL_TEST = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}test'
-RUN_ACC_FINAL_TRAIN = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}train'
-RUN_ACC_FINAL_TEST_AVG_BASE = (
-    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}test{NS_SEP}avg{NS_SEP}base'
+# Unified test-only accuracy metrics under `run.eval.acc.*`.
+RUN_ACC_REF = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}ref'
+RUN_ACC_FINAL = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final'
+RUN_ACC_FINAL_AVG_BASE = (
+    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
 )
-RUN_ACC_FINAL_TEST_AVG_CTRL = (
-    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}test{NS_SEP}avg{NS_SEP}ctrl'
-)
-RUN_ACC_FINAL_TRAIN_AVG_BASE = (
-    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}train{NS_SEP}avg{NS_SEP}base'
-)
-RUN_ACC_FINAL_TRAIN_AVG_CTRL = (
-    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}train{NS_SEP}avg{NS_SEP}ctrl'
+RUN_ACC_FINAL_AVG_CTRL = (
+    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
 )
 
 # Retained Avalanche eval metrics
 RUN_EVAL_FORGETTING = f'{NAMESPACE_EVAL}{NS_SEP}forgetting'
 RUN_EVAL_FORGETTING_STREAM = f'{RUN_EVAL_FORGETTING}{NS_SEP}stream'
-RUN_EVAL_LOSS = f'{NAMESPACE_EVAL}{NS_SEP}loss'
-RUN_EVAL_LOSS_EXP = f'{RUN_EVAL_LOSS}{NS_SEP}exp'
-RUN_EVAL_LOSS_STREAM = f'{RUN_EVAL_LOSS}{NS_SEP}stream'
 RUN_EVAL_TRANSFER = f'{NAMESPACE_EVAL}{NS_SEP}transfer'
 RUN_EVAL_TRANSFER_STREAM = f'{RUN_EVAL_TRANSFER}{NS_SEP}stream'
 
 # Retained Avalanche train metrics
 RUN_TRAIN_LOSS = f'{NAMESPACE_TRAIN}{NS_SEP}loss'
-RUN_TRAIN_LOSS_EXP = f'{RUN_TRAIN_LOSS}{NS_SEP}exp'
-RUN_TRAIN_LOSS_STREAM = f'{RUN_TRAIN_LOSS}{NS_SEP}stream'
 
 # Status
 RUN_STATUS_INCOMPLETE_ACC_EXP_BASE = (
