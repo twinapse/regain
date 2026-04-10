@@ -10,11 +10,10 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
+from regain.avalanche_utils.plugins import RepairControllerPlugin
 # Ensure a stable import order for plugin module initialization.
 import regain.experiments.orchestrator  # noqa: F401
-from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.models.controllers import RepairController
-
 
 ################
 # Test helpers #

@@ -55,7 +55,7 @@ class TestMlflowTrainingLogger:
         )
 
         logger.log_single_metric(
-            name='Loss_Exp/train_phase/train_stream/Exp001',
+            name='Loss_Epoch/train_phase/train_stream',
             value=0.22,
             x_plot=0,
         )
@@ -64,9 +64,19 @@ class TestMlflowTrainingLogger:
             value=1.5,
             x_plot=0,
         )
+        logger.log_single_metric(
+            name='Loss_Exp/train_phase/train_stream/Exp001',
+            value=0.33,
+            x_plot=0,
+        )
+        logger.log_single_metric(
+            name='Loss_Stream/train_phase/train_stream',
+            value=0.44,
+            x_plot=0,
+        )
 
         assert logged_metrics == [
-            ('run.train.loss.exp.exp001', pytest.approx(0.22), 7),
+            ('run.train.loss.epoch', pytest.approx(0.22), 7),
             ('run.train.time.epoch', pytest.approx(1.5), 7),
         ]
 

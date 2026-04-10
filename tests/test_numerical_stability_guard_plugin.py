@@ -8,11 +8,11 @@ import pytest
 import torch
 from torch import nn
 
-# Ensure a stable import order for plugin module initialization.
-import regain.experiments.orchestrator  # noqa: F401
 from regain.analysis.metrics import MetricContext
 from regain.analysis.metrics import MetricPhase
 from regain.avalanche_utils.plugins import NumericalStabilityGuardPlugin
+# Ensure a stable import order for plugin module initialization.
+import regain.experiments.orchestrator  # noqa: F401
 
 
 class _DummyStrategy:

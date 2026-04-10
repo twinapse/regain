@@ -17,8 +17,8 @@ class TestTrainingEvaluationPluginFactory:
 
         metric_names = {type(metric).__name__ for metric in plugin.metrics}
         assert 'EpochLoss' in metric_names
-        assert 'ExperienceLoss' in metric_names
-        assert 'StreamLoss' in metric_names
+        assert 'ExperienceLoss' not in metric_names
+        assert 'StreamLoss' not in metric_names
         assert 'EpochTime' in metric_names
         assert 'ExperienceForgetting' not in metric_names
         assert 'StreamForgetting' not in metric_names

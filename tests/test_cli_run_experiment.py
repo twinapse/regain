@@ -10,10 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import regain.cli.run_experiment as run_experiment_cli
-import regain.mlflow_utils as mlflow_utils
 from regain.cli.run_experiment import _build_arg_parser
 from regain.cli.run_experiment import _find_config_files
+import regain.cli.run_experiment as run_experiment_cli
+import regain.mlflow_utils as mlflow_utils
 
 
 @dataclass

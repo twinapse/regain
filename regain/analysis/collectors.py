@@ -50,10 +50,10 @@ from regain.constants import PARAM_NUM_CLASSES
 from regain.constants import PARAM_REPAIR_BUDGET_FRACTION
 from regain.constants import PARAM_REPAIR_SPLIT_FRACTION
 from regain.constants import PARAM_SEED
-from regain.constants import RUN_ACC_FINAL_TEST
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_CTRL
-from regain.constants import RUN_ACC_REF_TEST
+from regain.constants import RUN_ACC_FINAL
+from regain.constants import RUN_ACC_FINAL_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_AVG_CTRL
+from regain.constants import RUN_ACC_REF
 from regain.constants import RUN_CALIB_AECE
 from regain.constants import RUN_CALIB_BRIER
 from regain.constants import RUN_CALIB_ECE
@@ -118,20 +118,20 @@ _NS_SEP_ESCAPED = re.escape(NS_SEP)
 
 # Regex patterns for parsing per-experience MLflow metric keys.
 # Example keys:
-# `run.eval.acc.ref.test.exp000.base`, `run.eval.acc.final.test.exp000.ctrl`,
+# `run.eval.acc.ref.exp000.base`, `run.eval.acc.final.exp000.ctrl`,
 # `run.repair.rho.exp000`, etc.
 _ACC_EXP_BASE_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_REF_TEST)}'
+    rf'^{re.escape(RUN_ACC_REF)}'
     rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
     rf'{_NS_SEP_ESCAPED}base$'
 )
 _ACC_FINAL_BASE_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_FINAL_TEST)}'
+    rf'^{re.escape(RUN_ACC_FINAL)}'
     rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
     rf'{_NS_SEP_ESCAPED}base$'
 )
 _ACC_FINAL_CTRL_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_FINAL_TEST)}'
+    rf'^{re.escape(RUN_ACC_FINAL)}'
     rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
     rf'{_NS_SEP_ESCAPED}ctrl$'
 )
@@ -342,7 +342,7 @@ def _has_logged_ctrl_metrics(
         bool: True if repair-controller metrics are available, else False.
     """
     if (
-        RUN_ACC_FINAL_TEST_AVG_CTRL in metrics
+        RUN_ACC_FINAL_AVG_CTRL in metrics
         or RUN_RHO_AVG in metrics
     ):
         return True
@@ -512,8 +512,8 @@ def collect_experiment_tables(
 
             # Prefer direct aggregate metrics, then compute from per-task values.
             rho_avg = to_float(metrics.get(RUN_RHO_AVG))
-            a_ctrl_avg = to_float(metrics.get(RUN_ACC_FINAL_TEST_AVG_CTRL))
-            a_base_avg = to_float(metrics.get(RUN_ACC_FINAL_TEST_AVG_BASE))
+            a_ctrl_avg = to_float(metrics.get(RUN_ACC_FINAL_AVG_CTRL))
+            a_base_avg = to_float(metrics.get(RUN_ACC_FINAL_AVG_BASE))
             calib_max_ece = to_float(metrics.get(RUN_CALIB_MAX_ECE))
             latency_base_ms = to_float(metrics.get(RUN_LATENCY_MS_PER_SAMPLE_BASE))
             latency_base_sps = to_float(metrics.get(RUN_LATENCY_SAMPLES_PER_SEC_BASE))
@@ -651,8 +651,8 @@ def collect_experiment_tables(
                 COLUMN_B: b,
                 COLUMN_CONTROLLER_MODEL_PARAM_COUNT: ctrl_param_count,
                 RUN_RHO_AVG: rho_avg,
-                RUN_ACC_FINAL_TEST_AVG_CTRL: a_ctrl_avg,
-                RUN_ACC_FINAL_TEST_AVG_BASE: a_base_avg,
+                RUN_ACC_FINAL_AVG_CTRL: a_ctrl_avg,
+                RUN_ACC_FINAL_AVG_BASE: a_base_avg,
                 RUN_CALIB_MAX_ECE: calib_max_ece,
                 RUN_LATENCY_MS_PER_SAMPLE_BASE: latency_base_ms,
                 RUN_LATENCY_SAMPLES_PER_SEC_BASE: latency_base_sps,

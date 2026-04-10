@@ -6,7 +6,6 @@ import pytest
 
 from regain.experiments.utils import resolve_avalanche_eval_every
 
-
 #########################
 # Schedule value mapping #
 #########################

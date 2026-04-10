@@ -8,7 +8,6 @@ import pytest
 import torch
 from torch import nn
 
-import regain.experiments.orchestrator as orchestrator_module
 from regain.experiments.config import BackboneConfig
 from regain.experiments.config import EvaluationConfig
 from regain.experiments.config import ExperimentConfig
@@ -16,6 +15,7 @@ from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import RepairConfig
 from regain.experiments.config import StrategyConfig
 from regain.experiments.config import TrainingConfig
+import regain.experiments.orchestrator as orchestrator_module
 
 
 class _FakeStrategy:
@@ -31,7 +31,7 @@ class _FakeRegainEvaluationPlugin:
     def __init__(self, **kwargs) -> None:
         del kwargs
         self.last_posthoc_scalar_results = {
-            'run.eval.acc.final.test.avg.base': 0.73,
+            'run.eval.acc.final.avg.base': 0.73,
         }
 
 

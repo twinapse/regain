@@ -7,13 +7,13 @@ from typing import Any
 
 import pytest
 
-import regain.experiments.backbone as backbone_module
-import regain.experiments.logging as logging_module
 from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
 from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
+from regain.avalanche_utils.plugins import RegainEvaluationPlugin
+from regain.avalanche_utils.plugins import SeenClassesObserver
 from regain.constants import DIAG_VECTOR_KEYS
-from regain.constants import RUN_ACC_FINAL_TEST
-from regain.constants import RUN_ACC_REF_TEST
+from regain.constants import RUN_ACC_FINAL
+from regain.constants import RUN_ACC_REF
 from regain.constants import RUN_CALIB_AECE
 from regain.constants import RUN_CALIB_ECE
 from regain.constants import RUN_CALIB_NLL
@@ -21,21 +21,21 @@ from regain.constants import RUN_DIAG_AVG_CONF
 from regain.constants import RUN_DIAG_AVG_ENTROPY
 from regain.constants import RUN_DIAG_LOGIT_AVG_DRIFT
 from regain.constants import RUN_DIAG_OUT_OF_TASK_RATE
+from regain.experiments.backbone import extract_backbone_analysis_baseline
 from regain.experiments.backbone import extract_backbone_kwargs_from_run
 from regain.experiments.backbone import extract_backbone_training_config_from_run
+from regain.experiments.backbone import load_backbone_analysis_baseline_from_run
+import regain.experiments.backbone as backbone_module
 from regain.experiments.config import BackboneConfig
 from regain.experiments.config import EvaluationConfig
 from regain.experiments.config import ExperimentConfig
+from regain.experiments.config import LRSchedulerConfig
 from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import RepairConfig
 from regain.experiments.config import StrategyConfig
 from regain.experiments.config import TrainingConfig
-from regain.experiments.config import LRSchedulerConfig
 from regain.experiments.logging import log_run_params
-from regain.avalanche_utils.plugins import RegainEvaluationPlugin
-from regain.avalanche_utils.plugins import SeenClassesObserver
-from regain.experiments.backbone import extract_backbone_analysis_baseline
-from regain.experiments.backbone import load_backbone_analysis_baseline_from_run
+import regain.experiments.logging as logging_module
 
 
 def _make_run(
@@ -59,8 +59,8 @@ class TestLoadBackboneAnalysisBaselineFromRun:
     ) -> None:
         run = _make_run(
             metrics={
-                f'{RUN_ACC_REF_TEST}.exp000.base': 0.80,
-                f'{RUN_ACC_FINAL_TEST}.exp000.base': 0.55,
+                f'{RUN_ACC_REF}.exp000.base': 0.80,
+                f'{RUN_ACC_FINAL}.exp000.base': 0.55,
             },
         )
         monkeypatch.setattr(

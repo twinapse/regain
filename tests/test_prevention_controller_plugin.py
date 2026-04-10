@@ -7,11 +7,10 @@ from typing import Any
 import torch
 from torch import nn
 
+from regain.avalanche_utils.plugins import PreventionControllerPlugin
 # Ensure a stable import order for plugin module initialization.
 import regain.experiments.orchestrator  # noqa: F401
-from regain.avalanche_utils.plugins import PreventionControllerPlugin
 from regain.models.controllers import PreventionController
-
 
 ################
 # Test helpers #

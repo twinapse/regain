@@ -62,10 +62,8 @@ def _canonicalize_train_metric(*, normalized_name: str) -> str | None:
 
     head = tokens[0]
     tail = tokens[1:]
-    if head.startswith('loss_'):
-        family_tokens = ['loss', head[len('loss_'):]]
-        family_tokens.extend(tail)
-        return f'{NAMESPACE_TRAIN}{NS_SEP}{NS_SEP.join(family_tokens)}'
+    if head == 'loss_epoch':
+        return f'{NAMESPACE_TRAIN}{NS_SEP}loss{NS_SEP}epoch'
 
     if head.startswith('time_'):
         family_tokens = ['time', head[len('time_'):]]

@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-import regain.cli.run_analysis as run_analysis_cli
 from regain.cli._utils.output_helpers import CliFailure
+import regain.cli.run_analysis as run_analysis_cli
 
 
 def _run_collect_main(

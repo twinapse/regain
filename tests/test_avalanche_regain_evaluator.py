@@ -5,12 +5,12 @@ Tests for the custom Avalanche-side evaluator.
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-import mlflow
-import pytest
-import torch
 from avalanche.benchmarks import CLScenario
 from avalanche.benchmarks.scenarios.deprecated.generators import nc_benchmark
 from avalanche.benchmarks.utils.classification_dataset import _make_taskaware_tensor_classification_dataset
+import mlflow
+import pytest
+import torch
 from torch import nn
 from torch.utils.data import Dataset
 
@@ -321,6 +321,27 @@ class TestRegainEvaluator:
         assert evaluator.acc_exp_base == pytest.approx([1.0])
         assert evaluator.last_posthoc_scalar_results is not None
 
+    def test_run_after_training_exposes_canonical_final_accuracy_keys(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        monkeypatch.setattr(mlflow, 'active_run', lambda: None)
+        evaluator = _make_evaluator(controller=None, tmp_path=tmp_path)
+        strategy = SimpleNamespace(experience=SimpleNamespace(current_experience=0))
+
+        evaluator.run_before_training()
+        evaluator.run_after_training_exp(strategy=strategy, seen_classes={0, 1})
+        strategy.experience.current_experience = 1
+        evaluator.run_after_training_exp(strategy=strategy, seen_classes={0, 1})
+        evaluator.run_after_training(strategy=strategy, seen_classes={0, 1})
+
+        assert evaluator.last_posthoc_scalar_results == {
+            'run.eval.acc.final.exp000.base': pytest.approx(1.0),
+            'run.eval.acc.final.exp001.base': pytest.approx(1.0),
+            'run.eval.acc.final.avg.base': pytest.approx(1.0),
+        }
+
     def test_run_after_training_exp_uses_train_step_for_eval_style_metrics(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -348,11 +369,20 @@ class TestRegainEvaluator:
             logged_steps.setdefault(key, []).append(step)
 
         assert logged_steps['run.calibration.ece.exp000'] == [0]
-        assert logged_steps['run.eval.loss.exp.exp000'] == [0, 0]
-        assert logged_steps['run.eval.loss.stream'] == [0, 0]
         assert logged_steps['run.eval.forgetting.stream'] == [0, 0]
         assert logged_steps['run.eval.transfer.stream'] == [0, 0]
-        assert 'run.train.loss.exp.exp000' not in logged_steps
-        assert 'run.train.loss.stream' not in logged_steps
-        assert logged_steps['run.eval.acc.ref.test.exp000.base'] == [5]
-        assert logged_steps['run.eval.acc.ref.train.exp000.base'] == [5]
+        assert logged_steps['run.train.loss.exp000.train'] == [0]
+        assert logged_steps['run.train.loss.exp000.test'] == [0]
+        assert logged_steps['run.eval.acc.ref.exp000.base'] == [5]
+        assert not any(key.startswith('run.eval.loss.') for key in logged_steps)
+        assert not any(
+            key.startswith('run.train.') and f'.stream' in key
+            for key in logged_steps
+        )
+        assert not any(
+            key.startswith('run.eval.') and (
+                '.train.' in f'.{key}.'
+                or '.test.' in f'.{key}.'
+            )
+            for key in logged_steps
+        )

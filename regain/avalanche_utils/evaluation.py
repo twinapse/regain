@@ -30,21 +30,15 @@ from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import NAMESPACE_EVAL
 from regain.constants import NS_SEP
-from regain.constants import RUN_ACC_FINAL_TEST
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_TEST_AVG_CTRL
-from regain.constants import RUN_ACC_FINAL_TRAIN
-from regain.constants import RUN_ACC_FINAL_TRAIN_AVG_BASE
-from regain.constants import RUN_ACC_FINAL_TRAIN_AVG_CTRL
-from regain.constants import RUN_ACC_REF_TEST
-from regain.constants import RUN_ACC_REF_TRAIN
+from regain.constants import RUN_ACC_FINAL
+from regain.constants import RUN_ACC_FINAL_AVG_BASE
+from regain.constants import RUN_ACC_FINAL_AVG_CTRL
+from regain.constants import RUN_ACC_REF
 from regain.constants import RUN_CALIB_ECE
 from regain.constants import RUN_CALIB_MAX_ECE
 from regain.constants import RUN_EPS
 from regain.constants import RUN_EVAL_FORGETTING
 from regain.constants import RUN_EVAL_FORGETTING_STREAM
-from regain.constants import RUN_EVAL_LOSS_EXP
-from regain.constants import RUN_EVAL_LOSS_STREAM
 from regain.constants import RUN_EVAL_TRANSFER
 from regain.constants import RUN_EVAL_TRANSFER_STREAM
 from regain.constants import RUN_LATENCY_MS_PER_SAMPLE_BASE
@@ -55,6 +49,7 @@ from regain.constants import RUN_LATENCY_SAMPLES_PER_SEC_CTRL
 from regain.constants import RUN_RHO
 from regain.constants import RUN_RHO_AVG
 from regain.constants import RUN_STATUS_INCOMPLETE_ACC_EXP_BASE
+from regain.constants import RUN_TRAIN_LOSS
 from regain.evaluation import CalibrationCollector
 from regain.evaluation import check_eval_batch
 from regain.evaluation import ClassMask
@@ -361,16 +356,14 @@ class RegainEvaluator:
                 capture_predictions=False,
                 capture_auxiliary_metrics=False,
                 log_step=0,
+                compute_accuracy=True,
+                compute_loss=False,
             )
         finally:
             torch.set_rng_state(cpu_rng_state)
             if cuda_rng_state is not None:
                 torch.cuda.set_rng_state_all(cuda_rng_state)
         stream_value = self._forward_transfer.bootstrap(per_exp_acc=initial_result.per_exp_acc)
-        self._log_checkpoint_eval_losses(
-            result=initial_result,
-            step=0,
-        )
         self._log_canonical_metric(
             key=RUN_EVAL_FORGETTING_STREAM,
             value=0.0,
@@ -477,46 +470,6 @@ class RegainEvaluator:
             return
         self.calibration.end_pass(log_step=int(self.context.log_step))
 
-    def _log_checkpoint_eval_losses(
-        self,
-        *,
-        result: EvaluationPassResult,
-        step: int,
-    ) -> None:
-        """
-        Log checkpoint evaluation losses under the eval namespace.
-
-        Args:
-            result (EvaluationPassResult): Checkpoint pass result.
-            step (int): MLflow step.
-        """
-        total_loss = 0.0
-        total_samples = 0
-        for experience in self.benchmark.test_stream:
-            exp_idx = int(getattr(experience, 'current_experience'))
-            loss_value = result.per_exp_loss.get(exp_idx)
-            if loss_value is None:
-                continue
-
-            self._log_canonical_metric(
-                key=f'{RUN_EVAL_LOSS_EXP}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}',
-                value=float(loss_value),
-                step=step,
-            )
-
-            num_samples = len(_resolve_experience_dataset(experience))
-            total_loss += float(loss_value) * float(num_samples)
-            total_samples += int(num_samples)
-
-        if total_samples <= 0:
-            return
-
-        self._log_canonical_metric(
-            key=RUN_EVAL_LOSS_STREAM,
-            value=float(total_loss / float(total_samples)),
-            step=step,
-        )
-
     def eval_pass(
         self,
         stream: CLStream | CLExperience,
@@ -531,6 +484,8 @@ class RegainEvaluator:
         capture_predictions: bool = True,
         capture_auxiliary_metrics: bool = True,
         log_step: int | None = None,
+        compute_accuracy: bool = True,
+        compute_loss: bool = True,
     ) -> EvaluationPassResult:
         """
         Run one direct evaluation pass over a stream.
@@ -547,6 +502,8 @@ class RegainEvaluator:
             capture_predictions (bool): Whether to write prediction artifacts.
             capture_auxiliary_metrics (bool): Whether to collect calibration diagnostics.
             log_step (int | None): Optional MLflow step used for calibration logging.
+            compute_accuracy (bool): Whether to aggregate accuracy statistics.
+            compute_loss (bool): Whether to aggregate loss statistics.
 
         Returns:
             EvaluationPassResult: Aggregated pass result.
@@ -672,18 +629,20 @@ class RegainEvaluator:
                                     num_classes=self.num_classes,
                                 )
 
-                                loss_tensor = self.criterion(outputs, targets.reshape(-1).long())
-                                if not torch.is_tensor(loss_tensor):
-                                    raise TypeError('Criterion must return a scalar tensor.')
-
                                 batch_targets = targets.reshape(-1).to(device=outputs.device, dtype=torch.long)
-                                predictions = torch.argmax(outputs, dim=1)
-                                batch_correct = int(torch.sum(predictions.eq(batch_targets)).item())
                                 batch_size = int(batch_targets.shape[0])
-
-                                total_loss += float(loss_tensor.item()) * float(batch_size)
-                                total_correct += batch_correct
                                 total_examples += batch_size
+
+                                if compute_loss:
+                                    loss_tensor = self.criterion(outputs, targets.reshape(-1).long())
+                                    if not torch.is_tensor(loss_tensor):
+                                        raise TypeError('Criterion must return a scalar tensor.')
+                                    total_loss += float(loss_tensor.item()) * float(batch_size)
+
+                                if compute_accuracy:
+                                    predictions = torch.argmax(outputs, dim=1)
+                                    batch_correct = int(torch.sum(predictions.eq(batch_targets)).item())
+                                    total_correct += batch_correct
 
                                 if self.calibration is not None:
                                     self.calibration.observe_batch(
@@ -721,8 +680,10 @@ class RegainEvaluator:
                                     f'label={label}, exp_idx={exp_idx}'
                                 )
 
-                            per_exp_acc[exp_idx] = float(total_correct) / float(total_examples)
-                            per_exp_loss[exp_idx] = float(total_loss) / float(total_examples)
+                            if compute_accuracy:
+                                per_exp_acc[exp_idx] = float(total_correct) / float(total_examples)
+                            if compute_loss:
+                                per_exp_loss[exp_idx] = float(total_loss) / float(total_examples)
                             if capture_logits and per_exp_logits is not None:
                                 per_exp_logits[exp_idx] = np.concatenate(logits_chunks, axis=0)
                             if capture_backbone_logits and per_exp_backbone_logits is not None:
@@ -768,6 +729,55 @@ class RegainEvaluator:
             timing_ms=float(elapsed_ms),
         )
 
+    def _log_current_experience_loss(
+        self,
+        *,
+        experience: CLExperience,
+        label: str,
+        checkpoint_exp_idx: int,
+        controller_enabled: bool,
+        stage: str,
+        step: int,
+    ) -> None:
+        """
+        Evaluate and log one current-experience loss probe under `run.train.loss.*`.
+
+        Args:
+            experience (CLExperience): Experience to probe.
+            label (str): Human-readable pass label.
+            checkpoint_exp_idx (int): Training checkpoint identity.
+            controller_enabled (bool): Whether controller correction is enabled.
+            stage (str): Loss probe stage, either `train` or `test`.
+            step (int): MLflow step.
+        """
+        if stage not in {'train', 'test'}:
+            raise ValueError(f'Unsupported loss probe stage: {stage}')
+
+        exp_idx = int(getattr(experience, 'current_experience'))
+        result = self.eval_pass(
+            [experience],
+            label=label,
+            eval_tag='loss',
+            checkpoint_exp_idx=checkpoint_exp_idx,
+            controller_enabled=controller_enabled,
+            capture_logits=False,
+            capture_backbone_logits=False,
+            capture_predictions=False,
+            capture_auxiliary_metrics=False,
+            log_step=None,
+            compute_accuracy=False,
+            compute_loss=True,
+        )
+        loss_value = self._required_loss(
+            per_exp_loss=result.per_exp_loss,
+            exp_idx=exp_idx,
+        )
+        self._log_canonical_metric(
+            key=f'{RUN_TRAIN_LOSS}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}{NS_SEP}{stage}',
+            value=float(loss_value),
+            step=step,
+        )
+
     def run_after_training_exp(
         self,
         *,
@@ -789,10 +799,7 @@ class RegainEvaluator:
         analysis_step = int((exp_idx + 1) * self.num_epochs_per_experience)
         eval_metric_step = self._avalanche_eval_metric_step()
         eval_tag = 'ctrl' if self.controller is not None else 'base'
-        seen_mask = ClassMask.from_seen_classes(
-            seen_classes,
-            mask_value=self.mask_value,
-        )
+        loss_probe_controller_enabled = not self._is_repair_controller()
 
         ckpt_result = self.eval_pass(
             self.benchmark.test_stream,
@@ -805,10 +812,8 @@ class RegainEvaluator:
             capture_predictions=True,
             capture_auxiliary_metrics=True,
             log_step=eval_metric_step,
-        )
-        self._log_checkpoint_eval_losses(
-            result=ckpt_result,
-            step=eval_metric_step,
+            compute_accuracy=True,
+            compute_loss=False,
         )
         ref_test_accuracy = derive_masked_ref_accuracy(
             ckpt_result,
@@ -822,35 +827,27 @@ class RegainEvaluator:
                 f'eval_tag={eval_tag}, checkpoint_exp_idx={exp_idx}'
             )
 
-        ref_train_result = self.eval_pass(
-            [self.benchmark.train_stream[exp_idx]],
-            label='ref_train',
-            eval_tag='ref',
+        self._log_current_experience_loss(
+            experience=self.benchmark.train_stream[exp_idx],
+            label='train_loss',
             checkpoint_exp_idx=exp_idx,
-            mask=seen_mask,
-            controller_enabled=not self._is_repair_controller(),
-            capture_logits=False,
-            capture_backbone_logits=False,
-            capture_predictions=False,
-            capture_auxiliary_metrics=False,
-            log_step=None,
+            controller_enabled=loss_probe_controller_enabled,
+            stage='train',
+            step=eval_metric_step,
         )
-        ref_train_accuracy = self._required_accuracy(
-            per_exp_acc=ref_train_result.per_exp_acc,
-            exp_idx=exp_idx,
+        self._log_current_experience_loss(
+            experience=self.benchmark.test_stream[exp_idx],
+            label='test_loss',
+            checkpoint_exp_idx=exp_idx,
+            controller_enabled=loss_probe_controller_enabled,
+            stage='test',
+            step=eval_metric_step,
         )
 
         self.acc_exp_base.append(float(ref_test_accuracy))
         self._log_analysis_metric(
-            key=RUN_ACC_REF_TEST,
+            key=RUN_ACC_REF,
             value=float(ref_test_accuracy),
-            step=analysis_step,
-            experience=exp_idx,
-            variant='base',
-        )
-        self._log_analysis_metric(
-            key=RUN_ACC_REF_TRAIN,
-            value=float(ref_train_accuracy),
             step=analysis_step,
             experience=exp_idx,
             variant='base',
@@ -890,7 +887,7 @@ class RegainEvaluator:
             )
 
         self.last_posthoc_scalar_results = {
-            f'{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}': float(ckpt_result.per_exp_acc[exp_idx])
+            f'{RUN_ACC_REF}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}{NS_SEP}base': float(ref_test_accuracy)
         }
         if self.controller is not None:
             self.last_base_eval_result = None
@@ -940,10 +937,8 @@ class RegainEvaluator:
                 capture_predictions=True,
                 capture_auxiliary_metrics=True,
                 log_step=eval_metric_step,
-            )
-            self._log_checkpoint_eval_losses(
-                result=final_ckpt,
-                step=eval_metric_step,
+                compute_accuracy=True,
+                compute_loss=False,
             )
             forgetting_values = self._forgetting.update(
                 trained_exp_idx=last_exp_idx,
@@ -976,10 +971,6 @@ class RegainEvaluator:
                     value=float(stream_transfer),
                     step=eval_metric_step,
                 )
-            self.last_posthoc_scalar_results = {
-                f'{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}': float(acc)
-                for exp_idx, acc in final_ckpt.per_exp_acc.items()
-            }
             if self.controller is not None:
                 self.last_ctrl_eval_result = final_ckpt
             else:
@@ -1018,6 +1009,8 @@ class RegainEvaluator:
                 capture_predictions=False,
                 capture_auxiliary_metrics=False,
                 log_step=None,
+                compute_accuracy=True,
+                compute_loss=False,
             )
             self.last_base_eval_result = final_test_base_result
             final_test_base = self._ordered_vector(final_test_base_result.per_exp_acc)
@@ -1037,23 +1030,11 @@ class RegainEvaluator:
                     capture_predictions=False,
                     capture_auxiliary_metrics=False,
                     log_step=None,
+                    compute_accuracy=True,
+                    compute_loss=False,
                 )
                 self.last_base_eval_result = base_result
             final_test_base = self._ordered_vector(base_result.per_exp_acc)
-
-        final_train_base_result = self.eval_pass(
-            self.benchmark.train_stream,
-            label='final_train_base',
-            eval_tag='base',
-            checkpoint_exp_idx=last_exp_idx,
-            controller_enabled=not self._is_repair_controller(),
-            capture_logits=False,
-            capture_backbone_logits=False,
-            capture_predictions=False,
-            capture_auxiliary_metrics=False,
-            log_step=None,
-        )
-        final_train_base = self._ordered_vector(final_train_base_result.per_exp_acc)
 
         log_ctrl_metrics = self._is_repair_controller()
         if log_ctrl_metrics:
@@ -1070,26 +1051,14 @@ class RegainEvaluator:
                     capture_predictions=False,
                     capture_auxiliary_metrics=False,
                     log_step=None,
+                    compute_accuracy=True,
+                    compute_loss=False,
                 )
                 self.last_ctrl_eval_result = ctrl_result
             final_test_ctrl = self._ordered_vector(ctrl_result.per_exp_acc)
-            final_train_ctrl_result = self.eval_pass(
-                self.benchmark.train_stream,
-                label='final_train_ctrl',
-                eval_tag='ctrl',
-                checkpoint_exp_idx=last_exp_idx,
-                controller_enabled=True,
-                capture_logits=False,
-                capture_backbone_logits=False,
-                capture_predictions=False,
-                capture_auxiliary_metrics=False,
-                log_step=None,
-            )
-            final_train_ctrl = self._ordered_vector(final_train_ctrl_result.per_exp_acc)
             acc_final_ctrl = list(final_test_ctrl)
         else:
             final_test_ctrl = None
-            final_train_ctrl = None
             acc_final_ctrl = list(final_test_base)
 
         diagnostic_vectors = self._diagnostic_vectors_for_artifacts()
@@ -1107,51 +1076,29 @@ class RegainEvaluator:
             mlflow.log_dict(self.artifacts, MLFLOW_ARTIFACT_ANALYSIS_FILE)
 
         self._log_accuracy_vector(
-            key=RUN_ACC_FINAL_TEST,
+            key=RUN_ACC_FINAL,
             values=final_test_base,
             variant='base',
             step=final_step,
         )
         self._log_analysis_metric(
-            key=RUN_ACC_FINAL_TEST_AVG_BASE,
+            key=RUN_ACC_FINAL_AVG_BASE,
             value=self._mean_accuracy(final_test_base),
-            step=final_step,
-        )
-        self._log_accuracy_vector(
-            key=RUN_ACC_FINAL_TRAIN,
-            values=final_train_base,
-            variant='base',
-            step=final_step,
-        )
-        self._log_analysis_metric(
-            key=RUN_ACC_FINAL_TRAIN_AVG_BASE,
-            value=self._mean_accuracy(final_train_base),
             step=final_step,
         )
 
         if log_ctrl_metrics:
-            if final_test_ctrl is None or final_train_ctrl is None:
+            if final_test_ctrl is None:
                 raise RuntimeError('Repair-controller final accuracy vectors are missing.')
             self._log_accuracy_vector(
-                key=RUN_ACC_FINAL_TEST,
+                key=RUN_ACC_FINAL,
                 values=final_test_ctrl,
                 variant='ctrl',
                 step=final_step,
             )
             self._log_analysis_metric(
-                key=RUN_ACC_FINAL_TEST_AVG_CTRL,
+                key=RUN_ACC_FINAL_AVG_CTRL,
                 value=self._mean_accuracy(final_test_ctrl),
-                step=final_step,
-            )
-            self._log_accuracy_vector(
-                key=RUN_ACC_FINAL_TRAIN,
-                values=final_train_ctrl,
-                variant='ctrl',
-                step=final_step,
-            )
-            self._log_analysis_metric(
-                key=RUN_ACC_FINAL_TRAIN_AVG_CTRL,
-                value=self._mean_accuracy(final_train_ctrl),
                 step=final_step,
             )
             rho_values = artifacts.get(ARTIFACT_RHO)
@@ -1172,6 +1119,19 @@ class RegainEvaluator:
                     value=float(rho_avg),
                     step=final_step,
                 )
+
+        final_scalar_results = {
+            f'{RUN_ACC_FINAL}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}{NS_SEP}base': float(value)
+            for exp_idx, value in enumerate(final_test_base)
+        }
+        final_scalar_results[RUN_ACC_FINAL_AVG_BASE] = self._mean_accuracy(final_test_base)
+        if log_ctrl_metrics and final_test_ctrl is not None:
+            for exp_idx, value in enumerate(final_test_ctrl):
+                final_scalar_results[
+                    f'{RUN_ACC_FINAL}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}{NS_SEP}ctrl'
+                ] = float(value)
+            final_scalar_results[RUN_ACC_FINAL_AVG_CTRL] = self._mean_accuracy(final_test_ctrl)
+        self.last_posthoc_scalar_results = final_scalar_results
 
         self._log_latency_overhead(step=final_step)
 
@@ -1343,6 +1303,23 @@ class RegainEvaluator:
         if exp_idx_int not in per_exp_acc:
             raise ValueError(f'Missing Top1 accuracy for experience {exp_idx_int}.')
         return float(per_exp_acc[exp_idx_int])
+
+    @staticmethod
+    def _required_loss(*, per_exp_loss: Mapping[int, float], exp_idx: int) -> float:
+        """
+        Return one required experience loss from a sparse result map.
+
+        Args:
+            per_exp_loss (Mapping[int, float]): Loss by experience.
+            exp_idx (int): Required experience index.
+
+        Returns:
+            float: Loss for the requested experience.
+        """
+        exp_idx_int = int(exp_idx)
+        if exp_idx_int not in per_exp_loss:
+            raise ValueError(f'Missing loss for experience {exp_idx_int}.')
+        return float(per_exp_loss[exp_idx_int])
 
     def _diagnostic_vectors_for_artifacts(self) -> dict[str, list[float | None]]:
         """
@@ -1516,7 +1493,7 @@ class RegainEvaluator:
 
         Analysis metrics keep the explicit experience-based step convention
         `(exp_idx + 1) * num_epochs_per_experience`. Only the retained
-        forgetting, transfer, and checkpoint-loss histories use this helper.
+        forgetting and transfer histories use this helper.
 
         Avalanche's `MetricContextPlugin.before_eval()` overwrites the active eval
         step with `context.train_step`. Checkpoint-backed repair runs never
