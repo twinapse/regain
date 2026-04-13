@@ -208,3 +208,7 @@ __marimo__/
 
 # MLflow local runs
 mlruns/
+
+# Coding agents
+.claude/settings.local.json
+.codex/config.toml

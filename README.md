@@ -1,34 +1,22 @@
-# REGAIN: Retrieval-Based Gain Assessment for Incremental Networks
+# REGAIN: retrieval-based gain assessment for incremental networks
 
-This project asks:
+<!-- toc -->
 
-> **How much of catastrophic forgetting in neural networks is actually “repairable” by tiny retrieval-only 
-> interventions—and when do we truly need heavyweight continual-learning machinery?**
+- [Project overview](#project-overview)
+- [Architecture](#architecture)
+- [Methods](#methods)
+- [Experimental framework](#experimental-framework)
+- [CLI usage](#cli-usage)
+- [Debugging](#debugging)
+- [Coding agent setup](#coding-agent-setup)
 
-The work has two tightly linked parts:
+## Project overview
 
-1. **REGAIN analysis tool (frozen-backbone, offline):**
+See [docs/overview.md](docs/overview.md) for research, domain, and technology-stack context.
 
-   * Define a **family of small retrieval controllers** (scalar → layer → channel → input-conditioned) that act only 
-     at test-time / repair time (no backbone updates).
-   * For each controller capacity and repair data budget, measure how much forgetting is **retrieval-correctable**, 
-     producing **recoverability curves** and a **repair efficiency frontier**.
-   * Explicitly show how this generalizes **linear-probe feature forgetting** and **BiC-style logit bias correction**.
+## Architecture
 
-2. **Algorithmic (sequential class-incremental CL):**
-
-   * Design and evaluate a **task-agnostic, input-conditioned retrieval controller** (a tiny gating network that 
-     outputs per-layer gains from the current input) in **class-incremental learning**.
-   * Compare it to replay, calibration, and normalization baselines under realistic compute and memory budgets.
-
-Conceptually, the project connects:
-
-* The **dual form** view of neural networks as key–value memories over training patterns.
-* **Key–value memory in the brain**, where forgetting is often framed as retrieval failure and “silent engrams” can be 
-  reactivated.
-* **Feature forgetting** and knowledge accumulation in continually learned representations.
-* **Small post-hoc corrections** like BiC and normalization fixes for class-incremental learning.
-* **Modulation-based CL** and **NTK reactivation** as mechanistic lenses.
+See [docs/architecture.md](docs/architecture.md) for repository architecture patterns and implementation guidance.
 
 ## Methods
 
@@ -38,11 +26,6 @@ See [docs/methods.md](docs/methods.md) for implementation notes on specific meth
 
 See [docs/experimental-framework.md](docs/experimental-framework.md) for details on the benchmarks and metrics used in 
 the experiments.
-
-## Debugging
-
-See [docs/debugging.md](docs/debugging.md) for details on the repair-controller debug instrumentation, MLflow metrics,
-and health score diagnostics.
 
 ## CLI usage
 
@@ -177,43 +160,12 @@ python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experime
 When saving, add `--overwrite` to replace existing target plot directories.
 `--allow-partial` enables best-effort publishing on errors.
 
-## Code style and formatting
+## Debugging
 
-We follow [PEP 8](https://www.python.org/dev/peps/pep-0008/) and the 
-[Google Python Style Guide](https://github.com/google/styleguide/blob/gh-pages/pyguide.md). Check [pylintrc](pylintrc) 
-and [.style.yapf](.style.yapf) for the specific formatting rules.
+See [docs/debugging.md](docs/debugging.md) for details on the repair-controller debug instrumentation, MLflow metrics,
+and health score diagnostics.
 
-To ensure code consistency, we use the following tools:
+## Coding agent setup
 
-1. [isort](https://pycqa.github.io/isort/): Organizes the imports. Run:
-
-   ```
-   isort regain tests --profile google --line-length 120
-   ```
-
-2. [YAPF](https://github.com/google/yapf): Formats the code. Run:
-
-   ```
-   yapf --recursive --in-place regain tests
-   ```
-
-3. [Ruff](https://github.com/astral-sh/ruff): Quickly lints and fixes the code. Run:
-
-   ```
-   ruff check regain tests --fix
-   ```
-
-4. [Pylint](https://pypi.org/project/pylint/): Thoroughly lints the code. Run:
-
-   ```
-   pylint --rcfile=pylintrc regain
-   ```
-
-   to inspect the main [`regain`](regain) package, and
-
-   ```
-   pylint --rcfile=pylintrc --disable=redefined-outer-name,unused-argument tests
-   ```
-
-   to inspect the [`tests`](tests) package. We use different configurations for the main package and the tests to 
-   avoid Pytest-related false positives.
+See [docs/coding-agent-setup.md](docs/coding-agent-setup.md) for the project-local coding-agent setup used in
+this repository.

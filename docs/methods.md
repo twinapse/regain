@@ -5,13 +5,22 @@ the practical bits that are easy to forget later: what the original authors’ i
 implemented here, what we intentionally skipped, and what would need to change to reproduce an original setup more 
 faithfully.
 
+<!-- toc -->
+
+- [Linear probe](#linear-probe)
+- [BiC (bias correction)](#bic-bias-correction)
+- [IL2M (class incremental learning with dual memory)](#il2m-class-incremental-learning-with-dual-memory)
+- [CN (continual normalization)](#cn-continual-normalization)
+- [TBBN (task-balanced batch normalization)](#tbbn-task-balanced-batch-normalization)
+- [BaCE](#bace)
+
 ## Linear probe
 
 We use a linear probe to evaluate the quality of learned representations.
 
 See [*"Knowledge Accumulation in Continually Learned Representations and the Issue of Feature Forgetting"*](https://arxiv.org/abs/2304.00933).
 
-## BiC (Bias Correction)
+## BiC (bias correction)
 
 [**Paper**](https://arxiv.org/abs/1905.13260)
 
@@ -22,7 +31,7 @@ See [*"Knowledge Accumulation in Continually Learned Representations and the Iss
 - Backbone training is still provided by the shared experiment backbone strategy; BiC fits a bias layer on the repair
   stream and applies it during posthoc evaluation.
 
-## IL2M (Class Incremental Learning With Dual Memory)
+## IL2M (class incremental learning with dual memory)
 
 [**Paper**](https://ieeexplore.ieee.org/document/9009019)
 
@@ -32,7 +41,7 @@ See [*"Knowledge Accumulation in Continually Learned Representations and the Iss
 - The controller accumulates IL2M statistics from repair data after each experience and applies IL2M rectification
   during posthoc evaluation.
 
-## CN (Continual Normalization)
+## CN (continual normalization)
 
 [**Paper**](https://arxiv.org/abs/2203.16102)
 
@@ -50,7 +59,7 @@ See [*"Knowledge Accumulation in Continually Learned Representations and the Iss
   logic). This matches the “drop-in normalization replacement” spirit, but we do not attempt to reproduce every training
   detail/setup from the paper’s experiments (online CL protocols, specific baselines, etc.).
 
-## TBBN (Task-Balanced Batch Normalization)
+## TBBN (task-balanced batch normalization)
 
 [**Paper**](https://arxiv.org/abs/2201.12559)
 
