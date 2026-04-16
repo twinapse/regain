@@ -1,4 +1,4 @@
-# Experimental Framework
+# Experimental framework
 
 This document specifies the benchmark protocol, controller regimes, evaluation behavior, and metric logging
 organization used to measure **retrieval-correctable forgetting** on supported class-incremental
@@ -9,14 +9,14 @@ learning (CIL) scenarios (**SplitCIFAR-100**, **Split CUB-200**, **Split Tiny-Im
 ## Contents
 
 - [0) Overview](#0-overview)
-- [1) Benchmark & Scenario](#1-benchmark--scenario)
-- [2) Model & Training Protocol](#2-model--training-protocol)
-- [3) Controllers & Evaluation Behavior](#3-controllers--evaluation-behavior)
-- [4) Repair Data (Disjoint from Training)](#4-repair-data-disjoint-from-training)
-- [5) Recorded Accuracies](#5-recorded-accuracies)
-- [6) Forgetting & Repair Metrics](#6-forgetting--repair-metrics)
-- [7) Metric Logging & Reporting (MLflow)](#7-metric-logging--reporting-mlflow)
-- [8) REGAIN analysis tool: Curves, Frontiers, and Predictive Associations](#8-regain-analysis-tool-curves-frontiers-and-predictive-associations)
+- [1) Benchmark & scenario](#1-benchmark--scenario)
+- [2) Model & training protocol](#2-model--training-protocol)
+- [3) Controllers & evaluation behavior](#3-controllers--evaluation-behavior)
+- [4) Repair data (disjoint from training)](#4-repair-data-disjoint-from-training)
+- [5) Recorded accuracies](#5-recorded-accuracies)
+- [6) Forgetting & repair metrics](#6-forgetting--repair-metrics)
+- [7) Metric logging & reporting (MLflow)](#7-metric-logging--reporting-mlflow)
+- [8) REGAIN analysis tool: curves, frontiers, and predictive associations](#8-regain-analysis-tool-curves-frontiers-and-predictive-associations)
 
 ---
 
@@ -47,7 +47,7 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 
 ---
 
-## 1) Benchmark & Scenario
+## 1) Benchmark & scenario
 
 ### Dataset and split
 - Scenario selection is configuration-driven through `scenario`.
@@ -74,7 +74,7 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 #### `imagenet_r`
 - Dataset: **ImageNet-R** (200 classes)
 - Scenario builder: **custom `ImageNetRScenarioBuilder`**
-- Data source: Downloaded from the Berkeley ImageNet-R release ([Hendrycks et al.](https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar)).
+- Data source: Downloaded from the Berkeley ImageNet-R archive ([Hendrycks et al.](https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar)).
 - Expected split layout under dataset root: `train/<class_name>/*` and `test/<class_name>/*`.
 - If explicit split folders are not found, a deterministic per-class train/test holdout is built from a single-root class folder layout using `seed`.
 
@@ -99,7 +99,7 @@ We record accuracies under two different “label space” regimes:
 
 ---
 
-## 2) Model & Training Protocol
+## 2) Model & training protocol
 
 ### Model
 - Backbone: `resnet18` | `vit_small` | `vit_base` (default `resnet18`)
@@ -123,7 +123,7 @@ We record accuracies under two different “label space” regimes:
 
 ---
 
-## 3) Controllers & Evaluation Behavior
+## 3) Controllers & evaluation behavior
 
 This codebase distinguishes when a controller acts and how evaluation is executed.
 
@@ -224,7 +224,7 @@ When one or more configured controller runs are present:
   (including configurations that set `backbone.source_experiment`).
 - If `checkpoints_enabled: true`, shared checkpoints are also logged to MLflow artifacts.
 
-### 3.5 Run Configuration Constraints
+### 3.5 Run configuration constraints
 - Required top-level fields:
   - `experiment_name`
   - `scenario`
@@ -272,7 +272,7 @@ When one or more configured controller runs are present:
 
 ---
 
-## 4) Repair Data (Disjoint from Training)
+## 4) Repair data (disjoint from training)
 
 We use two related but distinct concepts alongside the sequential training stream:
 
@@ -306,7 +306,7 @@ We use two related but distinct concepts alongside the sequential training strea
 
 ---
 
-## 5) Recorded Accuracies
+## 5) Recorded accuracies
 
 Let $T_i$ be the i-th Avalanche experience.
 
@@ -343,7 +343,7 @@ $$
 
 ---
 
-## 6) Forgetting & Repair Metrics
+## 6) Forgetting & repair metrics
 
 ### Total forgetting
 $$
@@ -383,7 +383,7 @@ where $\epsilon = 10^{-4}$.
 
 ---
 
-## 7) Metric Logging & Reporting (MLflow)
+## 7) Metric logging & reporting (MLflow)
 
 This section describes **how metrics are organized in MLflow** and **what we report**.
 
@@ -621,7 +621,7 @@ The definitions below are the normative interpretation of the metric families us
 
 ---
 
-## 8) REGAIN analysis tool: Curves, Frontiers, and Predictive Associations
+## 8) REGAIN analysis tool: curves, frontiers, and predictive associations
 
 ### 8.1 Recoverability curves
 For each repair controller capacity level, we compute curves over repair budget fraction $b$:

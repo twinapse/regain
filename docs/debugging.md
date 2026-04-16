@@ -2,6 +2,12 @@
 
 This document covers repair-controller debug instrumentation and its MLflow metrics.
 
+<!-- toc -->
+
+- [Namespace](#namespace)
+- [Diagnostic metrics](#diagnostic-metrics)
+- [Health metrics](#health-metrics)
+
 ## Namespace
 
 All debug metrics are logged under:
@@ -17,7 +23,7 @@ Examples:
 - `run.debug.repair.ce.pre.exp003.base`
 - `run.debug.repair.health.exp003`
 
-## Diagnostic Metrics
+## Diagnostic metrics
 
 Per fit event, the plugin logs pre/post controller diagnostics and deltas:
 
@@ -54,7 +60,7 @@ Skip markers:
 - `run.debug.repair.diagnostics_skipped[.exp###] = 1`
 - `run.debug.repair.health.skipped[.exp###] = 1`
 
-## Health Metrics
+## Health metrics
 
 Per fit event:
 
