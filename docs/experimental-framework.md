@@ -1,8 +1,8 @@
 # Experimental framework
 
 This document specifies the benchmark protocol, controller regimes, evaluation behavior, and metric logging
-organization used to measure **retrieval-correctable forgetting** on supported class-incremental
-learning (CIL) scenarios (**SplitCIFAR-100**, **Split CUB-200**, **Split Tiny-ImageNet**, and **Split ImageNet-R**).
+organization used to measure **repairable forgetting** on supported class-incremental learning (CIL) scenarios
+(**SplitCIFAR-100**, **Split CUB-200**, **Split Tiny-ImageNet**, and **Split ImageNet-R**).
 
 ---
 
@@ -16,14 +16,16 @@ learning (CIL) scenarios (**SplitCIFAR-100**, **Split CUB-200**, **Split Tiny-Im
 - [5) Recorded accuracies](#5-recorded-accuracies)
 - [6) Forgetting & repair metrics](#6-forgetting--repair-metrics)
 - [7) Metric logging & reporting (MLflow)](#7-metric-logging--reporting-mlflow)
-- [8) REGAIN analysis tool: curves, frontiers, and predictive associations](#8-regain-analysis-tool-curves-frontiers-and-predictive-associations)
+- [8) REGAIN analysis tool: curves, frontiers, and predictive
+  associations](#8-regain-analysis-tool-curves-frontiers-and-predictive-associations)
 
 ---
 
 ## 0) Overview
 
-**Goal.** Quantify how much forgetting in continual learning is **retrieval-correctable** by a controller, using per-task
-accuracies and derived analysis metrics.
+**Goal.** Quantify how much forgetting in continual learning is **repairable** by constrained
+controllers, using per-task accuracies, calibration/diagnostic signals, resource measurements, and
+derived analysis metrics.
 
 **High-level pipeline.**
 1. Build the configured continual learning scenario (`scenario`, `num_experiences`).
@@ -74,19 +76,26 @@ curves, efficiency frontiers, and predictive-correlation summaries.
 #### `imagenet_r`
 - Dataset: **ImageNet-R** (200 classes)
 - Scenario builder: **custom `ImageNetRScenarioBuilder`**
-- Data source: Downloaded from the Berkeley ImageNet-R archive ([Hendrycks et al.](https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar)).
+- Data source: Downloaded from the Berkeley ImageNet-R archive
+  ([Hendrycks et al.](https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar)).
 - Expected split layout under dataset root: `train/<class_name>/*` and `test/<class_name>/*`.
-- If explicit split folders are not found, a deterministic per-class train/test holdout is built from a single-root class folder layout using `seed`.
+- If explicit split folders are not found, a deterministic per-class train/test holdout is built
+  from a single-root class folder layout using `seed`.
 
 ### Task definition (Avalanche)
-- For `cifar100`, we use `SplitCIFAR100(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
-- For `tiny_imagenet`, we use `SplitTinyImageNet(n_experiences=<num_experiences>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)`.
-- For `cub200`, we use `SplitCUB200(n_experiences=<num_experiences>, classes_first_batch=<computed>, return_task_id=False, seed=<seed>, class_ids_from_zero_from_first_exp=True)` with scenario-managed dataset download.
-- For `imagenet_r`, we resolve raw train/test datasets and then build a class-incremental NC benchmark with `return_task_id=False`.
+- For `cifar100`, we use `SplitCIFAR100` with `n_experiences=<num_experiences>`,
+  `return_task_id=False`, `seed=<seed>`, and `class_ids_from_zero_from_first_exp=True`.
+- For `tiny_imagenet`, we use `SplitTinyImageNet` with `n_experiences=<num_experiences>`,
+  `return_task_id=False`, `seed=<seed>`, and `class_ids_from_zero_from_first_exp=True`.
+- For `cub200`, we use `SplitCUB200` with `n_experiences=<num_experiences>`,
+  `classes_first_batch=<computed>`, `return_task_id=False`, `seed=<seed>`, and
+  `class_ids_from_zero_from_first_exp=True`; dataset download is scenario-managed.
+- For `imagenet_r`, we resolve raw train/test datasets and then build a class-incremental NC
+  benchmark with `return_task_id=False`.
 - Each experience corresponds to one task $T_i$.
 - The class partition/order is determined by `seed` and scenario generator logic.
-- Assumption: class IDs are contiguous starting from 0 across the full benchmark; this is enforced by the runner
-  (`verify_classes` in `regain/experiments/builders.py`).
+- Assumption: class IDs are contiguous starting from 0 across the full benchmark; this is enforced by scenario
+  validation (`ScenarioBuilder._verify_classes_contiguous_from_zero` in `regain/avalanche_utils/scenarios.py`).
 
 ### Label-space regimes (important!)
 We record accuracies under two different “label space” regimes:
@@ -106,16 +115,21 @@ We record accuracies under two different “label space” regimes:
 - Normalization: **BatchNorm** (standard ResNet-18 by default)
 - Classifier head: linear layer to **`num_classes(scenario)`** logits (single head)
 
-> ℹ️ **Class label invariant:** in this single-head setup, logit index `c` corresponds to global class ID `c` (class IDs
-> are contiguous from 0), and downstream analyses/controllers are expected to preserve this ordering.
+> ℹ️ **Class label invariant:** in this single-head setup, logit index `c` corresponds to
+> global class ID `c` (class IDs are contiguous from 0), and downstream analyses/controllers are
+> expected to preserve this ordering.
 
 ### Pretraining
-- Backbone initialization: **random initialization (no pretraining)**
+- Default configs use **random initialization** (`backbone.kwargs.pretrained_backbone: false`).
+- Classifier constructors also support pretrained backbones via
+  `backbone.kwargs.pretrained_backbone: true`; pretraining status should be reported as part of the experimental
+  setting.
 
 ### Incremental training protocol
 - Offline / multi-epoch training per experience.
 - After completing experience $T_k$, training proceeds to $T_{k+1}$.
-- Raw data from previous experiences are not reused (unless the chosen Avalanche strategy uses replay/memory internally).
+- Raw data from previous experiences are not reused (unless the chosen Avalanche strategy uses
+  replay/memory internally).
 - The classifier remains single-head over all benchmark classes throughout.
 - Typical backbone schedules are expressed explicitly in config:
   - `resnet18` commonly uses `backbone.training.num_epochs: 50` per experience.
@@ -129,12 +143,6 @@ This codebase distinguishes when a controller acts and how evaluation is execute
 
 ### 3.1 Controller types
 
-**Prevention (training-time) controllers** (`PreventionController`)
-- Affect training dynamics and therefore the final learned model.
-- Examples:
-  - modify the training loss (implements `TrainingObjectiveControllerInterface`)
-  - modify model internals in a way that affects training (implements `BackboneControllerInterface`, e.g., normalization replacement)
-
 **Repair (post-training) controllers** (`RepairController`)
 - Intended for *post-hoc* / *post-training* repair.
 - They should not change the backbone’s training dynamics.
@@ -145,13 +153,30 @@ This codebase distinguishes when a controller acts and how evaluation is execute
 - In code, repair controllers receive post-training hooks (`on_train_experience_end`, `on_train_end`), plus evaluation
   hooks (`on_eval_*`) and `correct_outputs` during evaluation. They do **not** receive training-time hooks.
 
-### 3.2 Repair/fitting protocol by controller type
+Repair controllers can also be grouped by mechanism:
 
-**`PreventionController` (training-time intervention)**
-- Acts during training; it may change:
-  - the loss surface and optimization trajectory, and/or
-  - the backbone architecture/normalization behavior.
-- It is not purely post-hoc, so this pipeline does not expose a fair base/ctrl toggle for prevention runs.
+- **Readout repair**: fits a new lightweight head or probe on frozen representations.
+- **Bias/calibration repair**: corrects logits, temperatures, or class-level biases.
+- **Statistical drift repair**: corrects feature/logit distributions using moments, prototypes, or reconstruction rules.
+- **Modulation repair**: applies input-, layer-, block-, or channel-conditioned corrections during evaluation.
+- **Test-time repair**: detects evaluation-time conditions such as old-task/task-confusion cases and applies
+  online retention, routing, or correction during inference.
+
+The repairability framing treats these as comparable controller families when they are implemented under the same
+repair split, backbone trajectory, label-space assumptions, and evaluation protocol.
+Test-time repair methods are still post-hoc repair methods, but their protocol assumptions should be reported
+explicitly because they need not match the repair-set fitting regime used by BiC- or IL2M-style controllers.
+
+**Prevention (training-time) controllers** (`PreventionController`)
+- Affect training dynamics and therefore the final learned model.
+- Serve as prevention-style baselines for the repairability framing, helping identify when post-hoc repair is
+  sufficient and when changing the training trajectory is necessary.
+- Examples:
+  - modify the training loss (implements `TrainingObjectiveControllerInterface`)
+  - modify model internals in a way that affects training (implements
+    `BackboneControllerInterface`, e.g., normalization replacement)
+
+### 3.2 Repair/fitting protocol by controller type
 
 **`RepairController` (post-hoc repair)**
 - After each training experience, the repair stream provides that experience’s fixed repair set.
@@ -165,6 +190,12 @@ This codebase distinguishes when a controller acts and how evaluation is execute
 - During fitting, backbone parameters $\phi$ are frozen (inference-only forwards); the controller trains on samples from
   the **repair stream** (aggregated across experiences).
 - The test set is never used for fitting $g_\theta$.
+
+**`PreventionController` (training-time intervention)**
+- Acts during training; it may change:
+  - the loss surface and optimization trajectory, and/or
+  - the backbone architecture/normalization behavior.
+- It is not purely post-hoc, so this pipeline does not expose a fair base/ctrl toggle for prevention runs.
 
 ### 3.3 Evaluation
 
@@ -209,7 +240,8 @@ When one or more configured controller runs are present:
   baseline diagnostic/calibration vectors consumed by repair-run analysis.
   Metric-only baselines are not sufficient for source-run reuse.
 - Repair-run downstream analysis enforces a baseline-only policy:
-  - diagnostic vectors and analysis calibration vectors (`run.calibration.ece`, `run.calibration.aece`, `run.calibration.nll`) are sourced from
+  - diagnostic vectors and analysis calibration vectors (`run.calibration.ece`,
+    `run.calibration.aece`, `run.calibration.nll`) are sourced from
     base `analysis_artifacts.json`;
   - run-level repair `run.calibration.max_ece` is derived from baseline `run.calibration.ece` vectors;
   - ctrl per-task run metrics for those keys are ignored.
@@ -217,7 +249,8 @@ When one or more configured controller runs are present:
   checkpoint per experience.
 - Each repair-controller run then reuses those checkpoints (the loader restores each experience checkpoint before the
   experience hooks), so controller behavior is compared on the same trained backbone trajectory.
-- The `backbone` run is also the source of base analysis vectors (`acc.exp.base`, `acc.final.base`) reused by repair runs.
+- The `backbone` run is also the source of base analysis vectors (`acc.exp.base`,
+  `acc.final.base`) reused by repair runs.
 - `name: backbone` is reserved in `runs` (always).
 - An experiment cannot contain multiple runs named `backbone`.
 - If a local `backbone` run already exists while `backbone` config is non-null, execution is rejected
@@ -241,7 +274,7 @@ When one or more configured controller runs are present:
 - For `warmup_cosine`, provide `backbone.training.lr_scheduler.kwargs.warmup_epochs`; `min_lr` is optional.
 - When `backbone.source_experiment` is provided, it must be the only field under `backbone`.
 - `backbone.source_experiment` must be different from `experiment_name` (same-experiment reuse is rejected).
-- `repair` configuration is mandatory. All runs in an experiment (backbone, prevention controllers, repair controllers)
+- `repair` configuration is mandatory. All runs in an experiment (backbone, repair controllers, prevention controllers)
   share the exact same repair split defined by:
   - required `repair.split_fraction` (float in `[0, 1)`) as the fraction of each training experience excluded from
     backbone training.
@@ -257,7 +290,7 @@ When one or more configured controller runs are present:
 - Run-specific config blocks are not allowed to override experiment-level training/runtime parameters
   (for example epochs, batch sizes, replay memory size, device, eval frequency, repair budget/fit schedule,
   and checkpoint-saving flags).
-- Each run logs `controller.type` with one of `none`, `prevention`, or `repair`.
+- Each run logs `controller.type` with one of `none`, `repair`, or `prevention`.
   Analysis uses this parameter as the authoritative controller-kind signal.
 - Controller runs do not log `backbone.*` parameters, except `backbone.source_experiment.id` and
   `backbone.source_experiment.name` when source reuse is configured. `backbone.source_experiment.name` is a run-time
@@ -322,16 +355,17 @@ A_{\text{post}}(T_i) =
 \text{Acc}\Big(\text{test}(T_i)\ \text{with label space } \{0,\dots,C-1\}\Big)
 $$
 
->ℹ️ With prevention controllers, $A_{\text{post}}$ is the posthoc evaluation of the model trained under the controller
-> (no eval-time toggling). With repair controllers, $A_{\text{post}}$ is the shared base baseline taken from
-> the reserved `backbone` run for the same checkpoint trajectory.
+>ℹ️ With repair controllers, $A_{\text{post}}$ is the shared base baseline taken from the reserved `backbone`
+> run for the same checkpoint trajectory. With prevention controllers, $A_{\text{post}}$ is the posthoc
+> evaluation of the model trained under the controller (no eval-time toggling).
 
 ### Controller accuracy (all-classes)
 $$
 A_{\text{ctrl}}(T_i;\theta,b) =
 \text{Acc}\Big(\text{test}(T_i)\ \text{with label space } \{0,\dots,C-1\}\Big)
 $$
->ℹ️ $A_{\text{ctrl}}$ and $\rho$ are logged only for repair controllers, because prevention controllers do not define
+>ℹ️ $A_{\text{ctrl}}$ and $\rho$ are logged only for repair controllers, because prevention
+> controllers do not define
 > a post-hoc, toggleable evaluation-time correction.
 
 ### Final global accuracy (all classes)
@@ -359,17 +393,19 @@ $$
 $$
 \Delta A(T_i;\theta,b)=A_{\text{ctrl}}(T_i;\theta,b)-A_{\text{post}}(T_i)
 $$
+>ℹ️ This per-task quantity is also persisted in `analysis_artifacts.json` as `delta_a`.
 
-### Retrieval-correctable fraction
+### Repairable fraction
 $$
 \rho(T_i;\theta,b) =
 \frac{A_{\text{ctrl}}(T_i;\theta,b) - A_{\text{post}}(T_i)}
      {A_{\text{ref}}(T_i) - A_{\text{post}}(T_i)}
 $$
->ℹ️ $\rho$ is reported only for repair controllers.
+>ℹ️ In implementation and artifacts, this metric appears under the helper/symbol name
+> `retrieval_correctable_fraction`; $\rho$ is reported only for repair controllers.
 
 ### Valid vs invalid tasks (for $\rho$)
-A task $T_i$ is considered **valid for retrieval-correctable fraction computations** if:
+A task $T_i$ is considered **valid for repairable-fraction computations** if:
 
 $$
 F_{\text{total}}(T_i) = A_{\text{ref}}(T_i) - A_{\text{post}}(T_i) > \epsilon
@@ -397,7 +433,8 @@ Metric keys are normalized and namespaced as:
 - `run.train.time.*` for Avalanche time metrics
 - `run.eval.forgetting.*` / `run.eval.transfer.*` for test-side checkpoint histories
 - `run.eval.acc.ref.*` / `run.eval.acc.final.*` for reference/final accuracy metrics
-- `run.calibration.<...>` for calibration metrics (for example per-task `run.calibration.<metric>.exp###` and run-level `run.calibration.max_ece`)
+- `run.calibration.<...>` for calibration metrics (for example per-task
+  `run.calibration.<metric>.exp###` and run-level `run.calibration.max_ece`)
 - `run.diagnostics.<...>` for task-level diagnostic metrics (for example `run.diagnostics.<metric>.exp###`)
 - `run.latency.<...>` for base/ctrl latency and throughput
 - `run.repair.seconds` / `run.repair.steps` for repair fit-time resources
@@ -423,7 +460,7 @@ Each experiment run creates a single MLflow run. Run creation rules (reserved `b
 `backbone.source_experiment` reuse, and rejection conditions) are defined in section 3.5.
 
 Analysis collection requires each run to provide:
-- `controller.type` in `{none, prevention, repair}`;
+- `controller.type` in `{none, repair, prevention}`;
 - `repair.split_fraction`.
 
 Runs that do not satisfy these analysis requirements are skipped during collection and recorded as run-level failures.
@@ -482,6 +519,9 @@ At the end of training, when all end-of-experience base accuracy points are comp
       The run-level MLflow metric on the repair run comes from the latest completed eval pass and is not the
       authoritative value for analysis.
 - Additional persisted vectors in `analysis_artifacts.json` (when available):
+  - `f_total`
+  - `f_res`
+  - `delta_a`
   - `run.diagnostics.out_of_task_rate`
   - `run.diagnostics.avg_conf`
   - `run.diagnostics.avg_entropy`
@@ -501,12 +541,14 @@ At the end of training, when all end-of-experience base accuracy points are comp
   - eval tags are:
     - `base` for controller-off posthoc evaluation
     - `ctrl` for controller-on posthoc evaluation
-  - repair-controller runs log their own `ctrl` prediction artifacts; backbone/controller-off prediction artifacts remain on
+  - repair-controller runs log their own `ctrl` prediction artifacts; backbone/controller-off
+    prediction artifacts remain on
     the corresponding `backbone` run
   - these artifacts support metric recomputation from stored predictions; the `run_analysis` pipeline consumes
     logged metrics and `analysis_artifacts.json`
 - For repair-controller runs, analysis outputs (`runs_table`, curves, predictive summaries) enforce baseline-only
-  consumption of diagnostic values and analysis calibration values (`run.calibration.ece`, `run.calibration.aece`, `run.calibration.nll`,
+  consumption of diagnostic values and analysis calibration values (`run.calibration.ece`,
+  `run.calibration.aece`, `run.calibration.nll`,
   run-level `run.calibration.max_ece`) from `analysis_artifacts.json`.
   For `run.calibration.max_ece`, repair runs use vector-derived `max(run.calibration.ece)`.
 - Additional run-level efficiency metrics:
@@ -524,7 +566,8 @@ At the end of training, when all end-of-experience base accuracy points are comp
   - `observed_num_exp_points`
   - `run.eps`
   - partial `acc.exp.base` vector
-- A flag metric `run.status.incomplete_acc_exp_base=1.0` is logged when end-of-experience base accuracies are incomplete.
+- A flag metric `run.status.incomplete_acc_exp_base=1.0` is logged when end-of-experience base
+  accuracies are incomplete.
 
 For step-history eval metrics exported to flat tables, the exporter inserts `after_exp###`:
 
@@ -541,7 +584,8 @@ For step-history eval metrics exported to flat tables, the exporter inserts `aft
     any reference checkpoint exists) is dropped — there is no recoverable signal before the
     first training experience completes;
   - history-bearing eval families must raise when MLflow history lookup fails.
-- The exporter does not fall back to raw latest-value `run.eval.forgetting.*` / `run.eval.transfer.*` columns when strict
+- The exporter does not fall back to raw latest-value `run.eval.forgetting.*` /
+  `run.eval.transfer.*` columns when strict
   history materialization fails.
 - Example exported columns:
   - `run.eval.forgetting.after_exp003.exp001`
@@ -554,8 +598,11 @@ We report mean ± std across seeds (common configs use **3 seeds**) for:
 - $\{A_{\text{post}}(T_i)\}_{i=1}^{N}$ (where $N=\text{num\_experiences}$)
 - $\bar{\rho}(\theta,b)$ for each repair controller and budget
 - Optionally: $\overline{A}_{\text{ctrl}}(\theta,b)$ for each repair controller and budget
-- Optionally: calibration, diagnostic, and efficiency summaries (for example `run.calibration.max_ece`, latency and repair-cost
+- Optionally: calibration, diagnostic, and efficiency summaries (for example
+  `run.calibration.max_ece`, latency and repair-cost
   metrics) in budget/controller-level tables and curves
+- The default analysis exports currently center `rho`, controller accuracy, `run.calibration.max_ece`, latency,
+  repair-fit cost, and controller parameter count.
 
 **Persisted artifacts**
 - Per-task accuracies $(A_{\text{exp}}, A_{\text{post}})$ in runs with complete end-of-experience vectors
@@ -573,12 +620,14 @@ The definitions below are the normative interpretation of the metric families us
 #### Calibration metrics
 
 - `run.calibration.nll`: Negative log-likelihood (cross-entropy). Mean `-log p(y_true)` over samples. Lower is better.
-- `run.calibration.brier`: Multiclass Brier score. Mean squared error between predicted probability vectors and one-hot labels.
+- `run.calibration.brier`: Multiclass Brier score. Mean squared error between predicted
+  probability vectors and one-hot labels.
   Lower is better.
 - `run.calibration.ece`: Expected calibration error with fixed-width confidence bins. Weighted mean absolute gap between
   per-bin accuracy and mean confidence. Lower is better.
 - `run.calibration.aece`: Adaptive ECE with approximately equal-count confidence bins. Lower is better.
-- `run.calibration.mce`: Maximum calibration error. Largest absolute per-bin gap between accuracy and confidence. Lower is better.
+- `run.calibration.mce`: Maximum calibration error. Largest absolute per-bin gap between accuracy
+  and confidence. Lower is better.
 - `run.calibration.max_ece`: Worst-task ECE.
   - Non-repair runs: worst task in the latest completed evaluation pass, i.e. `max_i run.calibration.ece.exp{i}`.
   - Repair runs: baseline-only value `max_i run.calibration.ece[i]` derived from base artifact vectors.
@@ -608,7 +657,8 @@ The definitions below are the normative interpretation of the metric families us
 - `run.diagnostics.logit_avg_drift`: `||mu_i_exp - mu_i_base||_2`, the L2 distance between the task-level mean logit
   vector after training experience `i` and the corresponding task-level mean logit vector at final base evaluation.
   The mean logit vectors themselves are not logged as standalone metrics.
-- Optional `run.diagnostics.logit_cov_drift_fro`: Frobenius drift between checkpoint and post-sequence logit covariance matrices.
+- Optional `run.diagnostics.logit_cov_drift_fro`: Frobenius drift between checkpoint and
+  post-sequence logit covariance matrices.
   This metric is not produced in the default pipeline.
 
 #### Analysis outputs

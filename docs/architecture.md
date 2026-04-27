@@ -46,18 +46,18 @@ This guide records repository-specific architecture patterns for REGAIN.
   runs should load its checkpoints instead of retraining the backbone.
 - Source-experiment reuse must load both backbone checkpoints and the baseline analysis payload. Metric-only source
   runs are not sufficient for repair analysis.
-- Prevention controllers participate in training and cannot be compared through the same controller-off post-hoc toggle
-  used by repair controllers.
+- Repair controllers support a controller-off post-hoc toggle. Prevention controllers participate in training and
+  therefore cannot be compared through that same toggle.
 - Keep checkpoint paths ordered by experience index and validate that a checkpoint exists for every training experience
   before using them in repair runs.
 
 ## Controllers
 
 - Controller base classes and lifecycle contracts live in `regain.models.controllers.base`.
-- Use `PreventionController` for training-time interventions that can modify the model, objective, or training
-  trajectory.
 - Use `RepairController` for post-hoc interventions that fit on repair data and correct outputs during evaluation
   without changing backbone training dynamics.
+- Use `PreventionController` for training-time interventions that can modify the model, objective, or training
+  trajectory.
 - Use `BackboneControllerInterface` when a prevention controller rewrites model structure or state, and
   `TrainingObjectiveControllerInterface` when it modifies the training loss.
 - Repair controllers should implement `requires_per_experience_fitting()` when final-only fitting would be invalid.
