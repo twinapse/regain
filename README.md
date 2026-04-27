@@ -1,4 +1,4 @@
-# REGAIN: retrieval-based gain assessment for incremental networks
+# REGAIN: A Repairability Framework for Class-Incremental Learning
 
 <!-- toc -->
 
@@ -77,7 +77,7 @@ Notes:
 * For repair-controller runs, predictive summaries and run-level `run.calibration.max_ece` in `runs_table` are baseline-only:
   sourced from base values in `analysis_artifacts.json`.
   `run.calibration.max_ece` is defined as `max(run.calibration.ece)` over artifact baseline vectors.
-* Analysis collection requires each run to include `controller.type` (`none`, `prevention`, or `repair`) and
+* Analysis collection requires each run to include `controller.type` (`none`, `repair`, or `prevention`) and
   `repair.split_fraction` parameters.
 * Runs that fail collection validation are skipped and reported as run-level failures.
   Use `--allow-partial` if you want successful outputs to still be published when some runs/stages fail.

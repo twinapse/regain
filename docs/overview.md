@@ -12,36 +12,34 @@ This document captures research, domain, and stack context for contributors work
 
 ## What is REGAIN?
 
-REGAIN is a research codebase for measuring how much catastrophic forgetting in class-incremental neural networks is
-retrieval-correctable by small controllers.
+REGAIN is a research codebase for measuring how much catastrophic forgetting in class-incremental
+neural networks is repairable by constrained post-training interventions.
 
-The project compares a frozen-backbone, post-training repair setting against prevention-style continual-learning
-baselines. It trains or reuses a shared backbone trajectory, fits lightweight controllers on held-out repair data, and
-logs enough information to compute recoverability curves, efficiency frontiers, calibration summaries, and diagnostic
-associations.
+The project studies repairability under a shared experimental and analysis framework. It trains or reuses shared
+backbone trajectories, evaluates representative repair mechanisms under held-out repair-data and resource constraints,
+and logs enough information to compute recoverability curves, efficiency frontiers, calibration summaries, and
+diagnostic associations.
 
 ## Research framing
 
 This project asks:
 
-> **How much of catastrophic forgetting in neural networks is actually "repairable" by tiny retrieval-only
-> interventions, and when do we truly need heavyweight continual-learning machinery?**
+> **How much observed forgetting is repairable under constrained controller capacity and repair data, and what kind of
+> repair mechanism is sufficient in each regime?**
 
-The work has two tightly linked parts:
+The central object is a **repairability frontier**: a capacity-, data-, and cost-aware map of how much performance can
+be recovered after continual learning without updating the backbone. The frontier treats different repair mechanisms as
+comparable interventions under a common evaluation protocol.
 
-1. **REGAIN analysis tool (frozen-backbone, offline)**:
-
-   - Define a **family of small retrieval controllers** (scalar, layer, channel, input-conditioned) that act only at
-     test time or repair time, without backbone updates.
-   - For each controller capacity and repair data budget, measure how much forgetting is **retrieval-correctable**,
-     producing **recoverability curves** and a **repair efficiency frontier**.
-   - Explicitly show how this generalizes **linear-probe feature forgetting** and **BiC-style logit bias correction**.
-
-2. **Algorithmic (sequential class-incremental continual learning)**:
-
-   - Design and evaluate a **task-agnostic, input-conditioned retrieval controller**: a tiny gating network that outputs
-     per-layer gains from the current input in **class-incremental learning**.
-   - Compare it to replay, calibration, and normalization baselines under realistic compute and memory budgets.
+REGAIN has a single goal: characterize the repairability frontier for continual forgetting under shared experimental
+constraints. The repository provides the experimental protocol, representative controller implementations, and analysis
+pipeline needed to compare repair mechanisms across controller capacity, repair data budget, compute, calibration, and
+latency tradeoffs. Those comparisons are meant to reveal which failure modes look repairable through logit/bias
+correction, readout repair, modulation, or deeper intervention, rather than to position new controller development as a
+separate project objective.
+Training-time / prevention controllers are included only as comparison baselines: they help locate the boundary between
+forgetting that remains repairable after training and forgetting that instead requires intervention during backbone
+training.
 
 Conceptually, the project connects:
 
@@ -49,7 +47,7 @@ Conceptually, the project connects:
 - **Key-value memory in the brain**, where forgetting is often framed as retrieval failure and silent engrams can be
   reactivated.
 - **Feature forgetting** and knowledge accumulation in continually learned representations.
-- **Small post-hoc corrections** like BiC and normalization fixes for class-incremental learning.
+- **Small post-hoc corrections** such as bias correction, calibration, statistical drift correction, and readout repair.
 - **Modulation-based continual learning** and **NTK reactivation** as mechanistic lenses.
 
 ## Core capabilities
@@ -61,7 +59,7 @@ Conceptually, the project connects:
 - **Repair data management**: Scenario builders can split each training experience into a backbone-training stream and
   a disjoint repair stream. Repair controllers fit only on the configured repair budget.
 - **Controller extensibility**: The registry exposes backbones, scenarios, learning-rate schedulers, repair-buffer
-  policies, prevention controllers, and repair controllers by stable configuration names.
+  policies, repair controllers, and prevention controllers by stable configuration names.
 - **Evaluation and diagnostics**: Custom Avalanche plugins record reference and final accuracies, controller-on and
   controller-off outputs, calibration metrics, prediction artifacts, forgetting metrics, latency metrics, and optional
   repair debug health scores.
@@ -79,10 +77,10 @@ Conceptually, the project connects:
   optional repair data carved out before backbone training.
 - **Backbones**: Classification models such as `resnet18`, `vit_small`, and `vit_base`. A backbone config either trains
   locally or points to a source experiment that contains reusable backbone checkpoints.
-- **Controllers**: Lightweight modules attached to a run. Prevention controllers can modify training dynamics, while
-  repair controllers fit after training boundaries and correct outputs during evaluation.
+- **Controllers**: Modules attached to a run. Repair controllers fit after training boundaries and correct outputs
+  during evaluation, while prevention controllers can modify training dynamics.
 - **Metrics**: Runtime values logged under stable MLflow namespaces. Analysis code depends on the canonical
-  `run.eval.*`, `run.repair.*`, `run.calibration.*`, `run.diagnostic.*`, `run.latency.*`, and `run.debug.*` naming
+  `run.eval.*`, `run.repair.*`, `run.calibration.*`, `run.diagnostics.*`, `run.latency.*`, and `run.debug.*` naming
   schemes.
 - **Analysis artifacts**: Table-first outputs written under `tables`, `curves`, `frontier`, `predictive`, and `plots`
   directories, plus optional `analysis.json` export bundles.
