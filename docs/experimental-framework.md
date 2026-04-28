@@ -601,7 +601,7 @@ We report mean ± std across seeds (common configs use **3 seeds**) for:
 - Optionally: calibration, diagnostic, and efficiency summaries (for example
   `run.calibration.max_ece`, latency and repair-cost
   metrics) in budget/controller-level tables and curves
-- The default analysis exports currently center `rho`, controller accuracy, `run.calibration.max_ece`, latency,
+- The default analysis exports center `rho`, controller accuracy, `run.calibration.max_ece`, latency,
   repair-fit cost, and controller parameter count.
 
 **Persisted artifacts**

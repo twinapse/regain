@@ -12,8 +12,8 @@ This document captures research, domain, and stack context for contributors work
 
 ## What is REGAIN?
 
-REGAIN is a research codebase for measuring how much catastrophic forgetting in class-incremental
-neural networks is repairable by constrained post-training interventions.
+REGAIN is a research codebase for measuring how much catastrophic forgetting in class-incremental neural networks is
+repairable by constrained post-training interventions.
 
 The project studies repairability under a shared experimental and analysis framework. It trains or reuses shared
 backbone trajectories, evaluates representative repair mechanisms under held-out repair-data and resource constraints,
@@ -31,15 +31,15 @@ The central object is a **repairability frontier**: a capacity-, data-, and cost
 be recovered after continual learning without updating the backbone. The frontier treats different repair mechanisms as
 comparable interventions under a common evaluation protocol.
 
-REGAIN has a single goal: characterize the repairability frontier for continual forgetting under shared experimental
+The main goal is to characterize the repairability frontier for continual forgetting under shared experimental
 constraints. The repository provides the experimental protocol, representative controller implementations, and analysis
 pipeline needed to compare repair mechanisms across controller capacity, repair data budget, compute, calibration, and
-latency tradeoffs. Those comparisons are meant to reveal which failure modes look repairable through logit/bias
-correction, readout repair, modulation, or deeper intervention, rather than to position new controller development as a
-separate project objective.
-Training-time / prevention controllers are included only as comparison baselines: they help locate the boundary between
-forgetting that remains repairable after training and forgetting that instead requires intervention during backbone
-training.
+latency tradeoffs. Those comparisons reveal which failure modes look repairable through logit/bias correction, readout
+repair, modulation, or deeper intervention under shared constraints.
+
+REGAIN separates offline repairability mapping from deployment-time repair selection: exhaustive controller sweeps are
+used to estimate frontiers and train or evaluate selection policies, while practical selection policies must choose a
+repair family from pre-repair diagnostics before fitting only the selected controller.
 
 Conceptually, the project connects:
 
@@ -50,14 +50,18 @@ Conceptually, the project connects:
 - **Small post-hoc corrections** such as bias correction, calibration, statistical drift correction, and readout repair.
 - **Modulation-based continual learning** and **NTK reactivation** as mechanistic lenses.
 
+> ℹ️ Training-time / prevention controllers are included only as comparison baselines: they help locate the boundary
+> between forgetting that remains repairable after training and forgetting that instead requires intervention during
+> backbone training.
+
 ## Core capabilities
 
 - **Experiment execution**: YAML experiment configs define the scenario, backbone, Avalanche strategy, repair split,
   controller runs, evaluation schedule, and MLflow output behavior.
 - **Shared-backbone controller comparisons**: Repair-controller experiments can train one reserved `backbone` run and
   reuse its checkpoints so post-hoc controllers are compared on the same model trajectory.
-- **Repair data management**: Scenario builders can split each training experience into a backbone-training stream and
-  a disjoint repair stream. Repair controllers fit only on the configured repair budget.
+- **Repair data management**: Scenario builders can split each training experience into a backbone-training stream and a
+  disjoint repair stream. Repair controllers fit only on the configured repair budget.
 - **Controller extensibility**: The registry exposes backbones, scenarios, learning-rate schedulers, repair-buffer
   policies, repair controllers, and prevention controllers by stable configuration names.
 - **Evaluation and diagnostics**: Custom Avalanche plugins record reference and final accuracies, controller-on and
