@@ -15,6 +15,8 @@
 
 See [docs/overview.md](docs/overview.md) for research, domain, and technology-stack context.
 
+See [docs/concepts.md](docs/concepts.md) for the glossary of core concepts.
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for repository architecture patterns and implementation guidance.

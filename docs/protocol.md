@@ -1,7 +1,7 @@
-# REGAIN protocol
+# Research rotocol
 
-This document defines the research protocol for REGAIN: how we map repairability offline, how we evaluate practical
-repair selection, and how we avoid confusing oracle controller comparison with deployable decision making.
+This document defines the research protocol: how we map repairability offline, how we evaluate practical repair 
+selection, and how we avoid confusing oracle controller comparison with deployable decision making.
 
 ## Table of contents
 
