@@ -95,7 +95,7 @@ representation.
 - The controller learns an additive per-class bias vector on repair data and applies `logits' = logits + b` during
   posthoc evaluation.
 - The backbone remains frozen during fitting, making this a simple low-capacity learned logit-space baseline in the
-  current controller registry.
+  controller registry.
 
 #### BiC (bias correction)
 
@@ -185,9 +185,8 @@ modulations rather than replacing only the final readout.
 - `conditioned_stage` and `conditioned_block` predict per-example stage/block gains from backbone features with a small
   MLP, then re-run the model with those input-conditioned gains applied.
 - All six controllers are fit on repair data with the backbone frozen and act only during post-hoc evaluation.
-- In the current project framing, these gain controllers are treated as exploratory modulation probes rather than
-  central baselines; they are useful for testing whether intermediate-feature modulation can recover forgetting under
-  constrained controller budgets.
+- These gain controllers serve as exploratory modulation probes for testing whether intermediate-feature modulation can
+  recover forgetting under constrained controller budgets.
 
 #### TMCL
 

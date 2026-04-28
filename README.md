@@ -4,6 +4,7 @@
 
 - [Project overview](#project-overview)
 - [Architecture](#architecture)
+- [Protocol](#protocol)
 - [Methods](#methods)
 - [Experimental framework](#experimental-framework)
 - [CLI usage](#cli-usage)
@@ -18,20 +19,25 @@ See [docs/overview.md](docs/overview.md) for research, domain, and technology-st
 
 See [docs/architecture.md](docs/architecture.md) for repository architecture patterns and implementation guidance.
 
+## Protocol
+
+See [docs/protocol.md](docs/protocol.md) for details on the research protocol: offline repairability mapping and
+frontier construction, plus deployment-time repair selection and decision gates.
+
 ## Methods
 
 See [docs/methods.md](docs/methods.md) for implementation notes on specific methods used in this codebase.
 
 ## Experimental framework
 
-See [docs/experimental-framework.md](docs/experimental-framework.md) for details on the benchmarks and metrics used in 
+See [docs/experimental-framework.md](docs/experimental-framework.md) for details on the benchmarks and metrics used in
 the experiments.
 
 ## CLI usage
 
 The typical workflow is:
 
-1) **Run experiments** (logs metrics to MLflow).  
+1) **Run experiments** (logs metrics to MLflow).
 2) **Run analysis** on the logged runs (writes analysis artifacts, and optionally plots).
 3) **Export** runs/analysis.
 
@@ -74,14 +80,14 @@ Experiment selection is standardized via one required selector:
 * `--config-dir`: directory recursively searched for experiment config files
 
 Notes:
-* For repair-controller runs, predictive summaries and run-level `run.calibration.max_ece` in `runs_table` are baseline-only:
-  sourced from base values in `analysis_artifacts.json`.
-  `run.calibration.max_ece` is defined as `max(run.calibration.ece)` over artifact baseline vectors.
+* For repair-controller runs, predictive summaries and run-level `run.calibration.max_ece` in `runs_table` are
+  baseline-only: sourced from base values in `analysis_artifacts.json`. `run.calibration.max_ece` is defined as
+  `max(run.calibration.ece)` over artifact baseline vectors.
 * Analysis collection requires each run to include `controller.type` (`none`, `repair`, or `prevention`) and
   `repair.split_fraction` parameters.
-* Runs that fail collection validation are skipped and reported as run-level failures.
-  Use `--allow-partial` if you want successful outputs to still be published when some runs/stages fail.
-  If zero runs are successfully collected, no analysis outputs are published (exit code `1`).
+* Runs that fail collection validation are skipped and reported as run-level failures. Use `--allow-partial` if you want
+  successful outputs to still be published when some runs/stages fail. If zero runs are successfully collected, no
+  analysis outputs are published (exit code `1`).
 * `repair_set_total` in analysis tables is:
   - `0` when `repair.split_fraction == 0.0`;
   - otherwise, the exact total non-empty line count across `repair/exp_*.txt` in `splits.tar.gz`.
@@ -140,7 +146,8 @@ Like `export_runs`, `export_analysis` supports `--allow-partial` (best-effort pu
 Outputs are organized under:
 
 * `./analysis_results/<experiment>/tables/` (from `collect`; JSONL: `runs_table.jsonl`, `experiences_table.jsonl`)
-* `./analysis_results/<experiment>/curves/` (from `curves`; CSV: `recoverability_curve.csv`, `task_age_rho.csv`, `calibration_vs_budget.csv`, `latency_vs_budget.csv`)
+* `./analysis_results/<experiment>/curves/` (from `curves`; CSV: `recoverability_curve.csv`, `task_age_rho.csv`,
+  `calibration_vs_budget.csv`, `latency_vs_budget.csv`)
 * `./analysis_results/<experiment>/frontier/` (from `frontier`)
 * `./analysis_results/<experiment>/predictive/` (from `predictive`; CSV: `predictive_correlations.csv`)
 * `./analysis_results/<experiment>/plots/` (when `--save-plots` is used)
@@ -156,9 +163,8 @@ python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experime
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --show --save --output-dir ./plots
 ```
 
-`generate_plots` defaults to interactive display when neither `--show` nor `--save` is provided.
-When saving, add `--overwrite` to replace existing target plot directories.
-`--allow-partial` enables best-effort publishing on errors.
+`generate_plots` defaults to interactive display when neither `--show` nor `--save` is provided. When saving, add
+`--overwrite` to replace existing target plot directories. `--allow-partial` enables best-effort publishing on errors.
 
 ## Debugging
 
@@ -167,5 +173,5 @@ and health score diagnostics.
 
 ## Coding agent setup
 
-See [docs/coding-agent-setup.md](docs/coding-agent-setup.md) for the project-local coding-agent setup used in
-this repository.
+See [docs/coding-agent-setup.md](docs/coding-agent-setup.md) for the project-local coding-agent setup used in this
+repository.
