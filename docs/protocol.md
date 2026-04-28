@@ -10,8 +10,8 @@ selection, and how we avoid confusing oracle controller comparison with deployab
 - [3. Controller families](#3-controller-families)
 - [4. Frontier construction](#4-frontier-construction)
 - [5. Utility target](#5-utility-target)
-- [6. Policy input contract](#6-policy-input-contract)
-- [7. Policy evaluation](#7-policy-evaluation)
+- [6. Repair-selection input contract](#6-repair-selection-input-contract)
+- [7. Repair-selection evaluation](#7-repair-selection-evaluation)
 - [8. Validation levels](#8-validation-levels)
 - [9. Cheap racing variant](#9-cheap-racing-variant)
 - [10. Failure-mode interpretation](#10-failure-mode-interpretation)
@@ -41,7 +41,7 @@ Purpose:
 * construct the repairability frontier;
 * estimate controller utility under shared constraints;
 * identify failure regimes;
-* produce labels for policy/router evaluation.
+* produce labels for repair-selection evaluation.
 
 This phase answers scientific questions such as:
 
@@ -55,7 +55,7 @@ This phase answers scientific questions such as:
 
 The deployment phase must not fit every candidate controller and then choose the winner.
 
-A practical policy must:
+A practical repair-selection policy must:
 
 1. observe the trained base continual learner;
 2. compute pre-repair diagnostics;
@@ -96,7 +96,7 @@ test-time adaptation.
 | Evaluation contract            | Uses labeled repair set? | Uses unlabeled test stream? | Updates or adapts at test time? |
 | ------------------------------ | -----------------------: | --------------------------: | ------------------------------: |
 | Fixed REGAIN repair controller | Yes                      | No                          | No                              |
-| Cheap racing / budgeted selection | Yes, partially       | No                          | No                              |
+| Cheap racing / budgeted repair-selection policy | Yes, partially       | No                          | No                              |
 | ARC-like test-time repair      | Usually no               | Yes                         | Yes                             |
 | Training-time prevention baseline | Not as post-hoc repair | No                        | During backbone training        |
 
@@ -155,7 +155,7 @@ A controller should be promoted to the main frontier only if:
 
 ## 5. Utility target
 
-Router and policy evaluation should optimize utility, not raw rho alone.
+Repair-selection evaluation should optimize utility, not raw rho alone.
 
 Example utility:
 
@@ -174,29 +174,29 @@ Where:
 * `b` is the repair budget;
 * `harm` may include fraction harmed, worst-task harm, or both.
 
-When a repair-budget cap is fixed externally, `b` is part of the setting and may appear in policy inputs. When budget is
-part of the policy action, the action is `(c, b)` and the chosen budget must not also be used as a policy input for
+When a repair-budget cap is fixed externally, `b` is part of the setting and may appear in repair-selection inputs. When budget is
+part of the repair action, the action is `(c, b)` and the chosen budget must not also be used as a repair-selection input for
 that same decision.
 
 The exact lambdas should be reported with each analysis.
 
-## 6. Policy input contract
+## 6. Repair-selection input contract
 
-A policy is any decision rule that selects a repair action, including fixed baselines, threshold rules, cheap racing,
-exhaustive validation selection, and learned selectors. A router is specifically a learned policy that maps pre-repair
+A repair-selection policy is any decision rule that selects a repair action, including fixed baselines, threshold rules, cheap racing,
+exhaustive validation-based controller selection, and learned repair-selection policies. A repair router is specifically a learned repair-selection policy that maps pre-repair
 diagnostics to a repair action.
 
-A policy input is any pre-repair diagnostic, metadata field, or cheap pilot summary used by a policy or router to
+A repair-selection input is any pre-repair diagnostic, metadata field, or cheap pilot summary used by a repair-selection policy or repair router to
 choose a repair action.
 
-A policy input is valid only if it is available before fitting the candidate controller being selected.
+A repair-selection input is valid only if it is available before fitting the candidate controller being selected.
 
 Allowed inputs include:
 
 * dataset/scenario metadata;
 * backbone metadata;
 * replay or memory metadata;
-* externally imposed repair-budget cap, if budget is fixed before policy selection;
+* externally imposed repair-budget cap, if budget is fixed before repair-selection policy choice;
 * repair samples per class;
 * base final accuracy;
 * estimated forgetting/headroom;
@@ -218,13 +218,13 @@ Forbidden inputs include:
 * any statistic that requires fully fitting all candidate controllers at decision time.
 
 Offline controller outcomes may be used as training labels or evaluation targets. They may not be used as
-deployment-time policy inputs.
+deployment-time repair-selection inputs.
 
-If repair budget is part of the policy action, the selected budget must not also be used as a policy input for that
-decision. In that case, the policy chooses `(controller_family, budget)` from the allowed action set using only
+If repair budget is part of the repair action, the selected budget must not also be used as a repair-selection input for that
+decision. In that case, the repair-selection policy chooses `(controller_family, budget)` from the allowed action set using only
 information available before that choice.
 
-The tables below summarize examples of valid pre-repair information and the practical value of routing under common
+The tables below summarize examples of valid pre-repair information and the practical value of repair routing under common
 diagnostic regimes.
 
 | Signal | Available before controller selection? | Why it is useful |
@@ -239,10 +239,10 @@ diagnostic regimes.
 | Representation separability proxy | Yes, if computed with a cheap proxy rather than a full candidate controller | Signals whether readout repair may work. |
 | Repair samples per class | Yes | Signals data sufficiency and overfitting risk. |
 | Candidate-controller test accuracy | No | Requires fitting and evaluating the candidate controller. |
-| Candidate-controller rho or absolute recovery | No | Leaks the outcome the router is supposed to predict. |
+| Candidate-controller rho or absolute recovery | No | Leaks the outcome the repair router is supposed to predict. |
 | Oracle-best controller identity | No | Uses final evaluation outcomes. |
 
-| Diagnostic regime | Likely router decision | Practical value |
+| Diagnostic regime | Likely repair-router decision | Practical value |
 | ----------------- | ---------------------- | --------------- |
 | Low forgetting, strong base model, small headroom | no-op or conservative calibration | Avoids over-repair. |
 | High recent-task bias or out-of-task errors | BiC / logit-bias repair | Uses cheap correction for classifier bias. |
@@ -252,9 +252,9 @@ diagnostic regimes.
 | Fine-grained setting, small repair set, high overfitting risk | avoid unconstrained probe; prefer ridge/prototype/BiC | Reduces CUB-style over-repair harm. |
 | Poor separability and low recovery across cheap probes | no post-hoc claim or training-time intervention | Identifies likely representation degradation. |
 
-## 7. Policy evaluation
+## 7. Repair-selection evaluation
 
-Evaluate policies as if only the selected controller were fitted.
+Evaluate repair-selection policies as if only the selected controller were fitted.
 
 Compare against:
 
@@ -262,9 +262,9 @@ Compare against:
 * always BiC;
 * always best simple calibration method;
 * always linear/ridge probe;
-* simple threshold policy;
-* learned router;
-* exhaustive model selection;
+* simple threshold repair-selection policy;
+* learned repair router;
+* exhaustive controller selection;
 * oracle best controller.
 
 Report:
@@ -280,11 +280,11 @@ Report:
 
 Definitions:
 
-* exhaustive model selection: fits all candidate controllers and selects using validation utility;
+* exhaustive controller selection: fits all candidate controllers and selects using validation utility;
 * oracle best controller: selects using final evaluation utility and is reported only as an unattainable upper bound.
 
-The oracle baseline is an unattainable upper bound. Exhaustive model selection is an expensive validation-selected
-baseline, not a practical deployment policy.
+The oracle baseline is an unattainable upper bound. The exhaustive controller-selection baseline is an expensive validation-selected
+baseline, not a practical deployment repair-selection policy.
 
 ## 8. Validation levels
 
@@ -294,12 +294,12 @@ Use three validation levels where possible:
 2. held-setting validation;
 3. held-dataset validation.
 
-Held-dataset validation is the strongest evidence that the router is learning a mechanism rather than memorizing
+Held-dataset validation is the strongest evidence that the repair router is learning a mechanism rather than memorizing
 configurations.
 
 ## 9. Cheap racing variant
 
-A policy may use cheap pilot signals, but this must be reported separately from pure pre-repair prediction.
+A repair-selection policy may use cheap pilot signals, but this must be reported separately from pure pre-repair prediction.
 
 Examples:
 
@@ -309,7 +309,7 @@ Examples:
 * estimate probe train/validation gap;
 * stop high-capacity repair early if validation harm appears.
 
-This is a budgeted controller-selection policy, not a zero-cost router.
+This is a budgeted repair-selection policy, not a zero-cost repair router.
 
 ## 10. Failure-mode interpretation
 
@@ -326,9 +326,9 @@ Use controller outcomes to interpret forgetting regimes.
 
 ## 11. Decision gates
 
-### Gate 1: Is routing viable?
+### Gate 1: Is learned repair routing viable?
 
-Pass if the router beats always-BiC in utility while reducing harm relative to always-linear-probe.
+Pass if the repair router beats always-BiC in utility while reducing harm relative to always-linear-probe.
 
 ### Gate 2: Are calibration methods distinct from BiC?
 
@@ -352,8 +352,8 @@ Every REGAIN result should state which setting it belongs to:
 
 * offline frontier mapping;
 * deployment-time repair selection;
-* oracle/exhaustive upper bound;
-* cheap racing / budgeted selection;
+* oracle/exhaustive controller-selection upper bound;
+* cheap racing / budgeted repair-selection policy;
 * failure-mode analysis.
 
-Do not describe oracle or exhaustive controller selection as a practical deployment policy.
+Do not describe oracle or exhaustive controller selection as a practical deployment repair-selection policy.

@@ -2,7 +2,7 @@
 
 Short glossary of core concepts.
 
-- **Action set** — The set of repair choices available to a policy, such as no repair, a repair family, or a repair
+- **Action set** — The set of repair choices available to a repair-selection policy, such as no repair, a repair family, or a repair
   family paired with a budget.
 
 - **Baseline-only diagnostics** — The rule that diagnostics used to analyze repair runs should describe the unrepaired
@@ -28,7 +28,7 @@ Short glossary of core concepts.
 - **Decision gate** — A predeclared criterion used to decide whether a research claim, controller family, or next
   implementation direction is justified.
 
-- **Deployment-time repair selection** — The practical protocol in which a policy observes pre-repair
+- **Deployment-time repair selection** — The practical protocol in which a repair-selection policy observes pre-repair
   information, chooses one repair action, fits only that action, and may reject it using allowed validation.
 
 - **Diagnostic association** — A relationship between pre-repair signals and later repair outcomes.
@@ -47,7 +47,7 @@ Short glossary of core concepts.
 - **Evaluation contract** — The assumptions under which a controller is evaluated, including what data it may use and
   whether it may adapt during evaluation.
 
-- **Exhaustive model selection** — A comparison protocol that fits all candidate controllers and chooses
+- **Exhaustive controller selection** — A comparison protocol that fits all candidate controllers and chooses
   using validation utility; it is not treated as practical deployment-time selection.
 
 - **Failure-mode analysis** — Interpretation of repair outcomes to infer what kind of degradation occurred and which
@@ -68,17 +68,17 @@ Short glossary of core concepts.
 - **Headroom** — The apparent room for recovery between degraded post-sequence behavior and a stronger
   reference point.
 
-- **Held-dataset validation** — Policy validation on a dataset not used to build or tune the policy.
+- **Held-dataset validation** — Repair-selection evaluation on a dataset not used to build or tune the repair-selection policy.
 
-- **Held-seed validation** — Policy validation on random seeds not used to build or tune the policy.
+- **Held-seed validation** — Repair-selection evaluation on random seeds not used to build or tune the repair-selection policy.
 
-- **Held-setting validation** — Policy validation on experimental settings not used to build or tune the policy.
+- **Held-setting validation** — Repair-selection evaluation on experimental settings not used to build or tune the repair-selection policy.
 
 - **Label-space regime** — The prediction space used during evaluation, such as restricting predictions to
   seen classes or allowing all classes.
 
 - **No-op action** — The decision to apply no repair, used both as a baseline and as a valid conservative
-  policy choice.
+  repair-selection policy choice.
 
 - **Offline repairability mapping** — The research protocol in which many controllers and budgets may be evaluated to
   estimate repairability frontiers and study failure regimes.
@@ -86,9 +86,9 @@ Short glossary of core concepts.
 - **Oracle upper bound** — An unattainable comparison point that chooses the best repair action using final evaluation
   outcomes.
 
-- **Policy** — Any decision rule that selects a repair action from available information.
+- **Repair-selection policy** — Any decision rule that selects a repair action from available information.
 
-- **Policy input** — Any diagnostic, metadata field, budget cap, or pilot summary used by a policy to choose a repair
+- **Repair-selection input** — Any diagnostic, metadata field, budget cap, or pilot summary used by a repair-selection policy to choose a repair
   action.
 
 - **Post-hoc repair** — Repair that fits or applies a controller after training boundaries while leaving the backbone
@@ -100,7 +100,7 @@ Short glossary of core concepts.
 - **Prevention controller** — A controller that changes the training trajectory and therefore serves as a prevention
   baseline rather than a purely post-hoc repair.
 
-- **Repair action** — The concrete choice made by a policy, usually a repair family, budget, or no-op.
+- **Repair action** — The concrete choice made by a repair-selection policy, usually a repair family, budget, or no-op.
 
 - **Repair budget** — The amount or fraction of held-out repair data available for fitting a repair controller.
 
@@ -109,7 +109,7 @@ Short glossary of core concepts.
 
 - **Repair data** — Data reserved for fitting or validating post-hoc controllers rather than training the backbone.
 
-- **Repair family** — A broad mechanism category for repair controllers used in frontier and policy comparisons.
+- **Repair family** — A broad mechanism category for repair controllers used in frontier and repair-selection policy comparisons.
 
 - **Repair fit subset** — The subset of the repair set actually used for controller fitting under the
   configured budget.
@@ -132,7 +132,7 @@ Short glossary of core concepts.
 - **Reserved backbone run** — The controller-free run used to produce the shared trajectory, checkpoints, and baseline
   artifacts for repair comparisons.
 
-- **Router** — A learned policy that maps pre-repair diagnostics to a repair action.
+- **Repair router** — A learned repair-selection policy that maps pre-repair diagnostics to a repair action.
 
 - **Shared backbone** — A single trained backbone trajectory reused across repair-controller runs so that
   controllers are compared on the same underlying states.
@@ -146,7 +146,7 @@ Short glossary of core concepts.
 - **Training-time prevention baseline** — A non-post-hoc comparison point that changes training dynamics to show when
   repair may be insufficient.
 
-- **Utility target** — The decision objective used for policy evaluation, combining repair benefit with penalties for
+- **Utility target** — The decision objective used for repair-selection evaluation, combining repair benefit with penalties for
   harm and resource cost.
 
 - **Validation task** — A predeclared non-test evaluation source used to accept, reject, or choose a repair action.

@@ -38,7 +38,7 @@ latency tradeoffs. Those comparisons reveal which failure modes look repairable 
 repair, modulation, or deeper intervention under shared constraints.
 
 REGAIN separates offline repairability mapping from deployment-time repair selection: exhaustive controller sweeps are
-used to estimate frontiers and train or evaluate selection policies, while practical selection policies must choose a
+used to estimate frontiers and train or evaluate repair-selection policies, while practical repair-selection policies must choose a
 repair family from pre-repair diagnostics before fitting only the selected controller.
 
 Conceptually, the project connects:
