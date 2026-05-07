@@ -4,7 +4,6 @@ Tests for gradient clipping plugin behavior.
 
 from types import SimpleNamespace
 
-import pytest
 import torch
 
 from regain.avalanche_utils.plugins import GradientClippingPlugin
@@ -24,7 +23,7 @@ class TestGradientClippingPlugin:
         grad_norm = torch.norm(model.weight.grad, p=2).item()
         assert grad_norm <= 1.0 + 1e-6
 
-    def test_noops_when_no_gradients_are_available(self) -> None:
+    def test_no_ops_when_no_gradients_are_available(self) -> None:
         model = torch.nn.Linear(3, 1)
         strategy = SimpleNamespace(model=model)
         plugin = GradientClippingPlugin(max_norm=1.0)

@@ -241,8 +241,7 @@ When one or more configured controller runs are present:
   Metric-only baselines are not sufficient for source-run reuse.
 - Repair-run downstream analysis enforces a baseline-only policy:
   - diagnostic vectors and analysis calibration vectors (`run.calibration.ece`,
-    `run.calibration.aece`, `run.calibration.nll`) are sourced from
-    base `analysis_artifacts.json`;
+    `run.calibration.aece`, `run.calibration.nll`) are sourced from base `analysis_artifacts.json`;
   - run-level repair `run.calibration.max_ece` is derived from baseline `run.calibration.ece` vectors;
   - ctrl per-task run metrics for those keys are ignored.
 - When executed in the current experiment, the `backbone` run performs the only backbone training pass and writes one
@@ -321,8 +320,7 @@ We use two related but distinct concepts alongside the sequential training strea
 - The split is deterministic under the experiment seed.
 - Repair samples are never used for backbone training.
 - The split is controlled by `repair.split_fraction`:
-  - per experience with `n_exp` samples, the repair set size is
-    `floor(repair.split_fraction * n_exp)`.
+  - per experience with `n_exp` samples, the repair set size is `floor(repair.split_fraction * n_exp)`.
   - a guard enforces at least one remaining training sample per class.
 - Setting `repair.split_fraction: 0.0` disables the repair stream entirely.
 - For repair controllers, fitting uses a deterministic stratified **repair fit subset** sampled from each repair set:
@@ -542,14 +540,12 @@ At the end of training, when all end-of-experience base accuracy points are comp
     - `base` for controller-off posthoc evaluation
     - `ctrl` for controller-on posthoc evaluation
   - repair-controller runs log their own `ctrl` prediction artifacts; backbone/controller-off
-    prediction artifacts remain on
-    the corresponding `backbone` run
+    prediction artifacts remain on the corresponding `backbone` run
   - these artifacts support metric recomputation from stored predictions; the `run_analysis` pipeline consumes
     logged metrics and `analysis_artifacts.json`
-- For repair-controller runs, analysis outputs (`runs_table`, curves, predictive summaries) enforce baseline-only
-  consumption of diagnostic values and analysis calibration values (`run.calibration.ece`,
-  `run.calibration.aece`, `run.calibration.nll`,
-  run-level `run.calibration.max_ece`) from `analysis_artifacts.json`.
+- For repair-controller runs, analysis outputs (`run_metrics`, `experience_metrics`, curves, predictive summaries)
+  enforce baseline-only consumption of diagnostic values and analysis calibration values (`run.calibration.ece`,
+  `run.calibration.aece`, `run.calibration.nll`, run-level `run.calibration.max_ece`) from `analysis_artifacts.json`.
   For `run.calibration.max_ece`, repair runs use vector-derived `max(run.calibration.ece)`.
 - Additional run-level efficiency metrics:
   - `run.repair.seconds` / `run.repair.steps` (cumulative) and `run.repair.seconds.exp###` / `run.repair.steps.exp###`
@@ -585,8 +581,7 @@ For step-history eval metrics exported to flat tables, the exporter inserts `aft
     first training experience completes;
   - history-bearing eval families must raise when MLflow history lookup fails.
 - The exporter does not fall back to raw latest-value `run.eval.forgetting.*` /
-  `run.eval.transfer.*` columns when strict
-  history materialization fails.
+  `run.eval.transfer.*` columns when strict history materialization fails.
 - Example exported columns:
   - `run.eval.forgetting.after_exp003.exp001`
   - `run.eval.transfer.after_exp002.stream`
@@ -599,8 +594,7 @@ We report mean ± std across seeds (common configs use **3 seeds**) for:
 - $\bar{\rho}(\theta,b)$ for each repair controller and budget
 - Optionally: $\overline{A}_{\text{ctrl}}(\theta,b)$ for each repair controller and budget
 - Optionally: calibration, diagnostic, and efficiency summaries (for example
-  `run.calibration.max_ece`, latency and repair-cost
-  metrics) in budget/controller-level tables and curves
+  `run.calibration.max_ece`, latency and repair-cost metrics) in budget/controller-level tables and curves
 - The default analysis exports center `rho`, controller accuracy, `run.calibration.max_ece`, latency,
   repair-fit cost, and controller parameter count.
 
@@ -621,8 +615,7 @@ The definitions below are the normative interpretation of the metric families us
 
 - `run.calibration.nll`: Negative log-likelihood (cross-entropy). Mean `-log p(y_true)` over samples. Lower is better.
 - `run.calibration.brier`: Multiclass Brier score. Mean squared error between predicted
-  probability vectors and one-hot labels.
-  Lower is better.
+  probability vectors and one-hot labels. Lower is better.
 - `run.calibration.ece`: Expected calibration error with fixed-width confidence bins. Weighted mean absolute gap between
   per-bin accuracy and mean confidence. Lower is better.
 - `run.calibration.aece`: Adaptive ECE with approximately equal-count confidence bins. Lower is better.
@@ -642,8 +635,7 @@ The definitions below are the normative interpretation of the metric families us
 - `run.latency.samples_per_sec.ctrl`: controller-on throughput (samples/sec) on the timed passes.
 - `run.latency.ms_ratio`: controller/base latency ratio,
   `run.latency.ms_per_sample.ctrl / run.latency.ms_per_sample.base`.
-- `run.repair.steps`: cumulative repair optimization steps, typically
-  `epochs * ceil(N_repair / batch_size)`.
+- `run.repair.steps`: cumulative repair optimization steps, typically `epochs * ceil(N_repair / batch_size)`.
   - Per-fit event keys are `run.repair.steps.exp###` or `run.repair.steps.final`.
 - `run.repair.seconds`: cumulative repair wall-clock fitting time in seconds.
   - Per-fit event keys are `run.repair.seconds.exp###` or `run.repair.seconds.final`.
@@ -658,16 +650,13 @@ The definitions below are the normative interpretation of the metric families us
   vector after training experience `i` and the corresponding task-level mean logit vector at final base evaluation.
   The mean logit vectors themselves are not logged as standalone metrics.
 - Optional `run.diagnostics.logit_cov_drift_fro`: Frobenius drift between checkpoint and
-  post-sequence logit covariance matrices.
-  This metric is not produced in the default pipeline.
+  post-sequence logit covariance matrices. This metric is not produced in the default pipeline.
 
-#### Analysis outputs
+#### Analysis usage
 
-- `predictive_correlations.csv` column `pearson_r`: Pearson correlation between diagnostic values and `rho(T_i)` over
-  tasks where both are defined.
-- `predictive_correlations.csv` column `spearman_r`: Spearman rank correlation between diagnostic values and `rho(T_i)`.
-- `predictive_correlations.csv` column `r2` (optional): univariate linear-fit coefficient of determination for
-  predicting `rho`.
+These diagnostic metrics feed the predictive analysis stage, which estimates how strongly pre-repair diagnostic
+signals are associated with later repairability outcomes. See [analysis.md](analysis.md) for the canonical artifact
+contract.
 
 ---
 
@@ -685,30 +674,24 @@ For each repair controller capacity level, we compute curves over repair budget 
   \overline{A}_{\text{ctrl}}(\theta,b)=\mathbb{E}_{i}[A_{\text{ctrl}}(T_i;\theta,b)]
   $$
 
-We also report $\rho(T_i;\theta,b)$ as a function of task index $i$ (“task age”).
-
-The `curves` analysis step writes:
-- `recoverability_curve.csv`
-- `task_age_rho.csv`
-- `calibration_vs_budget.csv` (mean/std of `run.calibration.max_ece` by controller and budget)
-- `latency_vs_budget.csv` (mean/std of latency ratio and base/ctrl latency summaries by controller and budget)
+We also report $\rho(T_i;\theta,b)$ as a function of task index $i$ (“task age”). The `curves` analysis step
+summarizes recoverability-vs-budget, task-age recoverability, calibration-vs-budget, and latency-vs-budget.
+See [analysis.md](analysis.md) for the canonical artifact paths and plot outputs.
 
 ### 8.2 Repair efficiency frontier
+The frontier stage derives controller-on repair outcomes from collected tables and summarizes them through frontier,
+impact, selection, and manifest artifacts. See [analysis.md](analysis.md) for the canonical artifact paths.
+
 We place controller configurations on frontiers defined by:
 
 - **Data cost:** repair-fit fraction $b$, where $b = \text{repair.budget\_fraction}$
   (total consumed repair examples are computed from repair-set size and $b$)
 - **Parameter cost:** controller parameter count $|\theta|$
 
-Frontiers plot recovered performance (e.g., $\bar{\rho}$, $\overline{A}_{\text{ctrl}}$) against these costs.
+The repair frontier compares repair benefit against data cost, parameter cost, latency, repair time, and harm under
+the repair evaluation contract.
 
 ### 8.3 Predictive associations
-The `predictive` analysis step assesses the predictive power of diagnostic signals for repairability (`rho`). For 
-each `(controller, budget)` group it computes correlation-based measures and writes
-`predictive/predictive_correlations.csv` with:
-
-- diagnostic key
-- Pearson correlation (`pearson_r`)
-- Spearman correlation (`spearman_r`)
-- simple linear-fit coefficient of determination (`r2`)
-- number of valid tasks used (`n_valid_tasks`)
+The `predictive` analysis step assesses the predictive power of diagnostic signals for repairability (`rho`). For
+each `(controller, budget)` group it summarizes how strongly pre-repair diagnostics are associated with later repair
+outcomes. See [analysis.md](analysis.md) for the canonical artifact path and output fields.

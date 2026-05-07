@@ -86,15 +86,20 @@ def _load_analysis_tables(*, experiment_dir: Path) -> tuple[list[dict[str, Any]]
         ValueError: If table contents are invalid.
     """
     tables_dir = experiment_dir / 'tables'
-    runs_table_path = tables_dir / 'runs_table.jsonl'
-    experiences_table_path = tables_dir / 'experiences_table.jsonl'
+    runs_table_path = tables_dir / 'run_metrics.jsonl'
+    experiences_table_path = tables_dir / 'experience_metrics.jsonl'
 
-    missing_paths = [path for path in [runs_table_path, experiences_table_path] if not path.exists()]
+    missing_paths = [
+        path
+        for path in [runs_table_path, experiences_table_path]
+        if not path.exists()
+    ]
     if missing_paths:
         missing_str = ', '.join(str(path) for path in missing_paths)
         raise FileNotFoundError(
             f'Missing required analysis tables: {missing_str}. '
-            'Run `python -m regain.cli.run_analysis --experiments <experiment> --output-dir <analysis_dir> collect` first.'
+            'Run `python -m regain.cli.run_analysis --experiments <experiment> '
+            '--output-dir <analysis_dir> collect` first.'
         )
 
     runs_table = _read_jsonl_table(path=runs_table_path)

@@ -6,11 +6,10 @@ It consumes metrics logged by `regain/cli/run_experiment.py`.
 Examples:
   python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results all
   python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results curves
-  python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results --perf-key analysis.repair.rho.avg frontier
+  python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results frontier
 """
 
 import argparse
-import csv
 from pathlib import Path
 import sys
 import tempfile
@@ -18,8 +17,9 @@ from typing import Any
 
 from regain.analysis.collectors import collect_experiment_tables
 from regain.analysis.curves import write_recoverability_curves
-from regain.analysis.frontier import write_efficiency_frontiers
+from regain.analysis.frontier import write_repairability_frontier_outputs
 from regain.analysis.plotting import plot_analysis_outputs
+from regain.analysis.plotting import write_plot_manifest_update
 from regain.analysis.predictive import write_predictive_correlations
 from regain.cli._utils.output_helpers import add_failure
 from regain.cli._utils.output_helpers import CliFailure
@@ -29,7 +29,6 @@ from regain.cli._utils.output_helpers import resolve_exit_code
 from regain.cli._utils.output_helpers import StagedOutput
 from regain.cli._utils.selector_helpers import add_experiment_selector_arguments
 from regain.cli._utils.selector_helpers import resolve_experiment_targets
-from regain.constants import ANALYSIS_RHO_AVG
 from regain.utils import get_logger
 
 __all__ = [
@@ -53,23 +52,6 @@ def _parse_list(value: str | None) -> list[str] | None:
     if not s:
         return None
     return [t.strip() for t in s.split(',') if t.strip()]
-
-
-def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
-    """
-    Read a CSV into a list of dict rows.
-
-    Args:
-        path (Path): Path to CSV file.
-
-    Returns:
-        list[dict[str, Any]]: List of rows as dicts.
-    """
-    if not path.exists():
-        return []
-    with path.open('r', newline='', encoding='utf-8') as f:
-        r = csv.DictReader(f)
-        return [dict(row) for row in r]
 
 
 def _plot_mode(*, show: bool, save: bool) -> str:
@@ -142,13 +124,22 @@ def main() -> None:
         default=None,
         help='Optional MLflow tracking URI override.',
     )
-    parser.add_argument('--include-controllers', type=str, default=None, help='Comma-separated allowlist for controller_name.')
-    parser.add_argument('--exclude-controllers', type=str, default=None, help='Comma-separated denylist for controller_name.')
+    parser.add_argument(
+        '--include-controllers',
+        type=str,
+        default=None,
+        help='Comma-separated allowlist for controller_name.',
+    )
+    parser.add_argument(
+        '--exclude-controllers',
+        type=str,
+        default=None,
+        help='Comma-separated denylist for controller_name.',
+    )
     parser.add_argument('--max-runs', type=int, default=None, help='Max number of runs.')
     parser.add_argument('--default-num-classes', type=int, default=None, help='Fallback num classes when not logged.')
     parser.add_argument('--show-plots', action='store_true', help='Show plots.')
     parser.add_argument('--save-plots', action='store_true', help='Save plots.')
-    parser.add_argument('--perf-key', type=str, default=ANALYSIS_RHO_AVG, help='Performance key to maximize.')
     parser.add_argument(
         '--allow-partial',
         action='store_true',
@@ -163,7 +154,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest='cmd', required=True)
     sub.add_parser('collect', help='Collect MLflow runs into tidy tables.')
     sub.add_parser('curves', help='Compute recoverability curves.')
-    sub.add_parser('frontier', help='Compute efficiency frontier.')
+    sub.add_parser('frontier', help='Compute repairability-frontier outputs.')
     sub.add_parser('predictive', help='Compute predictive correlations.')
     sub.add_parser('all', help='Run collect + curves + frontier + predictive.')
 
@@ -195,8 +186,6 @@ def main() -> None:
             runs_table: list[dict[str, Any]] = []
             experiences_table: list[dict[str, Any]] = []
             collect_completed = False
-            plot_curve_rows: list[dict[str, Any]] | None = None
-            plot_frontier_rows: list[dict[str, Any]] | None = None
 
             if args.cmd in ['collect', 'all', 'curves', 'frontier', 'predictive']:
                 tables_dir = staged_experiment_dir / 'tables'
@@ -266,23 +255,18 @@ def main() -> None:
                     )
                 else:
                     try:
-                        staged_curves_dir = staged_experiment_dir / 'curves'
-                        curve_csv = staged_curves_dir / 'recoverability_curve.csv'
-                        if not curve_csv.exists():
-                            existing_curve_csv = destination_analysis_dir / 'curves' / 'recoverability_curve.csv'
-                            if existing_curve_csv.exists():
-                                curve_csv = existing_curve_csv
-                        curve_rows = _read_csv_rows(curve_csv)
-                        frontier_dir = staged_experiment_dir / 'frontier'
-                        points_path, pareto_path = write_efficiency_frontiers(
-                            curve_rows=curve_rows,
-                            out_dir=frontier_dir,
-                            perf_key=str(getattr(args, 'perf_key', ANALYSIS_RHO_AVG)),
+                        frontier_paths = write_repairability_frontier_outputs(
+                            runs_table=runs_table,
+                            experiences_table=experiences_table,
+                            out_dir=staged_experiment_dir,
                         )
                         analysis_output_names.add('frontier')
-                        plot_curve_rows = curve_rows
-                        plot_frontier_rows = _read_csv_rows(points_path)
-                        logger.info(f'Frontier written: {points_path}, {pareto_path}')
+                        logger.info(
+                            'Frontier written: '
+                            f'{frontier_paths["repair_frontier"]}, '
+                            f'{frontier_paths["repair_pareto"]}, '
+                            f'{frontier_paths["repair_selection"]}'
+                        )
                     except Exception as exc:
                         add_failure(
                             failures=failures,
@@ -314,7 +298,7 @@ def main() -> None:
                         )
 
             mode = _plot_mode(show=bool(args.show_plots), save=bool(args.save_plots))
-            if mode != 'none' and args.cmd in ['curves', 'frontier', 'all']:
+            if mode != 'none' and args.cmd in ['frontier', 'all']:
                 if not collect_completed:
                     add_failure(
                         failures=failures,
@@ -323,17 +307,28 @@ def main() -> None:
                     )
                 else:
                     try:
-                        plot_perf_key = str(getattr(args, 'perf_key', ANALYSIS_RHO_AVG))
-                        saved = plot_analysis_outputs(
-                            curve_rows=plot_curve_rows,
-                            frontier_rows=plot_frontier_rows,
+                        plot_result = plot_analysis_outputs(
                             analysis_out=staged_experiment_dir,
-                            perf_key=plot_perf_key,
                             mode=mode,
                         )
-                        if saved:
+                        saved_plot_files = bool(plot_result.saved_paths)
+                        has_plot_manifest_metadata = bool(plot_result.saved_filenames or plot_result.skipped)
+                        destination_plots_dir = destination_analysis_dir / 'plots'
+                        plots_publishable = (
+                            not saved_plot_files
+                            or not destination_plots_dir.exists()
+                            or bool(args.overwrite)
+                        )
+                        if saved_plot_files:
                             analysis_output_names.add('plots')
                             logger.info(f'Plots written under: {staged_experiment_dir / "plots"}')
+                        if has_plot_manifest_metadata and plots_publishable:
+                            write_plot_manifest_update(
+                                source_manifest_path=staged_experiment_dir / 'frontier' / 'manifest.json',
+                                destination_manifest_path=staged_experiment_dir / 'frontier' / 'manifest.json',
+                                saved_filenames=plot_result.saved_filenames,
+                                skipped=plot_result.skipped,
+                            )
                     except Exception as exc:
                         add_failure(
                             failures=failures,

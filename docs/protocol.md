@@ -106,8 +106,6 @@ they should not be described as having the same deployment contract as fixed rep
 Some examples in this taxonomy are protocol targets rather than implemented controllers. Implementation status is
 tracked in [docs/methods.md](methods.md); experiment configs should only use controllers present in the registry.
 
-See [docs/methods.md](methods.md) for implementation-specific method notes.
-
 ## 4. Frontier construction
 
 The frontier phase evaluates recovery as a function of:
@@ -186,10 +184,8 @@ A repair-selection policy is any decision rule that selects a repair action, inc
 exhaustive validation-based controller selection, and learned repair-selection policies. A repair router is specifically a learned repair-selection policy that maps pre-repair
 diagnostics to a repair action.
 
-A repair-selection input is any pre-repair diagnostic, metadata field, or cheap pilot summary used by a repair-selection policy or repair router to
-choose a repair action.
-
-A repair-selection input is valid only if it is available before fitting the candidate controller being selected.
+In this protocol, a repair-selection input is valid only if it is available before fitting the candidate controller
+being selected.
 
 Allowed inputs include:
 

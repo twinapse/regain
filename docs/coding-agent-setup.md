@@ -74,8 +74,7 @@ That local file is the right place for personal, machine-specific Claude Code se
 * a `SessionStart` hook that prepares the same Python environment for later Bash commands via `CLAUDE_ENV_FILE`
 
 Keep those settings local and replace any path placeholders with values from your own machine. If you later want to add
-shared Claude Code settings for the whole team, put those in `.claude/settings.json` instead of the local override
-file.
+shared Claude Code settings for the whole team, put those in `.claude/settings.json` instead of the local override file.
 
 Permissions vary by developer, so the example below only shows the shared environment hook pattern.
 

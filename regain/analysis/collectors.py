@@ -3,7 +3,7 @@ MLflow collectors for the REGAIN analysis tool.
 
 This module converts MLflow runs into tidy tables suitable for automation of:
   - recoverability curves (ρ / recovered accuracy vs repair budget), and
-  - efficiency frontiers (Pareto sets over data cost, parameter cost, performance).
+  - repairability frontier summaries and selection datasets.
 """
 
 import json
@@ -27,6 +27,7 @@ from regain.analysis.utils import to_int
 from regain.constants import COLUMN_B
 from regain.constants import COLUMN_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import COLUMN_CONTROLLER_NAME
+from regain.constants import COLUMN_CONTROLLER_TYPE
 from regain.constants import COLUMN_EXP_IDX
 from regain.constants import COLUMN_EXPERIMENT_ID
 from regain.constants import COLUMN_NUM_CLASSES
@@ -42,6 +43,7 @@ from regain.constants import COLUMN_TASK_AGE
 from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
+from regain.constants import MLFLOW_ARTIFACT_CONFIG_FILE
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
 from regain.constants import NS_SEP
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
@@ -74,6 +76,7 @@ from regain.constants import RUN_REPAIR_STEPS
 from regain.constants import RUN_RHO
 from regain.constants import RUN_RHO_AVG
 from regain.constants import STREAM_REPAIR
+from regain.experiments.config import load_experiment_config
 from regain.mlflow_utils import download_json_artifact
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import resolve_mlflow_run_name
@@ -87,8 +90,8 @@ __all__ = [
 
 _COLUMN_SCENARIO = 'scenario'
 _COLUMN_STRATEGY_NAME = 'strategy_name'
+_COLUMN_BACKBONE_NAME = 'backbone_name'
 
-_PARAM_BACKBONE_STRATEGY_NAME = 'backbone.training.strategy.name'
 _PARAM_CONTROLLER_NAME = 'controller.name'
 _CONTROLLER_TYPE_NONE = 'none'
 _CONTROLLER_TYPE_PREVENTION = 'prevention'
@@ -219,6 +222,75 @@ def _extract_repair_set_total_from_splits_artifact(
                 'contains no repair split files.'
             )
         return int(total)
+
+
+def _extract_analysis_identity_from_config_artifact(
+    *,
+    client: MlflowClient,
+    run_id: str,
+) -> tuple[str, str]:
+    """
+    Extract analysis identity from a run's logged experiment config.
+
+    Args:
+        client (MlflowClient): MLflow client.
+        run_id (str): Run identifier.
+
+    Returns:
+        tuple[str, str]: Backbone name and backbone training strategy name.
+
+    Raises:
+        ValueError: If `config.yaml` is missing, cannot be parsed by the official
+            experiment config parser, or lacks resolved backbone/strategy identity.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        downloaded_path = client.download_artifacts(
+            run_id,
+            MLFLOW_ARTIFACT_CONFIG_FILE,
+            temp_dir,
+        )
+        config_path = Path(downloaded_path)
+        if config_path.is_dir():
+            config_path = config_path / MLFLOW_ARTIFACT_CONFIG_FILE
+        if not config_path.exists():
+            raise ValueError(
+                f'Run `{run_id}` is missing required config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}`.'
+            )
+
+        try:
+            experiment_config = load_experiment_config(config_path)
+        except Exception as exc:
+            raise ValueError(
+                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
+                f'could not be parsed by `load_experiment_config`: {exc}'
+            ) from exc
+
+        if experiment_config.backbone is None:
+            raise ValueError(
+                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
+                'is missing required `backbone`.'
+            )
+        backbone_name = str(experiment_config.backbone.name or '').strip()
+        if not backbone_name:
+            raise ValueError(
+                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
+                'is missing required `backbone.name`.'
+            )
+
+        if experiment_config.backbone.training is None:
+            raise ValueError(
+                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
+                'is missing required `backbone.training`.'
+            )
+        strategy = getattr(experiment_config.backbone.training, 'strategy', None)
+        strategy_name = str(getattr(strategy, 'name', '') or '').strip()
+        if not strategy_name:
+            raise ValueError(
+                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
+                'is missing required `backbone.training.strategy.name`.'
+            )
+
+        return backbone_name, strategy_name
 
 
 def _extract_experience_metrics(metrics: dict[str, float]) -> dict[int, dict[str, Optional[float]]]:
@@ -438,7 +510,7 @@ def collect_experiment_tables(
 
     Args:
         experiment: MLflow experiment name or id.
-        out_dir: Optional directory to also write 'runs_table.jsonl' and 'experiences_table.jsonl'.
+        out_dir: Optional directory to also write `run_metrics.jsonl` and `experience_metrics.jsonl`.
         tracking_uri: Optional MLflow tracking URI.
         include_controllers: Optional allowlist of controller_name values.
         exclude_controllers: Optional denylist of controller_name values.
@@ -523,7 +595,10 @@ def collect_experiment_tables(
             repair_seconds = to_float(metrics.get(RUN_REPAIR_SECONDS))
             repair_steps = to_float(metrics.get(RUN_REPAIR_STEPS))
 
-            strategy_name = str(params.get(_PARAM_BACKBONE_STRATEGY_NAME) or '')
+            backbone_name, strategy_name = _extract_analysis_identity_from_config_artifact(
+                client=client,
+                run_id=str(info.run_id),
+            )
 
             experience_metrics = _extract_experience_metrics(metrics)
             has_logged_ctrl_metrics = _has_logged_ctrl_metrics(
@@ -640,9 +715,11 @@ def collect_experiment_tables(
                 COLUMN_EXPERIMENT_ID: str(experiment_id),
                 COLUMN_RUN_NAME: run_name,
                 _COLUMN_SCENARIO: str(params.get(_COLUMN_SCENARIO) or ''),
+                _COLUMN_BACKBONE_NAME: backbone_name,
                 _COLUMN_STRATEGY_NAME: strategy_name,
                 COLUMN_SEED: seed,
                 COLUMN_CONTROLLER_NAME: controller_name,
+                COLUMN_CONTROLLER_TYPE: str(params.get(PARAM_CONTROLLER_TYPE) or '').strip().lower(),
                 COLUMN_REPAIR_BUDGET_FRACTION: repair_budget_fraction,
                 COLUMN_REPAIR_BUDGET_TOTAL: repair_budget_total,
                 COLUMN_REPAIR_SET_TOTAL: repair_set_total,
@@ -676,6 +753,7 @@ def collect_experiment_tables(
                     COLUMN_RUN_ID: str(info.run_id),
                     COLUMN_SEED: seed,
                     COLUMN_CONTROLLER_NAME: controller_name,
+                    COLUMN_CONTROLLER_TYPE: str(params.get(PARAM_CONTROLLER_TYPE) or '').strip().lower(),
                     COLUMN_REPAIR_BUDGET_FRACTION: repair_budget_fraction,
                     COLUMN_REPAIR_BUDGET_TOTAL: repair_budget_total,
                     COLUMN_REPAIR_SET_TOTAL: repair_set_total,
@@ -716,11 +794,11 @@ def collect_experiment_tables(
         outp = Path(out_dir)
         outp.mkdir(parents=True, exist_ok=True)
 
-        (outp / 'runs_table.jsonl').write_text(
+        (outp / 'run_metrics.jsonl').write_text(
             '\n'.join(json.dumps(r, default=str) for r in runs_table) + ('\n' if runs_table else ''),
             encoding='utf-8',
         )
-        (outp / 'experiences_table.jsonl').write_text(
+        (outp / 'experience_metrics.jsonl').write_text(
             '\n'.join(json.dumps(r, default=str) for r in experiences_table) + ('\n' if experiences_table else ''),
             encoding='utf-8',
         )

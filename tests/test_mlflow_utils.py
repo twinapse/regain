@@ -85,7 +85,7 @@ class TestLogFatalErrorArtifact:
         assert 'exception_message: fatal failure' in payload
         assert 'traceback:\nTraceback (most recent call last):' in payload
 
-    def test_noops_when_mlflow_run_is_not_active(
+    def test_no_ops_when_mlflow_run_is_not_active(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:

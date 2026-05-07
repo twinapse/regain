@@ -170,8 +170,7 @@ statistics, such as means, covariances, prototypes, or analytically reconstructe
 ### Modulation repair
 
 Modulation repair methods test whether forgetting is recoverable by applying input-, layer-,
-channel-, or state-dependent
-modulations rather than replacing only the final readout.
+channel-, or state-dependent modulations rather than replacing only the final readout.
 
 #### Gain controllers
 
@@ -217,8 +216,7 @@ pre-fit repair module learned from a labeled repair stream.
 ##### Method role
 
 - ARC is a test-time repair baseline for classifier bias and task-confusion failure modes.
-- It detects whether a sample is likely to come from a past task and applies adaptive retention/correction at test
-  time.
+- It detects whether a sample is likely to come from a past task and applies adaptive retention/correction at test time.
 - In REGAIN-style comparisons, ARC should be treated as a repair method with different assumptions from fixed
   repair-set controllers, because it can use test-time adaptation behavior rather than only a pre-collected labeled
   repair stream.
@@ -245,8 +243,7 @@ needed.
   group count (commonly 32 in vision backbones); in this repo you can change it via controller config.
 - We intentionally keep CN as a **pure backbone rewrite** (no extra losses, no extra buffers/datasets, no task-specific
   logic). This matches the “drop-in normalization replacement” spirit, but we do not attempt to
-  reproduce every training
-  detail/setup from the paper’s experiments (online CL protocols, specific baselines, etc.).
+  reproduce every training detail/setup from the paper’s experiments (online CL protocols, specific baselines, etc.).
 
 ### TBBN (task-balanced batch normalization)
 
@@ -269,8 +266,7 @@ needed.
     TBBN is only wired for replay-backed backbone training (`backbone.training.strategy.name: replay`) and validates
     the partition accordingly.
   - **Explicit partition (no total-batch inference):** `(B_c, B_p)` are not derived from a
-    single “total batch size”.
-    `B_c` comes from `backbone.training.batch_size`; `B_p` comes from
+    single “total batch size”. `B_c` comes from `backbone.training.batch_size`; `B_p` comes from
     `backbone.training.strategy.kwargs.batch_size_mem` when provided, and otherwise falls back to
     `backbone.training.batch_size` (matching Replay defaults).
   - **Last minibatch robustness:** some strategies / dataloaders can yield a last minibatch whose current-part size is
@@ -314,13 +310,11 @@ Important differences / simplifications vs a faithful reproduction:
 
 - Our implementation is **scoped to image classification-style models** that expose a `.backbone` (or `.encoder`)
   returning 2D features; we do not reproduce the paper’s broader PTM/NLP setups.
-- The KNN bank in this repo is built over the **current experience dataset** (with the teacher’s
-  representation), not a
+- The KNN bank in this repo is built over the **current experience dataset** (with the teacher’s representation), not a
   specialized multi-source retrieval system. This is a pragmatic approximation of BaCE’s “use prior/old knowledge to
   assist adaptation” idea.
 - We update the teacher **once per epoch** (EMA). If an official implementation updates more frequently, results may
   differ.
-- We detect “current vs replay” samples by **class membership in the minibatch labels**, not by
-  relying on a particular
+- We detect “current vs replay” samples by **class membership in the minibatch labels**, not by relying on a particular
   sampler ordering. This makes the controller more robust across Avalanche strategies, but it may not match an exact
   paper protocol if the protocol assumes a strict batch construction process.

@@ -83,6 +83,44 @@ def _coerce_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return coerced_rows
 
 
+def _read_json_payload(path: Path) -> dict[str, Any] | list[Any] | None:
+    """
+    Read a JSON file into a Python payload.
+
+    Args:
+        path: JSON path.
+
+    Returns:
+        dict[str, Any] | list[Any] | None: Parsed JSON payload, or None when missing.
+    """
+    if not path.exists():
+        return None
+    with path.open('r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    """
+    Read newline-delimited JSON rows from disk.
+
+    Args:
+        path: JSONL file path.
+
+    Returns:
+        list[dict[str, Any]]: Parsed object rows.
+    """
+    rows: list[dict[str, Any]] = []
+    with path.open('r', encoding='utf-8') as f:
+        for line in f:
+            payload = line.strip()
+            if not payload:
+                continue
+            row = json.loads(payload)
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
 def export_analysis_to_json(
     *,
     experiment: str,
@@ -130,8 +168,12 @@ def export_analysis_to_json(
     task_age_path = curves_dir / 'task_age_rho.csv'
     calibration_budget_path = curves_dir / 'calibration_vs_budget.csv'
     latency_budget_path = curves_dir / 'latency_vs_budget.csv'
-    frontier_points_path = frontier_dir / 'frontier_points.csv'
-    frontier_pareto_path = frontier_dir / 'frontier_pareto.csv'
+    repair_outcomes_path = experiment_dir / 'tables' / 'repair_outcomes.jsonl'
+    repair_frontier_path = frontier_dir / 'repair_frontier.csv'
+    repair_pareto_path = frontier_dir / 'repair_pareto.csv'
+    repair_impact_path = frontier_dir / 'repair_impact.csv'
+    repair_selection_path = frontier_dir / 'repair_selection.csv'
+    manifest_path = frontier_dir / 'manifest.json'
     predictive_corr_path = experiment_dir / 'predictive' / 'predictive_correlations.csv'
 
     missing_sections: list[str] = []
@@ -144,10 +186,23 @@ def export_analysis_to_json(
         missing_sections.append(name)
         return []
 
+    def _read_json_section(path: Path, name: str) -> dict[str, Any] | list[Any]:
+        payload = _read_json_payload(path)
+        if payload is not None:
+            return payload
+        missing_sections.append(name)
+        return {}
+
+    def _read_jsonl_section(path: Path, name: str) -> list[dict[str, Any]]:
+        if path.exists():
+            return _read_jsonl_rows(path)
+        missing_sections.append(name)
+        return []
+
     export_payload: dict[str, Any] = {
         'schema': {
             'name': 'regain.analysis.export',
-            'version': 1,
+            'version': 2,
         },
         'generated_at_utc': datetime.now(timezone.utc).isoformat(),
         'mlflow': {
@@ -161,8 +216,12 @@ def export_analysis_to_json(
             'require_finished': require_finished,
         },
         'tables': {
-            'runs_table': runs_table,
-            'experiences_table': experiences_table,
+            'run_metrics': runs_table,
+            'experience_metrics': experiences_table,
+            'repair_outcomes': _read_jsonl_section(
+                repair_outcomes_path,
+                'tables.repair_outcomes',
+            ),
         },
         'curves': {
             'recoverability_curve': _read_section(
@@ -180,8 +239,26 @@ def export_analysis_to_json(
             ),
         },
         'frontier': {
-            'points': _read_section(frontier_points_path, 'frontier.points'),
-            'pareto': _read_section(frontier_pareto_path, 'frontier.pareto'),
+            'repair_frontier': _read_section(
+                repair_frontier_path,
+                'frontier.repair_frontier',
+            ),
+            'repair_pareto': _read_section(
+                repair_pareto_path,
+                'frontier.repair_pareto',
+            ),
+            'repair_impact': _read_section(
+                repair_impact_path,
+                'frontier.repair_impact',
+            ),
+            'repair_selection': _read_section(
+                repair_selection_path,
+                'frontier.repair_selection',
+            ),
+            'manifest': _read_json_section(
+                manifest_path,
+                'frontier.manifest',
+            ),
         },
         'predictive': {
             'correlations': _read_section(
