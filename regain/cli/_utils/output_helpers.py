@@ -43,11 +43,14 @@ class StagedOutput:
         scope (str): Scope label used for friendly error messages.
         source (Path): Staged source path in a temporary directory.
         destination (Path): Final output destination path.
+        overwrite_destination (bool): Whether this output may replace an existing destination path
+            regardless of the command-level `--overwrite` setting.
     """
 
     scope: str
     source: Path
     destination: Path
+    overwrite_destination: bool = False
 
 
 def add_failure(
@@ -161,7 +164,8 @@ def finalize_staged_outputs(
                 )
             continue
 
-        if output.destination.exists() and not overwrite:
+        output_overwrite = bool(overwrite or output.overwrite_destination)
+        if output.destination.exists() and not output_overwrite:
             add_failure(
                 failures=failures,
                 scope=output.scope,
@@ -271,7 +275,7 @@ def _publish_outputs_best_effort(
             _publish_output(
                 source=output.source,
                 destination=output.destination,
-                overwrite=overwrite,
+                overwrite=bool(overwrite or output.overwrite_destination),
             )
             published_count += 1
         except Exception as exc:
@@ -304,10 +308,11 @@ def _publish_outputs_transactionally(
     with tempfile.TemporaryDirectory() as temp_dir:
         backup_root = Path(temp_dir)
         for output in outputs:
+            output_overwrite = bool(overwrite or output.overwrite_destination)
             destination_backup_path: Path | None = None
             try:
                 if output.destination.exists():
-                    if not overwrite:
+                    if not output_overwrite:
                         raise FileExistsError(f'Target path already exists: {output.destination}')
                     destination_backup_path = _backup_existing_destination(
                         destination=output.destination,

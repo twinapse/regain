@@ -80,7 +80,7 @@ This guide records repository-specific architecture patterns for REGAIN.
 ## Analysis pipeline
 
 - Analysis code is table-first. `regain.analysis.collectors.collect_experiment_tables()` converts MLflow runs into
-  `runs_table` and `experiences_table` rows before downstream calculations run.
+  `run_metrics` and `experience_metrics` rows before downstream calculations run.
 - Curves, frontiers, predictive associations, plots, and JSON exports should consume saved tables or derived CSVs rather
   than reaching back into MLflow unnecessarily.
 - Keep schema changes explicit. When `analysis.json` changes shape, update the export contract and tests that assert the

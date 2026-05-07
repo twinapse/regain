@@ -2,11 +2,13 @@
 Tests for analysis export CLI behavior.
 """
 
+import json
 from pathlib import Path
 import sys
 
 import pytest
 
+from regain.analysis.exports import export_analysis_to_json
 from regain.cli._utils.output_helpers import CliFailure
 import regain.cli.export_analysis as export_analysis_cli
 
@@ -97,3 +99,82 @@ def test_parser_rejects_legacy_export_dir_flag() -> None:
                 '/tmp/legacy',
             ]
         )
+
+
+def test_load_analysis_tables_uses_renamed_jsonl_inputs(tmp_path: Path) -> None:
+    experiment_dir = tmp_path / 'analysis' / 'exp_1'
+    tables_dir = experiment_dir / 'tables'
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    (tables_dir / 'run_metrics.jsonl').write_text('{"run_id":"run_1"}\n', encoding='utf-8')
+    (tables_dir / 'experience_metrics.jsonl').write_text('{"run_id":"run_1","exp_idx":0}\n', encoding='utf-8')
+
+    runs_table, experiences_table = export_analysis_cli._load_analysis_tables(
+        experiment_dir=experiment_dir,
+    )
+
+    assert runs_table == [{'run_id': 'run_1'}]
+    assert experiences_table == [{'run_id': 'run_1', 'exp_idx': 0}]
+
+
+def test_export_analysis_includes_no_op_rows(tmp_path: Path) -> None:
+    experiment_dir = tmp_path / 'analysis' / 'exp_1'
+    tables_dir = experiment_dir / 'tables'
+    frontier_dir = experiment_dir / 'frontier'
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    frontier_dir.mkdir(parents=True, exist_ok=True)
+
+    (tables_dir / 'repair_outcomes.jsonl').write_text(
+        '\n'.join([
+            json.dumps({
+                'controller_name': 'no-op',
+                'controller_id': 'no_op',
+                'source_stage': 'no_op',
+                'is_no_op_action': True,
+            }),
+            '',
+        ]),
+        encoding='utf-8',
+    )
+    (frontier_dir / 'repair_frontier.csv').write_text(
+        (
+            'controller_name,controller_id,is_no_op_action,action_repair_budget_fraction,utility_primary\n'
+            'no-op,no_op,True,0.0,0.0\n'
+        ),
+        encoding='utf-8',
+    )
+    (frontier_dir / 'repair_pareto.csv').write_text(
+        'controller_name,controller_id\nno-op,no_op\n',
+        encoding='utf-8',
+    )
+    (frontier_dir / 'repair_impact.csv').write_text(
+        'controller_name,controller_id\nno-op,no_op\n',
+        encoding='utf-8',
+    )
+    (frontier_dir / 'repair_selection.csv').write_text(
+        'best_controller_by_utility_primary,utility_primary__no_op\nno_op,0.0\n',
+        encoding='utf-8',
+    )
+    (frontier_dir / 'manifest.json').write_text('{}', encoding='utf-8')
+
+    export_path = tmp_path / 'exports' / 'analysis.json'
+    export_analysis_to_json(
+        experiment='exp_1',
+        experiment_dir=experiment_dir,
+        export_path=export_path,
+        tracking_uri=None,
+        artifact_location=None,
+        runs_table=[{'run_id': 'run_1'}],
+        experiences_table=[{'run_id': 'run_1', 'exp_idx': 0}],
+        include_controllers=None,
+        exclude_controllers=None,
+        max_runs=None,
+        default_num_classes=None,
+        require_finished=False,
+    )
+
+    payload = json.loads(export_path.read_text(encoding='utf-8'))
+    assert payload['schema']['version'] == 2
+    assert payload['tables']['repair_outcomes'][0]['controller_name'] == 'no-op'
+    assert payload['tables']['repair_outcomes'][0]['is_no_op_action'] is True
+    assert payload['frontier']['repair_frontier'][0]['controller_id'] == 'no_op'
+    assert payload['frontier']['repair_selection'][0]['best_controller_by_utility_primary'] == 'no_op'

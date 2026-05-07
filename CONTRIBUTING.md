@@ -17,13 +17,16 @@ Project reference documentation is summarized in [Documentation](#documentation)
 
 Project reference documentation lives in [docs](docs):
 
+- [docs/analysis.md](docs/analysis.md): Repairability-frontier artifact contract and analysis output guide.
 - [docs/architecture.md](docs/architecture.md): Repository architecture patterns and implementation guidance.
 - [docs/coding-agent-setup.md](docs/coding-agent-setup.md): Project-local coding-agent setup guidance.
+- [docs/concepts.md](docs/concepts.md): Core concepts.
 - [docs/debugging.md](docs/debugging.md): Repair-controller debug instrumentation and health metric guidance.
 - [docs/experimental-framework.md](docs/experimental-framework.md): Benchmark protocol, controller regimes,
   evaluation behavior, and metric logging organization.
 - [docs/methods.md](docs/methods.md): Implementation notes for methods used in the codebase.
 - [docs/overview.md](docs/overview.md): Research, domain, and technology-stack context.
+- [docs/protocol.md](docs/protocol.md): Research protocol for repairability-frontier construction and repair-selection evaluation.
 
 Review the relevant reference documentation before changing related behavior.
 

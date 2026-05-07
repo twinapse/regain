@@ -39,6 +39,7 @@ from regain.constants import RUN_RHO_AVG
 from regain.utils import get_logger
 
 __all__ = [
+    'build_recoverability_curve_rows',
     'write_recoverability_curves',
 ]
 
@@ -88,36 +89,12 @@ def write_recoverability_curves(
     outp = Path(out_dir)
     outp.mkdir(parents=True, exist_ok=True)
 
+    curve_rows = build_recoverability_curve_rows(runs_table=runs_table)
     groups: dict[tuple[str, Any], list[dict[str, Any]]] = {}
     for row in runs_table:
         controller = str(row.get(COLUMN_CONTROLLER_NAME) or 'none')
         budget = row.get(COLUMN_B)
         groups.setdefault((controller, budget), []).append(row)
-
-    curve_rows: list[dict[str, Any]] = []
-    for (controller, budget), rows in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
-        rho_vals = [to_float(row.get(RUN_RHO_AVG)) for row in rows]
-        acc_ctrl_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_CTRL)) for row in rows]
-        acc_base_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_BASE)) for row in rows]
-
-        curve_rows.append({
-            COLUMN_CONTROLLER_NAME: controller,
-            COLUMN_B: budget,
-            COLUMN_REPAIR_BUDGET_FRACTION: rows[0].get(COLUMN_REPAIR_BUDGET_FRACTION),
-            COLUMN_REPAIR_BUDGET_TOTAL: rows[0].get(COLUMN_REPAIR_BUDGET_TOTAL),
-            COLUMN_REPAIR_SET_TOTAL: rows[0].get(COLUMN_REPAIR_SET_TOTAL),
-            COLUMN_REPAIR_SPLIT_FRACTION: rows[0].get(COLUMN_REPAIR_SPLIT_FRACTION),
-            COLUMN_NUM_CLASSES: rows[0].get(COLUMN_NUM_CLASSES),
-            COLUMN_CONTROLLER_MODEL_PARAM_COUNT: rows[0].get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT),
-            ANALYSIS_RHO_AVG: mean(rho_vals),
-            _ANALYSIS_RHO_STD: stdev(rho_vals),
-            ANALYSIS_ACC_FINAL_AVG_CTRL: mean(acc_ctrl_vals),
-            _ANALYSIS_ACC_FINAL_STD_CTRL: stdev(acc_ctrl_vals),
-            _ANALYSIS_ACC_FINAL_AVG_BASE: mean(acc_base_vals),
-            _ANALYSIS_ACC_FINAL_STD_BASE: stdev(acc_base_vals),
-            _COLUMN_N_SEEDS: len({row.get(COLUMN_SEED) for row in rows}),
-            _COLUMN_N_RUNS: len(rows),
-        })
 
     curve_path = outp / 'recoverability_curve.csv'
     write_csv(curve_path, curve_rows)
@@ -201,3 +178,50 @@ def write_recoverability_curves(
     logger.warning(f'Wrote {latency_path}')
 
     return curve_path, task_path, calib_path, latency_path
+
+
+def build_recoverability_curve_rows(
+    *,
+    runs_table: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Build recoverability-curve rows without writing them to disk.
+
+    Args:
+        runs_table: One row per run (from `regain.analysis.collectors`).
+
+    Returns:
+        list[dict[str, Any]]: Aggregated recoverability-curve rows.
+    """
+    groups: dict[tuple[str, Any], list[dict[str, Any]]] = {}
+    for row in runs_table:
+        controller = str(row.get(COLUMN_CONTROLLER_NAME) or 'none')
+        budget = row.get(COLUMN_B)
+        groups.setdefault((controller, budget), []).append(row)
+
+    curve_rows: list[dict[str, Any]] = []
+    for (controller, budget), rows in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
+        rho_vals = [to_float(row.get(RUN_RHO_AVG)) for row in rows]
+        acc_ctrl_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_CTRL)) for row in rows]
+        acc_base_vals = [to_float(row.get(RUN_ACC_FINAL_AVG_BASE)) for row in rows]
+
+        curve_rows.append({
+            COLUMN_CONTROLLER_NAME: controller,
+            COLUMN_B: budget,
+            COLUMN_REPAIR_BUDGET_FRACTION: rows[0].get(COLUMN_REPAIR_BUDGET_FRACTION),
+            COLUMN_REPAIR_BUDGET_TOTAL: rows[0].get(COLUMN_REPAIR_BUDGET_TOTAL),
+            COLUMN_REPAIR_SET_TOTAL: rows[0].get(COLUMN_REPAIR_SET_TOTAL),
+            COLUMN_REPAIR_SPLIT_FRACTION: rows[0].get(COLUMN_REPAIR_SPLIT_FRACTION),
+            COLUMN_NUM_CLASSES: rows[0].get(COLUMN_NUM_CLASSES),
+            COLUMN_CONTROLLER_MODEL_PARAM_COUNT: rows[0].get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT),
+            ANALYSIS_RHO_AVG: mean(rho_vals),
+            _ANALYSIS_RHO_STD: stdev(rho_vals),
+            ANALYSIS_ACC_FINAL_AVG_CTRL: mean(acc_ctrl_vals),
+            _ANALYSIS_ACC_FINAL_STD_CTRL: stdev(acc_ctrl_vals),
+            _ANALYSIS_ACC_FINAL_AVG_BASE: mean(acc_base_vals),
+            _ANALYSIS_ACC_FINAL_STD_BASE: stdev(acc_base_vals),
+            _COLUMN_N_SEEDS: len({row.get(COLUMN_SEED) for row in rows}),
+            _COLUMN_N_RUNS: len(rows),
+        })
+
+    return curve_rows

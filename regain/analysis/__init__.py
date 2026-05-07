@@ -1,5 +1,5 @@
 """
-Analysis utilities: metrics, recoverability curves, and efficiency frontiers.
+Analysis utilities: metrics, recoverability curves, and repairability frontiers.
 """
 
 from regain.analysis.artifacts import AnalysisArtifacts

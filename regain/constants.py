@@ -77,6 +77,7 @@ __all__ = [
     'COLUMN_B',
     'COLUMN_CONTROLLER_MODEL_PARAM_COUNT',
     'COLUMN_CONTROLLER_NAME',
+    'COLUMN_CONTROLLER_TYPE',
     'COLUMN_END_TIME',
     'COLUMN_EXPERIMENT_ID',
     'COLUMN_EXP_IDX',
@@ -182,6 +183,7 @@ PARAM_TORCH_DETERMINISTIC_ALGORITHMS = 'torch_deterministic_algorithms'
 COLUMN_B = 'b'
 COLUMN_CONTROLLER_MODEL_PARAM_COUNT = 'controller_model_param_count'
 COLUMN_CONTROLLER_NAME = 'controller_name'
+COLUMN_CONTROLLER_TYPE = 'controller_type'
 COLUMN_END_TIME = 'end_time'
 COLUMN_EXPERIMENT_ID = 'experiment_id'
 COLUMN_EXP_IDX = 'exp_idx'

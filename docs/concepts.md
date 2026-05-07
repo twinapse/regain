@@ -65,8 +65,7 @@ Short glossary of core concepts.
 
 - **Harm risk** — The possibility that a repair action improves some behavior while worsening other behavior.
 
-- **Headroom** — The apparent room for recovery between degraded post-sequence behavior and a stronger
-  reference point.
+- **Headroom** — The apparent room for recovery between degraded post-sequence behavior and a stronger reference point.
 
 - **Held-dataset validation** — Repair-selection evaluation on a dataset not used to build or tune the repair-selection policy.
 
@@ -111,8 +110,7 @@ Short glossary of core concepts.
 
 - **Repair family** — A broad mechanism category for repair controllers used in frontier and repair-selection policy comparisons.
 
-- **Repair fit subset** — The subset of the repair set actually used for controller fitting under the
-  configured budget.
+- **Repair fit subset** — The subset of the repair set actually used for controller fitting under the configured budget.
 
 - **Repair mechanism** — The kind of intervention a repair family uses to recover from degradation.
 

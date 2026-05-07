@@ -72,7 +72,7 @@ or local default store).
 
 * `collect`: download/aggregate finished parent MLflow runs into tidy JSONL tables
 * `curves`: compute recoverability, task-age, calibration-vs-budget, and latency-vs-budget curves (requires `collect`)
-* `frontier`: compute the efficiency frontier from the curve CSV (requires `curves` output)
+* `frontier`: build repairability-frontier tables from collected run and experience metrics
 * `predictive`: compute diagnostic-vs-repairability correlations (requires `collect`)
 * `all`: run `collect + curves + frontier + predictive`
 
@@ -82,7 +82,7 @@ Experiment selection is standardized via one required selector:
 * `--config-dir`: directory recursively searched for experiment config files
 
 Notes:
-* For repair-controller runs, predictive summaries and run-level `run.calibration.max_ece` in `runs_table` are
+* For repair-controller runs, predictive summaries and run-level `run.calibration.max_ece` in `run_metrics` are
   baseline-only: sourced from base values in `analysis_artifacts.json`. `run.calibration.max_ece` is defined as
   `max(run.calibration.ece)` over artifact baseline vectors.
 * Analysis collection requires each run to include `controller.type` (`none`, `repair`, or `prevention`) and
@@ -101,7 +101,6 @@ Common flags:
 * `--tracking-uri`: optional MLflow tracking URI override
 * `--show-plots`: display plots interactively
 * `--save-plots`: save plots to `<output-dir>/<experiment>/plots`
-* `--perf-key`: metric key to maximize for the frontier and plot in curves
 * `--allow-partial`: publish successful outputs even if some stages fail
 * `--overwrite`: replace existing `<output-dir>/<experiment>/*`
 
@@ -110,8 +109,8 @@ Examples:
 ```bash
 # Step-by-step
 python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results collect
-python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results --show-plots curves
-python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results --perf-key analysis.repair.rho.avg --save-plots frontier
+python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results curves
+python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results --save-plots frontier
 python -m regain.cli.run_analysis --experiments experiment_1 --output-dir ./analysis_results predictive
 
 # One-shot (recommended for most use)
@@ -147,12 +146,14 @@ Like `export_runs`, `export_analysis` supports `--allow-partial` (best-effort pu
 
 Outputs are organized under:
 
-* `./analysis_results/<experiment>/tables/` (from `collect`; JSONL: `runs_table.jsonl`, `experiences_table.jsonl`)
-* `./analysis_results/<experiment>/curves/` (from `curves`; CSV: `recoverability_curve.csv`, `task_age_rho.csv`,
-  `calibration_vs_budget.csv`, `latency_vs_budget.csv`)
+* `./analysis_results/<experiment>/tables/` (from `collect` and `frontier`)
+* `./analysis_results/<experiment>/curves/` (from `curves`)
 * `./analysis_results/<experiment>/frontier/` (from `frontier`)
-* `./analysis_results/<experiment>/predictive/` (from `predictive`; CSV: `predictive_correlations.csv`)
+* `./analysis_results/<experiment>/predictive/` (from `predictive`)
 * `./analysis_results/<experiment>/plots/` (when `--save-plots` is used)
+
+See [docs/analysis.md](docs/analysis.md) for the canonical analysis artifact contract, including exact filenames,
+table meanings, and plot outputs.
 
 ### Plot later (if you didn’t plot during analysis)
 
@@ -161,7 +162,6 @@ If you ran analysis without `--show-plots` / `--save-plots`, you can render plot
 ```bash
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --show
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --save
-python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --save --perf-key analysis.acc.final.avg.ctrl
 python -m regain.cli.generate_plots --analysis-dir ./analysis_results --experiments experiment_1 --show --save --output-dir ./plots
 ```
 

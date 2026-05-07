@@ -2,6 +2,7 @@
 Tests for analysis collectors.
 """
 
+import csv
 import io
 from pathlib import Path
 import tarfile
@@ -13,6 +14,7 @@ import pytest
 from regain.analysis.artifacts import ARTIFACT_RHO
 from regain.analysis.collectors import _extract_repair_set_total_from_splits_artifact
 from regain.analysis.collectors import collect_experiment_tables
+from regain.analysis.frontier import write_repairability_frontier_outputs
 import regain.analysis.collectors as collectors_module
 from regain.constants import COLUMN_REPAIR_SET_TOTAL
 from regain.constants import PARAM_CONTROLLER_TYPE
@@ -30,12 +32,13 @@ from regain.constants import RUN_DIAG_OUT_OF_TASK_RATE
 
 def _make_run(
     *,
+    run_id: str = 'run_1',
     params: dict[str, str],
     metrics: dict[str, float],
 ) -> SimpleNamespace:
     return SimpleNamespace(
         info=SimpleNamespace(
-            run_id='run_1',
+            run_id=run_id,
             status='FINISHED',
         ),
         data=SimpleNamespace(
@@ -51,6 +54,7 @@ def _patch_collectors(
     runs: list[SimpleNamespace],
     artifact_payload: dict[str, Any] | None,
     client_factory: Any = None,
+    analysis_identity: tuple[str, str] | None = ('vit_small', 'er'),
 ) -> None:
     monkeypatch.setattr(
         collectors_module,
@@ -82,6 +86,12 @@ def _patch_collectors(
         'download_json_artifact',
         lambda **kwargs: artifact_payload,
     )
+    if analysis_identity is not None:
+        monkeypatch.setattr(
+            collectors_module,
+            '_extract_analysis_identity_from_config_artifact',
+            lambda **kwargs: analysis_identity,
+        )
 
 
 def _base_metrics_with_exp000() -> dict[str, float]:
@@ -141,6 +151,30 @@ class _MissingSplitsMlflowClient:
         return '/tmp/nonexistent_splits_archive.tar.gz'
 
 
+class _ConfigArtifactMlflowClient:
+    def __init__(
+        self,
+        *,
+        config_path_by_run_id: dict[str, Path] | None = None,
+        default_config_path: Path | None = None,
+    ) -> None:
+        self._config_path_by_run_id = config_path_by_run_id or {}
+        self._default_config_path = default_config_path
+
+    def download_artifacts(
+        self,
+        run_id: str,
+        artifact_path: str,
+        dst_path: str,
+    ) -> str:
+        del artifact_path, dst_path
+        if run_id in self._config_path_by_run_id:
+            return str(self._config_path_by_run_id[run_id])
+        if self._default_config_path is not None:
+            return str(self._default_config_path)
+        return '/tmp/nonexistent_config_artifact.yaml'
+
+
 class TestRepairSetTotalExtraction:
     def test_extracts_exact_total_from_splits_archive(self, tmp_path: Path) -> None:
         archive_path = _write_splits_archive(
@@ -175,6 +209,271 @@ class TestRepairSetTotalExtraction:
 
 
 class TestCollectExperimentTablesPredictiveBaselinePolicy:
+    def test_repair_run_identity_comes_from_config_parser(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        params = {
+            'controller.name': 'my_repair_controller',
+            PARAM_CONTROLLER_TYPE: 'repair',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+        }
+        metrics = _base_metrics_with_exp000()
+        metrics.update({
+            f'{RUN_ACC_FINAL}.exp000.ctrl': 0.60,
+        })
+        run = _make_run(params=params, metrics=metrics)
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text('experiment_name: exp\n', encoding='utf-8')
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run],
+            artifact_payload={
+                RUN_CALIB_MAX_ECE: 0.10,
+                RUN_CALIB_ECE: [0.11],
+                RUN_CALIB_AECE: [0.12],
+                RUN_CALIB_NLL: [0.13],
+                RUN_DIAG_OUT_OF_TASK_RATE: [0.21],
+                RUN_DIAG_AVG_CONF: [0.22],
+                RUN_DIAG_AVG_ENTROPY: [0.23],
+                RUN_DIAG_LOGIT_AVG_DRIFT: [0.24],
+            },
+            client_factory=lambda: _ConfigArtifactMlflowClient(default_config_path=config_path),
+            analysis_identity=None,
+        )
+
+        captured_paths: list[Path] = []
+
+        def _fake_load_experiment_config(path: str | Path) -> SimpleNamespace:
+            captured_paths.append(Path(path))
+            return SimpleNamespace(
+                backbone=SimpleNamespace(
+                    name='resnet18',
+                    training=SimpleNamespace(
+                        strategy=SimpleNamespace(name='bic'),
+                    ),
+                )
+            )
+
+        monkeypatch.setattr(
+            collectors_module,
+            'load_experiment_config',
+            _fake_load_experiment_config,
+        )
+
+        runs_table, _, run_failures = collect_experiment_tables(experiment='exp_name')
+
+        assert len(runs_table) == 1
+        assert runs_table[0]['backbone_name'] == 'resnet18'
+        assert runs_table[0]['strategy_name'] == 'bic'
+        assert not run_failures
+        assert captured_paths == [config_path]
+
+    def test_missing_config_artifact_skips_run(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        params = {
+            'controller.name': 'my_prevention_controller',
+            PARAM_CONTROLLER_TYPE: 'prevention',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+        }
+        run = _make_run(params=params, metrics=_base_metrics_with_exp000())
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run],
+            artifact_payload=None,
+            client_factory=lambda: _ConfigArtifactMlflowClient(),
+            analysis_identity=None,
+        )
+
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+
+        assert not runs_table
+        assert not experiences_table
+        assert len(run_failures) == 1
+        assert 'run_1' in run_failures[0]['error']
+        assert 'config.yaml' in run_failures[0]['error']
+
+    @pytest.mark.parametrize(
+        'parsed_config,expected_field',
+        [
+            (
+                SimpleNamespace(backbone=None),
+                'backbone',
+            ),
+            (
+                SimpleNamespace(
+                    backbone=SimpleNamespace(
+                        name='',
+                        training=SimpleNamespace(strategy=SimpleNamespace(name='er')),
+                    )
+                ),
+                'backbone.name',
+            ),
+            (
+                SimpleNamespace(
+                    backbone=SimpleNamespace(
+                        name='resnet18',
+                        training=None,
+                    )
+                ),
+                'backbone.training',
+            ),
+            (
+                SimpleNamespace(
+                    backbone=SimpleNamespace(
+                        name='resnet18',
+                        training=SimpleNamespace(strategy=SimpleNamespace(name='')),
+                    )
+                ),
+                'backbone.training.strategy.name',
+            ),
+        ],
+    )
+    def test_unresolved_config_identity_skips_run(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        parsed_config: SimpleNamespace,
+        expected_field: str,
+    ) -> None:
+        params = {
+            'controller.name': 'my_prevention_controller',
+            PARAM_CONTROLLER_TYPE: 'prevention',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+        }
+        run = _make_run(params=params, metrics=_base_metrics_with_exp000())
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text('experiment_name: exp\n', encoding='utf-8')
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run],
+            artifact_payload=None,
+            client_factory=lambda: _ConfigArtifactMlflowClient(default_config_path=config_path),
+            analysis_identity=None,
+        )
+        monkeypatch.setattr(
+            collectors_module,
+            'load_experiment_config',
+            lambda path: parsed_config,
+        )
+
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+
+        assert not runs_table
+        assert not experiences_table
+        assert len(run_failures) == 1
+        assert 'run_1' in run_failures[0]['error']
+        assert 'config.yaml' in run_failures[0]['error']
+        assert expected_field in run_failures[0]['error']
+
+    def test_frontier_grouping_preserves_distinct_config_identity(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        params = {
+            'controller.name': 'my_repair_controller',
+            PARAM_CONTROLLER_TYPE: 'repair',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+            'scenario': 'cifar100',
+        }
+        metrics = _base_metrics_with_exp000()
+        metrics.update({
+            f'{RUN_ACC_FINAL}.exp000.ctrl': 0.60,
+            'run.repair.rho.exp000': 0.20,
+        })
+        run_1 = _make_run(run_id='run_1', params=params, metrics=metrics)
+        run_2 = _make_run(run_id='run_2', params=params, metrics=metrics)
+        config_path_1 = tmp_path / 'run_1_config.yaml'
+        config_path_2 = tmp_path / 'run_2_config.yaml'
+        config_path_1.write_text('experiment_name: exp\n', encoding='utf-8')
+        config_path_2.write_text('experiment_name: exp\n', encoding='utf-8')
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run_1, run_2],
+            artifact_payload={
+                RUN_CALIB_MAX_ECE: 0.10,
+                RUN_CALIB_ECE: [0.11],
+                RUN_CALIB_AECE: [0.12],
+                RUN_CALIB_NLL: [0.13],
+                RUN_DIAG_OUT_OF_TASK_RATE: [0.21],
+                RUN_DIAG_AVG_CONF: [0.22],
+                RUN_DIAG_AVG_ENTROPY: [0.23],
+                RUN_DIAG_LOGIT_AVG_DRIFT: [0.24],
+            },
+            client_factory=lambda: _ConfigArtifactMlflowClient(
+                config_path_by_run_id={
+                    'run_1': config_path_1,
+                    'run_2': config_path_2,
+                }
+            ),
+            analysis_identity=None,
+        )
+
+        def _fake_load_experiment_config(path: str | Path) -> SimpleNamespace:
+            if Path(path) == config_path_1:
+                return SimpleNamespace(
+                    backbone=SimpleNamespace(
+                        name='vit_small',
+                        training=SimpleNamespace(strategy=SimpleNamespace(name='er')),
+                    )
+                )
+            return SimpleNamespace(
+                backbone=SimpleNamespace(
+                    name='resnet18',
+                    training=SimpleNamespace(strategy=SimpleNamespace(name='er')),
+                )
+            )
+
+        monkeypatch.setattr(
+            collectors_module,
+            'load_experiment_config',
+            _fake_load_experiment_config,
+        )
+
+        runs_table, experiences_table, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert len(runs_table) == 2
+        assert len(experiences_table) == 2
+        assert not run_failures
+
+        output_paths = write_repairability_frontier_outputs(
+            runs_table=runs_table,
+            experiences_table=experiences_table,
+            out_dir=tmp_path / 'frontier_out',
+        )
+
+        with output_paths['repair_frontier'].open('r', newline='', encoding='utf-8') as f:
+            frontier_rows = list(csv.DictReader(f))
+        repair_frontier_rows = [row for row in frontier_rows if row['controller_name'] == 'my_repair_controller']
+        assert len(repair_frontier_rows) == 2
+        assert {
+            (row['backbone_name'], row['strategy_name'])
+            for row in repair_frontier_rows
+        } == {('vit_small', 'er'), ('resnet18', 'er')}
+
+        with output_paths['repair_selection'].open('r', newline='', encoding='utf-8') as f:
+            selection_rows = list(csv.DictReader(f))
+        assert len(selection_rows) == 2
+        assert {
+            (row['backbone_name'], row['strategy_name'])
+            for row in selection_rows
+        } == {('vit_small', 'er'), ('resnet18', 'er')}
+
     def test_repair_run_policy_uses_logged_controller_type(
         self,
         monkeypatch: pytest.MonkeyPatch,
