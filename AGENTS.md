@@ -1,6 +1,6 @@
-# Instructions for AI agents
+# Coding agent instructions
 
-This file contains instructions for AI agents working on this repository.
+This file contains instructions for coding agents working on this repository.
 
 Shared contributor policies such as formatting, typing, docstrings, imports, naming, and Git conventions live in
 [CONTRIBUTING.md](CONTRIBUTING.md). Follow that document for all rules that apply to both humans and agents.
@@ -10,12 +10,14 @@ Reference documentation, including project context and architecture guidance, li
 
 Review the relevant reference documentation before changing related behavior.
 
-## Environment setup
+## Python environment setup
 
-1. Read the `VIRTUAL_ENV` environment variable and activate the Python environment it specifies.
-2. If `VIRTUAL_ENV` is not available, or if activation fails for any reason, stop immediately and exit without
-   proceeding further.
-3. Only continue with the task after activation succeeds, and show a message confirming that activation succeeded.
+Before running any Python-related command, activate the repository virtual environment specified by the `VIRTUAL_ENV` 
+environment variable. If `VIRTUAL_ENV` is not available, or if activation fails for any reason, stop immediately and 
+exit without proceeding further. Only continue with the task after activation succeeds, and show a message confirming 
+that activation succeeded.
+
+Do not install Python packages globally. Install or run tools only inside the activated virtual environment.
 
 ## Agent workflow
 
