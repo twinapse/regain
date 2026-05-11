@@ -2,25 +2,37 @@
 Tests for MLflow utility helpers.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import mlflow
+from mlflow.utils.mlflow_tags import MLFLOW_GIT_COMMIT
 import pytest
 
+from regain.constants import COLUMN_GIT_COMMIT
 from regain.constants import MLFLOW_ARTIFACT_ERROR_FILE
 from regain.constants import RUN_ACC_FINAL_AVG_BASE
 from regain.constants import RUN_ACC_REF
 from regain.mlflow_utils import _log_fatal_error_artifact
 from regain.mlflow_utils import build_mlflow_run_columns
+from regain.mlflow_utils import extract_mlflow_run_git_commit
 from regain.mlflow_utils import log_fatal_error_context
+from regain.mlflow_utils import resolve_git_commit
 
 
-def _make_run(*, metrics: dict[str, float]) -> SimpleNamespace:
+def _make_run(
+    *,
+    metrics: dict[str, float],
+    params: dict[str, str] | None = None,
+    tags: dict[str, str] | None = None,
+) -> SimpleNamespace:
     """
     Build a minimal MLflow run stub for export tests.
 
     Args:
         metrics (dict[str, float]): Run metric payload.
+        params (dict[str, str] | None): Optional run params.
+        tags (dict[str, str] | None): Optional run tags.
 
     Returns:
         SimpleNamespace: Run stub.
@@ -33,8 +45,9 @@ def _make_run(*, metrics: dict[str, float]) -> SimpleNamespace:
             end_time=0,
         ),
         data=SimpleNamespace(
-            params={'seed': '1'},
+            params=params or {'seed': '1'},
             metrics=metrics,
+            tags=tags,
         ),
     )
 
@@ -150,7 +163,56 @@ class TestLogFatalErrorContext:
         assert 'RuntimeError: boom' in traceback_text
 
 
+class TestGitCommitHelpers:
+    def test_extract_mlflow_run_git_commit_returns_tag_when_present(self) -> None:
+        run = _make_run(
+            metrics={},
+            tags={MLFLOW_GIT_COMMIT: 'a' * 40},
+        )
+
+        assert extract_mlflow_run_git_commit(run) == 'a' * 40
+
+    def test_extract_mlflow_run_git_commit_returns_empty_string_when_tag_missing(self) -> None:
+        run = _make_run(metrics={}, tags={'other_tag': 'value'})
+
+        assert extract_mlflow_run_git_commit(run) == ''
+
+    def test_extract_mlflow_run_git_commit_returns_empty_string_when_tags_are_none(self) -> None:
+        run = _make_run(metrics={}, tags=None)
+
+        assert extract_mlflow_run_git_commit(run) == ''
+
+    def test_resolve_git_commit_returns_repo_commit_and_none_outside_repo(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        repo_commit = resolve_git_commit()
+
+        assert repo_commit is not None
+        assert len(repo_commit) == 40
+        assert set(repo_commit) <= set('0123456789abcdef')
+        assert resolve_git_commit(tmp_path) is None
+
+
 class TestBuildMlflowRunColumns:
+    def test_includes_git_commit_and_reserves_column_name(self) -> None:
+        run = _make_run(
+            metrics={
+                COLUMN_GIT_COMMIT: 0.5,
+                RUN_ACC_FINAL_AVG_BASE: 0.77,
+            },
+            params={
+                'seed': '1',
+                COLUMN_GIT_COMMIT: 'param_override',
+            },
+            tags={MLFLOW_GIT_COMMIT: 'b' * 40},
+        )
+
+        columns = build_mlflow_run_columns(run=run)
+
+        assert columns[COLUMN_GIT_COMMIT] == 'b' * 40
+        assert columns[RUN_ACC_FINAL_AVG_BASE] == pytest.approx(0.77)
+
     def test_materializes_history_bearing_eval_metrics_with_actual_after_exp_tokens(self) -> None:
         run = _make_run(
             metrics={

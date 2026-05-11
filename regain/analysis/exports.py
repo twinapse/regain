@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from regain.mlflow_utils import resolve_artifact_location
+from regain.mlflow_utils import resolve_git_commit
 from regain.mlflow_utils import resolve_tracking_uri
 
 __all__ = [
@@ -202,13 +203,14 @@ def export_analysis_to_json(
     export_payload: dict[str, Any] = {
         'schema': {
             'name': 'regain.analysis.export',
-            'version': 2,
+            'version': 3,
         },
         'generated_at_utc': datetime.now(timezone.utc).isoformat(),
         'mlflow': {
             'experiment': str(experiment),
             'tracking_uri': resolved_tracking_uri,
             'artifact_location': resolved_artifact_location,
+            'git_commit': resolve_git_commit(),
             'include_controllers': include_controllers,
             'exclude_controllers': exclude_controllers,
             'max_runs': max_runs,

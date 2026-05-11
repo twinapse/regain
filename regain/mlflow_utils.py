@@ -18,10 +18,13 @@ import mlflow
 from mlflow.entities import Experiment
 from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
+from mlflow.utils.git_utils import get_git_commit
+from mlflow.utils.mlflow_tags import MLFLOW_GIT_COMMIT
 from mlflow.utils.yaml_utils import write_yaml
 
 from regain.constants import COLUMN_END_TIME
 from regain.constants import COLUMN_EXPERIMENT_ID
+from regain.constants import COLUMN_GIT_COMMIT
 from regain.constants import COLUMN_RUN_ID
 from regain.constants import COLUMN_RUN_NAME
 from regain.constants import COLUMN_START_TIME
@@ -38,6 +41,7 @@ __all__ = [
     'delete_mlflow_runs',
     'download_json_artifact',
     'ensure_experiment',
+    'extract_mlflow_run_git_commit',
     'format_timestamp_ms',
     'init_mlflow',
     'log_fatal_error_context',
@@ -46,6 +50,7 @@ __all__ = [
     'resolve_active_runs_by_name',
     'resolve_artifact_location',
     'resolve_experiment_id',
+    'resolve_git_commit',
     'resolve_latest_active_runs_by_name',
     'resolve_mlflow_run_name',
     'resolve_tracking_uri',
@@ -211,6 +216,35 @@ def set_tracking_uri(
     """
     mlflow.set_tracking_uri(tracking_uri)
     return mlflow.get_tracking_uri()
+
+
+def extract_mlflow_run_git_commit(run: Run) -> str:
+    """
+    Return the git commit tag for an MLflow run, or '' if absent.
+
+    Args:
+        run (Run): MLflow run whose tags should be inspected.
+
+    Returns:
+        str: Git commit tag value, or an empty string when unavailable.
+    """
+    tags = dict(getattr(run.data, 'tags', {}) or {})
+    value = tags.get(MLFLOW_GIT_COMMIT)
+    return str(value) if value else ''
+
+
+def resolve_git_commit(repo_path: str | Path | None = None) -> str | None:
+    """
+    Return the current repository git commit at call time.
+
+    Args:
+        repo_path (str | Path | None): Optional repository path override.
+
+    Returns:
+        str | None: Git commit hash, or None when no git repo can be found.
+    """
+    target = str(Path(repo_path) if repo_path is not None else Path(__file__).parent)
+    return get_git_commit(target)
 
 
 ####################################
@@ -828,8 +862,10 @@ def build_mlflow_run_columns(
     columns[COLUMN_STATUS] = run.info.status
     columns[COLUMN_START_TIME] = format_timestamp_ms(run.info.start_time)
     columns[COLUMN_END_TIME] = format_timestamp_ms(run.info.end_time)
+    columns[COLUMN_GIT_COMMIT] = extract_mlflow_run_git_commit(run)
 
     reserved_keys = {
+        COLUMN_GIT_COMMIT,
         COLUMN_RUN_ID,
         COLUMN_RUN_NAME,
         COLUMN_STATUS,
