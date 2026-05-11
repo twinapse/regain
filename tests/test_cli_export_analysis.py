@@ -116,7 +116,10 @@ def test_load_analysis_tables_uses_renamed_jsonl_inputs(tmp_path: Path) -> None:
     assert experiences_table == [{'run_id': 'run_1', 'exp_idx': 0}]
 
 
-def test_export_analysis_includes_no_op_rows(tmp_path: Path) -> None:
+def test_export_analysis_includes_no_op_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     experiment_dir = tmp_path / 'analysis' / 'exp_1'
     tables_dir = experiment_dir / 'tables'
     frontier_dir = experiment_dir / 'frontier'
@@ -157,6 +160,10 @@ def test_export_analysis_includes_no_op_rows(tmp_path: Path) -> None:
     (frontier_dir / 'manifest.json').write_text('{}', encoding='utf-8')
 
     export_path = tmp_path / 'exports' / 'analysis.json'
+    monkeypatch.setattr(
+        'regain.analysis.exports.resolve_git_commit',
+        lambda: 'd' * 40,
+    )
     export_analysis_to_json(
         experiment='exp_1',
         experiment_dir=experiment_dir,
@@ -173,7 +180,8 @@ def test_export_analysis_includes_no_op_rows(tmp_path: Path) -> None:
     )
 
     payload = json.loads(export_path.read_text(encoding='utf-8'))
-    assert payload['schema']['version'] == 2
+    assert payload['schema']['version'] == 3
+    assert payload['mlflow']['git_commit'] == 'd' * 40
     assert payload['tables']['repair_outcomes'][0]['controller_name'] == 'no-op'
     assert payload['tables']['repair_outcomes'][0]['is_no_op_action'] is True
     assert payload['frontier']['repair_frontier'][0]['controller_id'] == 'no_op'

@@ -9,6 +9,7 @@ from typing import Any
 from mlflow.tracking import MlflowClient
 
 from regain.constants import COLUMN_END_TIME
+from regain.constants import COLUMN_GIT_COMMIT
 from regain.constants import COLUMN_RUN_ID
 from regain.constants import COLUMN_RUN_NAME
 from regain.constants import COLUMN_START_TIME
@@ -82,6 +83,7 @@ def export_runs_to_csvs(
         COLUMN_STATUS,
         COLUMN_START_TIME,
         COLUMN_END_TIME,
+        COLUMN_GIT_COMMIT,
     ]
     reserved_keys = set(metadata_columns)
     param_columns = sorted(key for key in parent_param_keys if key not in reserved_keys)
