@@ -2,6 +2,7 @@ avalanche-lib @ git+https://github.com/ContinualAI/avalanche  # Published versio
 mlflow
 numpy
 pyyaml
+scikit-learn
 timm
 torch
 torchvision

@@ -17,7 +17,7 @@ Project reference documentation is summarized in [Documentation](#documentation)
 
 Project reference documentation lives in [docs](docs):
 
-- [docs/analysis.md](docs/analysis.md): Repairability-frontier artifact contract and analysis output guide.
+- [docs/analysis.md](docs/analysis.md): Analysis-stage flow, artifact contracts, and output guide.
 - [docs/architecture.md](docs/architecture.md): Repository architecture patterns and implementation guidance.
 - [docs/coding-agent-setup.md](docs/coding-agent-setup.md): Project-local coding-agent setup guidance.
 - [docs/concepts.md](docs/concepts.md): Core concepts.

@@ -234,8 +234,8 @@ def plot_analysis_outputs(
     Plot repairability-frontier analysis artifacts.
 
     Args:
-        frontier_rows: Optional rows from `frontier/repair_frontier.csv`.
-        impact_rows: Optional rows from `frontier/repair_impact.csv`.
+        frontier_rows: Optional rows from `frontier/candidates.csv`.
+        impact_rows: Optional rows from `frontier/impact.csv`.
         analysis_out: Root analysis output directory used to load default inputs.
         mode: One of `none`, `show`, `save`, or `both`.
         save_dir: Optional output directory for PNG files.
@@ -250,9 +250,9 @@ def plot_analysis_outputs(
     analysis_out_p: Optional[Path] = Path(analysis_out) if analysis_out is not None else None
     frontier_dir = analysis_out_p / 'frontier' if analysis_out_p is not None else None
     if frontier_rows is None and frontier_dir is not None:
-        frontier_rows = _read_csv_rows(frontier_dir / 'repair_frontier.csv')
+        frontier_rows = _read_csv_rows(frontier_dir / 'candidates.csv')
     if impact_rows is None and frontier_dir is not None:
-        impact_rows = _read_csv_rows(frontier_dir / 'repair_impact.csv')
+        impact_rows = _read_csv_rows(frontier_dir / 'impact.csv')
 
     frontier_rows = frontier_rows or []
     impact_rows = impact_rows or []

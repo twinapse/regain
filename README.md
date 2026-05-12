@@ -152,7 +152,7 @@ Outputs are organized under:
 * `./analysis_results/<experiment>/predictive/` (from `predictive`)
 * `./analysis_results/<experiment>/plots/` (when `--save-plots` is used)
 
-See [docs/analysis.md](docs/analysis.md) for the canonical analysis artifact contract, including exact filenames,
+See [docs/analysis.md](docs/analysis.md) for the analysis-stage flow and artifact contracts, including exact filenames,
 table meanings, and plot outputs.
 
 ### Plot later (if you didn’t plot during analysis)

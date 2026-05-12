@@ -3,6 +3,7 @@ mlflow
 numpy
 pytest
 pyyaml
+scikit-learn
 timm
 torch
 torchvision

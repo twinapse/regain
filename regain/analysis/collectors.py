@@ -46,6 +46,8 @@ from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
 from regain.constants import MLFLOW_ARTIFACT_CONFIG_FILE
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
 from regain.constants import NS_SEP
+from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
+from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import PARAM_CONTROLLER_TYPE
 from regain.constants import PARAM_NUM_CLASSES
@@ -228,7 +230,7 @@ def _extract_analysis_identity_from_config_artifact(
     *,
     client: MlflowClient,
     run_id: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, Optional[int], Optional[int]]:
     """
     Extract analysis identity from a run's logged experiment config.
 
@@ -237,7 +239,9 @@ def _extract_analysis_identity_from_config_artifact(
         run_id (str): Run identifier.
 
     Returns:
-        tuple[str, str]: Backbone name and backbone training strategy name.
+        tuple[str, str, Optional[int], Optional[int]]: Backbone name, backbone training
+            strategy name, replay memory size, and replay memory batch size. The replay
+            fields are `None` when the configured strategy is not a replay-based one.
 
     Raises:
         ValueError: If `config.yaml` is missing, cannot be parsed by the official
@@ -290,7 +294,11 @@ def _extract_analysis_identity_from_config_artifact(
                 'is missing required `backbone.training.strategy.name`.'
             )
 
-        return backbone_name, strategy_name
+        strategy_kwargs = getattr(strategy, 'kwargs', None) or {}
+        replay_mem_size = to_int(strategy_kwargs.get('mem_size'))
+        replay_batch_size_mem = to_int(strategy_kwargs.get('batch_size_mem'))
+
+        return backbone_name, strategy_name, replay_mem_size, replay_batch_size_mem
 
 
 def _extract_experience_metrics(metrics: dict[str, float]) -> dict[int, dict[str, Optional[float]]]:
@@ -595,10 +603,21 @@ def collect_experiment_tables(
             repair_seconds = to_float(metrics.get(RUN_REPAIR_SECONDS))
             repair_steps = to_float(metrics.get(RUN_REPAIR_STEPS))
 
-            backbone_name, strategy_name = _extract_analysis_identity_from_config_artifact(
+            (
+                backbone_name,
+                strategy_name,
+                config_replay_mem_size,
+                config_replay_batch_size_mem,
+            ) = _extract_analysis_identity_from_config_artifact(
                 client=client,
                 run_id=str(info.run_id),
             )
+            replay_mem_size = to_int(params.get(PARAM_BACKBONE_REPLAY_MEM_SIZE))
+            if replay_mem_size is None:
+                replay_mem_size = config_replay_mem_size
+            replay_batch_size_mem = to_int(params.get(PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM))
+            if replay_batch_size_mem is None:
+                replay_batch_size_mem = config_replay_batch_size_mem
 
             experience_metrics = _extract_experience_metrics(metrics)
             has_logged_ctrl_metrics = _has_logged_ctrl_metrics(
@@ -727,6 +746,8 @@ def collect_experiment_tables(
                 COLUMN_NUM_CLASSES: num_classes,
                 COLUMN_B: b,
                 COLUMN_CONTROLLER_MODEL_PARAM_COUNT: ctrl_param_count,
+                'replay_mem_size': replay_mem_size,
+                'replay_batch_size_mem': replay_batch_size_mem,
                 RUN_RHO_AVG: rho_avg,
                 RUN_ACC_FINAL_AVG_CTRL: a_ctrl_avg,
                 RUN_ACC_FINAL_AVG_BASE: a_base_avg,

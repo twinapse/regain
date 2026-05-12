@@ -54,7 +54,7 @@ def _patch_collectors(
     runs: list[SimpleNamespace],
     artifact_payload: dict[str, Any] | None,
     client_factory: Any = None,
-    analysis_identity: tuple[str, str] | None = ('vit_small', 'er'),
+    analysis_identity: tuple[str, str, int | None, int | None] | None = ('vit_small', 'er', None, None),
 ) -> None:
     monkeypatch.setattr(
         collectors_module,
@@ -457,7 +457,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             out_dir=tmp_path / 'frontier_out',
         )
 
-        with output_paths['repair_frontier'].open('r', newline='', encoding='utf-8') as f:
+        with output_paths['candidates'].open('r', newline='', encoding='utf-8') as f:
             frontier_rows = list(csv.DictReader(f))
         repair_frontier_rows = [row for row in frontier_rows if row['controller_name'] == 'my_repair_controller']
         assert len(repair_frontier_rows) == 2
@@ -466,7 +466,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             for row in repair_frontier_rows
         } == {('vit_small', 'er'), ('resnet18', 'er')}
 
-        with output_paths['repair_selection'].open('r', newline='', encoding='utf-8') as f:
+        with output_paths['selection'].open('r', newline='', encoding='utf-8') as f:
             selection_rows = list(csv.DictReader(f))
         assert len(selection_rows) == 2
         assert {
@@ -1000,3 +1000,116 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
         assert not experiences_table
         assert len(run_failures) == 1
         assert 'repair.split_fraction' in run_failures[0]['error']
+
+    def test_replay_metadata_is_collected_from_params(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        params = {
+            'controller.name': 'my_prevention_controller',
+            PARAM_CONTROLLER_TYPE: 'prevention',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+            'backbone.training.strategy.mem_size': '500',
+            'backbone.training.strategy.batch_size_mem': '32',
+        }
+        run = _make_run(params=params, metrics=_base_metrics_with_exp000())
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run],
+            artifact_payload=None,
+        )
+
+        runs_table, _, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not run_failures
+        assert len(runs_table) == 1
+        assert runs_table[0]['replay_mem_size'] == 500
+        assert runs_table[0]['replay_batch_size_mem'] == 32
+
+    def test_replay_metadata_falls_back_to_config_strategy_kwargs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        params = {
+            'controller.name': 'my_prevention_controller',
+            PARAM_CONTROLLER_TYPE: 'prevention',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+        }
+        run = _make_run(params=params, metrics=_base_metrics_with_exp000())
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text('experiment_name: exp\n', encoding='utf-8')
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run],
+            artifact_payload=None,
+            client_factory=lambda: _ConfigArtifactMlflowClient(default_config_path=config_path),
+            analysis_identity=None,
+        )
+        monkeypatch.setattr(
+            collectors_module,
+            'load_experiment_config',
+            lambda path: SimpleNamespace(
+                backbone=SimpleNamespace(
+                    name='resnet18',
+                    training=SimpleNamespace(
+                        strategy=SimpleNamespace(
+                            name='replay',
+                            kwargs={'mem_size': 1000, 'batch_size_mem': 64},
+                        )
+                    ),
+                )
+            ),
+        )
+
+        runs_table, _, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not run_failures
+        assert len(runs_table) == 1
+        assert runs_table[0]['replay_mem_size'] == 1000
+        assert runs_table[0]['replay_batch_size_mem'] == 64
+
+    def test_replay_metadata_is_none_when_strategy_lacks_kwargs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        params = {
+            'controller.name': 'my_prevention_controller',
+            PARAM_CONTROLLER_TYPE: 'prevention',
+            'seed': '1',
+            'repair.split_fraction': '0.0',
+            'repair.budget_fraction': '0.5',
+            'num_classes': '2',
+        }
+        run = _make_run(params=params, metrics=_base_metrics_with_exp000())
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text('experiment_name: exp\n', encoding='utf-8')
+        _patch_collectors(
+            monkeypatch=monkeypatch,
+            runs=[run],
+            artifact_payload=None,
+            client_factory=lambda: _ConfigArtifactMlflowClient(default_config_path=config_path),
+            analysis_identity=None,
+        )
+        monkeypatch.setattr(
+            collectors_module,
+            'load_experiment_config',
+            lambda path: SimpleNamespace(
+                backbone=SimpleNamespace(
+                    name='resnet18',
+                    training=SimpleNamespace(
+                        strategy=SimpleNamespace(name='naive', kwargs={}),
+                    ),
+                )
+            ),
+        )
+
+        runs_table, _, run_failures = collect_experiment_tables(experiment='exp_name')
+        assert not run_failures
+        assert runs_table[0]['replay_mem_size'] is None
+        assert runs_table[0]['replay_batch_size_mem'] is None
