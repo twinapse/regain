@@ -269,9 +269,13 @@ _CONTROLLERS: Mapping[str, str] = MappingProxyType(
         'il2m': 'regain.models.controllers.repair.IL2MController',
         'linear_probe': 'regain.models.controllers.repair.LinearProbeController',
         'logit_bias': 'regain.models.controllers.repair.LogitBiasController',
+        'prototype_blend': 'regain.models.controllers.repair.PrototypeBlendController',
         'scalar_block': 'regain.models.controllers.repair.ScalarBlockGainController',
         'scalar_stage': 'regain.models.controllers.repair.ScalarStageGainController',
+        'tcil_lite': 'regain.models.controllers.repair.TCILLiteController',
         'tbbn': 'regain.models.controllers.prevention.TaskBalancedBatchNormController',
+        'temperature_scaling': 'regain.models.controllers.repair.TemperatureScalingController',
+        'weight_aligning': 'regain.models.controllers.repair.WeightAligningController',
     }
 )
 

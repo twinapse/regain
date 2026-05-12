@@ -6,7 +6,7 @@ global/partial bias and class-incremental calibration drift.
 
 They represent the lowest-capacity points in the controller family.
 """
-
+import math
 from typing import Any
 
 import numpy as np
@@ -20,7 +20,9 @@ from regain.models.controllers.modules import BiasLayer
 from regain.models.controllers.repair.common import build_repair_dataloader
 from regain.models.controllers.repair.common import build_sgd_optimizer_and_scheduler
 from regain.models.controllers.repair.common import fit_repair_controller
+from regain.models.controllers.repair.common import model_logits
 from regain.models.controllers.repair.common import prepare_repair_fit_context
+from regain.models.controllers.repair.common import resolve_classifier_weight
 from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval
 
@@ -28,6 +30,9 @@ __all__ = [
     'BiCController',
     'LogitBiasController',
     'IL2MController',
+    'TCILLiteController',
+    'TemperatureScalingController',
+    'WeightAligningController',
 ]
 
 
@@ -221,6 +226,337 @@ class LogitBiasController(RepairController):
             bias = bias[: int(outputs.shape[1])]
 
         return outputs + bias.to(outputs.device)
+
+
+class WeightAligningController(RepairController):
+    """
+    Weight Aligning baseline for class-incremental classifier-head correction.
+
+    The controller estimates the average classifier-weight norm ratio between old and newly introduced classes and
+    applies the resulting scalar to the logits of the new classes. This is a near-zero-cost post-hoc repair baseline:
+    it reads frozen classifier weights and does not optimize on repair minibatches.
+
+    Args:
+        min_scale (float): Lower clamp for class logit scales.
+        max_scale (float): Upper clamp for class logit scales.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_scale: float = 0.05,
+        max_scale: float = 20.0,
+    ) -> None:
+        super().__init__()
+        self.min_scale = float(min_scale)
+        self.max_scale = float(max_scale)
+        if self.min_scale <= 0.0:
+            raise ValueError('`min_scale` must be positive.')
+        if self.max_scale < self.min_scale:
+            raise ValueError('`max_scale` must be greater than or equal to `min_scale`.')
+
+        self._seen_classes: set[int] = set()
+        self._class_scales: dict[int, float] = {}
+
+    @classmethod
+    def requires_per_experience_fitting(cls) -> bool:
+        return True
+
+    def fit_on_repair_data(
+        self,
+        *,
+        model: nn.Module,
+        repair_dataset: Dataset | None,
+        new_classes: list[int],
+        num_epochs: int,
+        batch_size: int,
+    ) -> None:
+        del repair_dataset, num_epochs, batch_size
+
+        cur_classes = sorted({int(class_id) for class_id in new_classes})
+        old_classes = sorted(self._seen_classes.difference(cur_classes))
+        self._seen_classes.update(cur_classes)
+        if not old_classes or not cur_classes:
+            return
+
+        weight = resolve_classifier_weight(model)
+        if weight is None or weight.ndim != 2:
+            return
+
+        max_class = int(weight.shape[0]) - 1
+        old_idx = [class_id for class_id in old_classes if 0 <= class_id <= max_class]
+        cur_idx = [class_id for class_id in cur_classes if 0 <= class_id <= max_class]
+        if not old_idx or not cur_idx:
+            return
+
+        norms = torch.linalg.vector_norm(weight.detach().float(), ord=2, dim=1)
+        old_norm = float(norms[old_idx].mean().item())
+        cur_norm = float(norms[cur_idx].mean().item())
+        if cur_norm <= 0.0:
+            return
+
+        scale = max(self.min_scale, min(self.max_scale, old_norm / cur_norm))
+        for class_id in cur_idx:
+            self._class_scales[int(class_id)] = float(scale)
+
+    def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
+        del model, inputs
+        if not torch.is_tensor(outputs) or outputs.ndim != 2:
+            return outputs
+        if not self._class_scales:
+            return outputs
+
+        corrected = outputs.clone()
+        for class_id, scale in self._class_scales.items():
+            if 0 <= int(class_id) < int(corrected.shape[1]):
+                corrected[:, int(class_id)] = corrected[:, int(class_id)] * float(scale)
+        return corrected
+
+
+class TemperatureScalingController(RepairController):
+    """
+    Scalar temperature-scaling baseline optimized with frozen logits and repair-set NLL.
+
+    Args:
+        min_temperature (float): Lower clamp for the fitted temperature.
+        max_temperature (float): Upper clamp for the fitted temperature.
+        device (str | None): Device for collecting frozen repair logits.
+        seed (int): Random seed for dataloader ordering.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_temperature: float = 0.05,
+        max_temperature: float = 10.0,
+        device: str | None = None,
+        seed: int = 1,
+    ) -> None:
+        super().__init__()
+        self.min_temperature = float(min_temperature)
+        self.max_temperature = float(max_temperature)
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.seed = int(seed)
+        if self.min_temperature <= 0.0:
+            raise ValueError('`min_temperature` must be positive.')
+        if self.max_temperature < self.min_temperature:
+            raise ValueError('`max_temperature` must be greater than or equal to `min_temperature`.')
+
+        self.temperature = torch.tensor(1.0, dtype=torch.float32)
+
+    def fit_on_repair_data(
+        self,
+        *,
+        model: nn.Module,
+        repair_dataset: Dataset | None,
+        new_classes: list[int],
+        num_epochs: int,
+        batch_size: int,
+    ) -> None:
+        del new_classes
+        logits, targets = self._collect_logits_and_targets(
+            model=model,
+            repair_dataset=repair_dataset,
+            batch_size=batch_size,
+        )
+        if logits is None or targets is None:
+            return
+
+        max_iter = num_epochs * math.ceil(len(repair_dataset) / batch_size)
+
+        self.temperature = self._fit_temperature(logits=logits, targets=targets, max_iter=max_iter).detach().cpu()
+
+    def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
+        del model, inputs
+        if not torch.is_tensor(outputs) or outputs.ndim != 2:
+            return outputs
+        temperature = self.temperature.to(device=outputs.device, dtype=outputs.dtype).clamp(
+            min=self.min_temperature,
+            max=self.max_temperature,
+        )
+        return outputs / temperature
+
+    def _collect_logits_and_targets(
+        self,
+        *,
+        model: nn.Module,
+        repair_dataset: Dataset | None,
+        batch_size: int,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        dataloader = build_repair_dataloader(
+            repair_dataset=repair_dataset,
+            batch_size=batch_size,
+            seed=self.seed,
+            shuffle=False,
+        )
+        if dataloader is None:
+            return None, None
+
+        model_device = module_device(model, self.device)
+        logits_chunks: list[torch.Tensor] = []
+        target_chunks: list[torch.Tensor] = []
+        for batch in dataloader:
+            x, y, *_ = batch
+            if not torch.is_tensor(x):
+                x = torch.as_tensor(x)
+            if not torch.is_tensor(y):
+                y = torch.as_tensor(y)
+            logits = model_logits(model=model, inputs=x.to(model_device))
+            if not torch.is_tensor(logits) or logits.ndim != 2:
+                return None, None
+            logits_chunks.append(logits.detach().to(device='cpu', dtype=torch.float32))
+            target_chunks.append(y.reshape(-1).detach().to(device='cpu', dtype=torch.long))
+
+        if not logits_chunks:
+            return None, None
+        return torch.cat(logits_chunks, dim=0), torch.cat(target_chunks, dim=0)
+
+    def _fit_temperature(self, *, logits: torch.Tensor, targets: torch.Tensor, max_iter: int) -> torch.Tensor:
+        log_min = float(np.log(self.min_temperature))
+        log_max = float(np.log(self.max_temperature))
+        log_temperature = torch.zeros((), dtype=torch.float32, requires_grad=True)
+        optimizer = torch.optim.LBFGS(
+            [log_temperature],
+            lr=0.1,
+            max_iter=max_iter,
+            line_search_fn='strong_wolfe',
+        )
+        criterion = CrossEntropyLoss()
+
+        def _closure() -> torch.Tensor:
+            optimizer.zero_grad()
+            temperature = torch.exp(log_temperature.clamp(min=log_min, max=log_max))
+            loss = criterion(logits / temperature, targets)
+            loss.backward()
+            return loss
+
+        optimizer.step(_closure)
+        return torch.exp(log_temperature.detach().clamp(min=log_min, max=log_max))
+
+
+class TCILLiteController(TemperatureScalingController):
+    """
+    T-CIL-Lite temperature baseline.
+
+    This is a lightweight approximation of T-CIL rather than a faithful reproduction: it fits one temperature per
+    observed experience class group and applies the group temperature to that group's logit columns.
+
+    Args:
+        min_temperature (float): Lower clamp for the fitted temperature.
+        max_temperature (float): Upper clamp for the fitted temperature.
+        device (str | None): Device for collecting frozen repair logits.
+        seed (int): Random seed for dataloader ordering.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_temperature: float = 0.05,
+        max_temperature: float = 10.0,
+        device: str | None = None,
+        seed: int = 1,
+    ) -> None:
+        super().__init__(
+            min_temperature=min_temperature,
+            max_temperature=max_temperature,
+            device=device,
+            seed=seed,
+        )
+        self._class_groups: list[list[int]] = []
+        self._group_temperatures: list[float] = []
+
+    @classmethod
+    def requires_per_experience_fitting(cls) -> bool:
+        return True
+
+    def fit_on_repair_data(
+        self,
+        *,
+        model: nn.Module,
+        repair_dataset: Dataset | None,
+        new_classes: list[int],
+        num_epochs: int,
+        batch_size: int,
+    ) -> None:
+        cur_group = sorted({int(class_id) for class_id in new_classes})
+        if cur_group and cur_group not in self._class_groups:
+            self._class_groups.append(cur_group)
+
+        logits, targets = self._collect_logits_and_targets(
+            model=model,
+            repair_dataset=repair_dataset,
+            batch_size=batch_size,
+        )
+        if logits is None or targets is None:
+            return
+        if not self._class_groups:
+            return
+
+        max_iter = num_epochs * math.ceil(len(repair_dataset) / batch_size)
+
+        self._group_temperatures = self._fit_group_temperatures(
+            logits=logits,
+            targets=targets,
+            max_iter=max_iter,
+        )
+
+    def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
+        del model, inputs
+        if not torch.is_tensor(outputs) or outputs.ndim != 2:
+            return outputs
+        if not self._class_groups or not self._group_temperatures:
+            return outputs
+
+        corrected = outputs.clone()
+        for class_group, temperature in zip(self._class_groups, self._group_temperatures, strict=False):
+            valid_classes = [class_id for class_id in class_group if 0 <= int(class_id) < int(outputs.shape[1])]
+            if not valid_classes:
+                continue
+            temp_tensor = torch.tensor(
+                float(temperature),
+                device=outputs.device,
+                dtype=outputs.dtype,
+            ).clamp(min=self.min_temperature, max=self.max_temperature)
+            corrected[:, valid_classes] = corrected[:, valid_classes] / temp_tensor
+        return corrected
+
+    def _fit_group_temperatures(self, *, logits: torch.Tensor, targets: torch.Tensor, max_iter: int) -> list[float]:
+        log_min = float(np.log(self.min_temperature))
+        log_max = float(np.log(self.max_temperature))
+        log_temperatures = torch.zeros(len(self._class_groups), dtype=torch.float32, requires_grad=True)
+        optimizer = torch.optim.LBFGS(
+            [log_temperatures],
+            lr=0.1,
+            max_iter=max_iter,
+            line_search_fn='strong_wolfe',
+        )
+        criterion = CrossEntropyLoss()
+
+        class_to_group: dict[int, int] = {}
+        for group_idx, class_group in enumerate(self._class_groups):
+            for class_id in class_group:
+                class_to_group[int(class_id)] = int(group_idx)
+
+        column_group_idxs = torch.full((int(logits.shape[1]),), -1, dtype=torch.long)
+        for class_id, group_idx in class_to_group.items():
+            if 0 <= class_id < int(column_group_idxs.numel()):
+                column_group_idxs[class_id] = int(group_idx)
+
+        def _closure() -> torch.Tensor:
+            optimizer.zero_grad()
+            temperatures = torch.exp(log_temperatures.clamp(min=log_min, max=log_max))
+            scaled_logits = logits.clone()
+            for group_idx in range(len(self._class_groups)):
+                mask = column_group_idxs.eq(group_idx)
+                if bool(mask.any()):
+                    scaled_logits[:, mask] = scaled_logits[:, mask] / temperatures[group_idx]
+            loss = criterion(scaled_logits, targets)
+            loss.backward()
+            return loss
+
+        optimizer.step(_closure)
+        fitted = torch.exp(log_temperatures.detach().clamp(min=log_min, max=log_max))
+        return [float(value) for value in fitted.tolist()]
 
 
 class BiCController(RepairController):

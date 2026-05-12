@@ -28,6 +28,7 @@ from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval
 
 __all__ = [
+    'as_batch_tensors',
     'BaseUnitGainController',
     'bounded_positive_gain',
     'build_repair_dataloader',
@@ -40,9 +41,11 @@ __all__ = [
     'mean_l2_distance_to_one',
     'apply_repair_correction',
     'maybe_correct_outputs',
+    'model_logits',
     'prepare_repair_fit_context',
     'resolve_backbone_or_raise',
     'resolve_block_units',
+    'resolve_classifier_weight',
     'resolve_stage_units',
     'run_model_with_hooks',
 ]
@@ -83,6 +86,63 @@ def build_repair_dataloader(
         shuffle=bool(shuffle),
         generator=generator,
     )
+
+
+def as_batch_tensors(batch: object, *, device: torch.device) -> tuple[torch.Tensor, torch.Tensor] | None:
+    """
+    Extract input and target tensors from a repair dataloader batch.
+
+    Args:
+        batch (object): Dataloader batch, expected to start with `(x, y, ...)`.
+        device (torch.device): Device for returned inputs.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor] | None: Inputs and targets, or None if the batch is invalid.
+    """
+    try:
+        x, y, *_ = batch
+    except (TypeError, ValueError):
+        return None
+    if not torch.is_tensor(x):
+        x = torch.as_tensor(x)
+    if not torch.is_tensor(y):
+        y = torch.as_tensor(y)
+    return x.to(device), y.reshape(-1).to(device=device, dtype=torch.long)
+
+
+def model_logits(*, model: nn.Module, inputs: torch.Tensor) -> torch.Tensor | Any:
+    """
+    Run the model and return its logits-like output.
+
+    Args:
+        model (nn.Module): Model to evaluate.
+        inputs (torch.Tensor): Input batch.
+
+    Returns:
+        torch.Tensor | Any: Model output.
+    """
+    with preserve_model_mode_after_eval(model):
+        with torch.inference_mode():
+            return model(inputs)
+
+
+def resolve_classifier_weight(model: nn.Module) -> torch.Tensor | None:
+    """
+    Resolve the linear classifier weight tensor from supported classifier layouts.
+
+    Args:
+        model (nn.Module): Model exposing a classifier head.
+
+    Returns:
+        torch.Tensor | None: Classifier weight shaped `(num_classes, feat_dim)`, if found.
+    """
+    classifier = getattr(model, 'classifier', None)
+    if isinstance(classifier, nn.Linear):
+        return classifier.weight.detach()
+    fc = getattr(classifier, 'fc', None)
+    if isinstance(fc, nn.Linear):
+        return fc.weight.detach()
+    return None
 
 
 @contextmanager

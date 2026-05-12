@@ -20,7 +20,7 @@ Methods marked **Not yet implemented** are included to document the repair-famil
     - [BiC (bias correction)](#bic-bias-correction)
     - [IL2M (class incremental learning with dual memory)](#il2m-class-incremental-learning-with-dual-memory)
     - [Temperature scaling](#temperature-scaling)
-    - [T-CIL / DATS-style calibration](#t-cil--dats-style-calibration)
+    - [T-CIL-Lite calibration](#t-cil-lite-calibration)
   - [Statistical drift repair](#statistical-drift-repair)
     - [MACIL](#macil)
     - [DPCR-style repair](#dpcr-style-repair)
@@ -73,19 +73,36 @@ See [*"Knowledge Accumulation and Feature Forgetting"*](https://arxiv.org/abs/23
 
 #### Prototype classifier
 
-**Status:** Not yet implemented in this repository.
+This is a generic nearest-class-prototype baseline rather than a faithful reproduction of one method. It is related to
+nearest-mean classifiers used in class-incremental learning, for example iCaRL's [nearest-mean-of-exemplars
+classifier](https://arxiv.org/abs/1611.07725), but `prototype_blend` keeps the trained head and blends prototype
+similarity scores into its logits.
 
-##### Method role
+##### Our implementation
 
 - Feature-space classifier built from class prototypes estimated on repair data.
 - Useful for testing whether forgetting is primarily a prototype-drift problem rather than a classifier-head problem.
-- In REGAIN-style comparisons, it is tracked under readout repair as a lightweight feature-to-label baseline.
+- `prototype_blend` (`PrototypeBlendController`) blends frozen classifier logits with frozen-feature prototype
+  similarity scores estimated from repair examples.
+- In REGAIN-style comparisons, it is tracked under statistical/readout repair as a lightweight feature-to-label
+  baseline.
 
 ### Bias / calibration repair
 
 Bias and calibration repair methods test whether forgetting can be recovered by correcting logits, temperatures,
 class-level bias, or confidence structure with fixed post-hoc parameters rather than changing the backbone
 representation.
+
+#### Weight Aligning
+
+[**Paper**](https://arxiv.org/abs/1911.07053)
+
+##### Our implementation
+
+- `weight_aligning` (`WeightAligningController`) estimates the classifier-head weight-norm ratio between old and newly
+  introduced classes and applies that near-zero-cost scalar to the logits of the new classes.
+- In REGAIN-style comparisons, it is the cheapest classifier-head correction baseline between no-op and learned
+  logit-space repair.
 
 #### Logit bias
 
@@ -120,24 +137,25 @@ representation.
 
 #### Temperature scaling
 
-**Status:** Not yet implemented in this repository.
-
-##### Method role
+##### Our implementation
 
 - One-parameter calibration baseline that rescales logits uniformly.
 - Useful as a minimal-capacity reference point below per-class bias methods such as `logit_bias` or BiC.
+- `temperature_scaling` (`TemperatureScalingController`) optimizes one scalar temperature on frozen repair-set logits
+  using NLL.
 - In REGAIN-style comparisons, it tests how much forgetting is recoverable through global confidence calibration alone.
 
-#### T-CIL / DATS-style calibration
+#### T-CIL-Lite calibration
 
-**Status:** Not yet implemented in this repository.
+[**Paper**](https://arxiv.org/abs/2503.22163)
 
-##### Method role
+##### Our implementation
 
 - Placeholder for class-incremental calibration methods that adjust temperatures or confidence structure more flexibly
   than a single global scalar.
 - Useful for documenting the space between global temperature scaling and richer class-specific correction methods.
-- No T-CIL- or DATS-style calibration controller is currently implemented in this repository.
+- `tcil_lite` (`TCILLiteController`) is a lightweight approximation of T-CIL: it fits one temperature per observed
+  experience class group. It should not be considered a faithful T-CIL reproduction.
 
 ### Statistical drift repair
 
