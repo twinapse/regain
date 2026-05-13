@@ -658,6 +658,9 @@ def run_experiment(
             local_backbone_kwargs = extract_backbone_kwargs_from_run(
                 run=source_backbone_run
             )
+            local_backbone_training = extract_backbone_training_config_from_run(
+                run=source_backbone_run
+            )
             source_experiment_id_for_logging = str(source_backbone_run.info.experiment_id)
             source_experiment_entity = mlflow_client.get_experiment(
                 experiment_id=source_experiment_id_for_logging
@@ -680,10 +683,9 @@ def run_experiment(
         elif backbone_config is None:
             local_backbone_name = extract_backbone_name_from_run(run=local_backbone_run)
             local_backbone_kwargs = extract_backbone_kwargs_from_run(run=local_backbone_run)
-            if non_repair_run_names:
-                local_backbone_training = extract_backbone_training_config_from_run(
-                    run=local_backbone_run
-                )
+            local_backbone_training = extract_backbone_training_config_from_run(
+                run=local_backbone_run
+            )
             (
                 backbone_checkpoint_paths,
                 backbone_eval_results,
@@ -748,6 +750,8 @@ def run_experiment(
                     if local_backbone_kwargs is not None
                     else {}
                 )
+                if local_backbone_training is not None:
+                    experiment_config.backbone.training = local_backbone_training
 
         resolved_backbone_name = (
             experiment_config.backbone.name
