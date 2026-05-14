@@ -1,3 +1,7 @@
+"""
+Experiment configuration parsing for runner configs and resolved manifests.
+"""
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field
@@ -22,7 +26,6 @@ from regain.constants import PARAM_TORCH_DETERMINISTIC_ALGORITHMS
 from regain.constants import RUN_NAME_BACKBONE
 from regain.registry import get_backbone_path
 from regain.registry import get_controller_path
-from regain.registry import get_scenario_builder_path
 
 __all__ = [
     'ControllerConfig',
@@ -37,6 +40,7 @@ __all__ = [
     'RunConfig',
     'ExperimentConfig',
     'load_experiment_config',
+    'load_run_manifest',
 ]
 
 _CONFIG_PARAM_OVERRIDE_MAP: list[tuple[str, list[str]]] = [
@@ -157,12 +161,16 @@ class BackboneConfig:
         training: Optional backbone training configuration for learning from scratch.
         source_experiment: Optional source experiment id/name from which to load the reserved `backbone` run
                            checkpoints and baseline artifacts.
+        source_experiment_id: Optional resolved MLflow experiment ID of the source experiment; written by the
+                              runner into manifests when cross-experiment backbone reuse occurs. Always `None`
+                              in user-authored configs.
     """
 
     name: str | None = None
     kwargs: dict[str, object] = field(default_factory=dict)
     training: TrainingConfig | None = None
     source_experiment: str | None = None
+    source_experiment_id: str | None = None
 
 
 @dataclass
@@ -353,8 +361,7 @@ def _collect_logged_leaf_paths(
                     config_tree=value,
                     prefix=raw_path,
                     within_kwargs=next_within_kwargs,
-                )
-            )
+                ))
             continue
         if value is None:
             continue
@@ -375,10 +382,8 @@ def _guard_config_tree(*, child_config: object, context: str) -> None:
         for parent_key, child_keys in _CONFIG_PARAM_OVERRIDE_MAP:
             overrides = [key for key in child_keys if key in child_config]
             if overrides:
-                raise ValueError(
-                    f'{context} keys should not override `{parent_key}`; '
-                    f'use experiment config instead (remove: {sorted(overrides)}).'
-                )
+                raise ValueError(f'{context} keys should not override `{parent_key}`; '
+                                 f'use experiment config instead (remove: {sorted(overrides)}).')
         for key, value in child_config.items():
             if isinstance(value, Mapping) or isinstance(value, (list, tuple)):
                 _guard_config_tree(child_config=value, context=f'{context}.{key}')
@@ -473,21 +478,17 @@ def _guard_kwargs_conflicts_in_scope(
         conflicting_paths = sorted(path for path in raw_paths if path not in param_paths_in_kwargs)
         param_path_in_kwargs = param_paths_in_kwargs[0]
         conflicting_path = conflicting_paths[0] if conflicting_paths else param_paths_in_kwargs[1]
-        raise ValueError(
-            f'Invalid param `{scope_context}{NS_SEP}{param_path_in_kwargs}`: '
-            f'resolves to `{normalized_path}` and conflicts with '
-            f'`{scope_context}{NS_SEP}{conflicting_path}` after removing `.kwargs`.'
-        )
+        raise ValueError(f'Invalid param `{scope_context}{NS_SEP}{param_path_in_kwargs}`: '
+                         f'resolves to `{normalized_path}` and conflicts with '
+                         f'`{scope_context}{NS_SEP}{conflicting_path}` after removing `.kwargs`.')
 
     for raw_path, normalized_path, is_within_kwargs in leaf_paths:
         if not is_within_kwargs:
             continue
         if normalized_path in _RESERVED_LOG_PARAMS:
-            raise ValueError(
-                f'Invalid param `{scope_context}{NS_SEP}{raw_path}`: '
-                f'resolves to reserved logged parameter `{normalized_path}`. '
-                f'`{normalized_path}` cannot be set under `kwargs`.'
-            )
+            raise ValueError(f'Invalid param `{scope_context}{NS_SEP}{raw_path}`: '
+                             f'resolves to reserved logged parameter `{normalized_path}`. '
+                             f'`{normalized_path}` cannot be set under `kwargs`.')
 
 
 def _guard_kwargs_conflicts(*, payload: Mapping[str, object]) -> None:
@@ -500,11 +501,7 @@ def _guard_kwargs_conflicts(*, payload: Mapping[str, object]) -> None:
     Returns:
         None
     """
-    experiment_scope = {
-        key: value
-        for key, value in payload.items()
-        if key != 'runs'
-    }
+    experiment_scope = {key: value for key, value in payload.items() if key != 'runs'}
     _guard_kwargs_conflicts_in_scope(
         scope_config=experiment_scope,
         scope_context='config',
@@ -605,32 +602,22 @@ def _validate_optimizer_config(
         return
 
     if optimizer_name != 'adamw':
-        raise ValueError(
-            f'{config_name} optimizer `name` must be one of `sgd` or `adamw`.'
-        )
+        raise ValueError(f'{config_name} optimizer `name` must be one of `sgd` or `adamw`.')
 
     betas = kwargs.get('betas')
     if betas is not None:
         if isinstance(betas, str):
-            raise ValueError(
-                f'{config_name} optimizer `betas` must be a YAML sequence like '
-                '`[0.9, 0.999]`, not a string literal.'
-            )
+            raise ValueError(f'{config_name} optimizer `betas` must be a YAML sequence like '
+                             '`[0.9, 0.999]`, not a string literal.')
         if not isinstance(betas, Sequence):
-            raise ValueError(
-                f'{config_name} optimizer `betas` must be a sequence of two floats.'
-            )
+            raise ValueError(f'{config_name} optimizer `betas` must be a sequence of two floats.')
         beta_values = list(betas)
         if len(beta_values) != 2:
-            raise ValueError(
-                f'{config_name} optimizer `betas` must contain exactly two values.'
-            )
+            raise ValueError(f'{config_name} optimizer `betas` must contain exactly two values.')
         for beta in beta_values:
             beta_value = float(beta)
-            if not (0.0 <= beta_value < 1.0):
-                raise ValueError(
-                    f'{config_name} optimizer `betas` values must be in [0, 1).'
-                )
+            if 0.0 > beta_value or beta_value >= 1.0:
+                raise ValueError(f'{config_name} optimizer `betas` values must be in [0, 1).')
 
     for key in ('lr', 'eps', 'weight_decay'):
         if key not in kwargs:
@@ -638,14 +625,10 @@ def _validate_optimizer_config(
         value = float(kwargs[key])
         if key == 'weight_decay':
             if value < 0.0:
-                raise ValueError(
-                    f'{config_name} optimizer `{key}` must be >= 0.'
-                )
+                raise ValueError(f'{config_name} optimizer `{key}` must be >= 0.')
         else:
             if value <= 0.0:
-                raise ValueError(
-                    f'{config_name} optimizer `{key}` must be > 0.'
-                )
+                raise ValueError(f'{config_name} optimizer `{key}` must be > 0.')
 
 
 def _validate_lr_scheduler_config(
@@ -673,22 +656,16 @@ def _validate_lr_scheduler_config(
         return
 
     if scheduler_name != 'warmup_cosine':
-        raise ValueError(
-            '`lr_scheduler.name` must be one of `multi_step` or `warmup_cosine`.'
-        )
+        raise ValueError('`lr_scheduler.name` must be one of `multi_step` or `warmup_cosine`.')
 
     if 'warmup_epochs' not in kwargs:
-        raise ValueError(
-            '`lr_scheduler.kwargs.warmup_epochs` is required for `warmup_cosine`.'
-        )
+        raise ValueError('`lr_scheduler.kwargs.warmup_epochs` is required for `warmup_cosine`.')
     warmup_epochs = int(kwargs['warmup_epochs'])
     if warmup_epochs < 0:
         raise ValueError('`lr_scheduler.kwargs.warmup_epochs` must be >= 0.')
     if warmup_epochs >= int(num_epochs):
-        raise ValueError(
-            '`lr_scheduler.kwargs.warmup_epochs` must be < '
-            '`backbone.training.num_epochs`.'
-        )
+        raise ValueError('`lr_scheduler.kwargs.warmup_epochs` must be < '
+                         '`backbone.training.num_epochs`.')
 
     if 'min_lr' in kwargs and float(kwargs['min_lr']) < 0.0:
         raise ValueError('`lr_scheduler.kwargs.min_lr` must be >= 0.')
@@ -706,26 +683,20 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
         if not isinstance(source_experiment_raw, (str, int)):
             raise ValueError('Backbone config `source_experiment` must be a string or integer experiment id.')
         source_experiment = str(source_experiment_raw)
-        invalid_keys = sorted(
-            key
-            for key in backbone_config
-            if key != 'source_experiment'
-        )
+        invalid_keys = sorted(key for key in backbone_config if key != 'source_experiment')
         if invalid_keys:
             raise ValueError(
                 'When `backbone.source_experiment` is provided, it must be the only field under `backbone`. '
-                f'Remove: {invalid_keys}'
-            )
+                f'Remove: {invalid_keys}')
         experiment_name_raw = config.get('experiment_name')
         if experiment_name_raw is not None:
             if source_experiment.strip() == str(experiment_name_raw).strip():
-                raise ValueError(
-                    'Backbone config `source_experiment` must be different from `experiment_name`.'
-                )
+                raise ValueError('Backbone config `source_experiment` must be different from `experiment_name`.')
         return BackboneConfig(
             name=None,
             training=None,
             source_experiment=source_experiment,
+            source_experiment_id=None,
         )
 
     backbone_name = backbone_config.get('name', 'resnet18')
@@ -740,13 +711,33 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
         raise ValueError('Backbone config `kwargs` must be a mapping when provided.')
     backbone_kwargs = dict(backbone_kwargs_payload)
 
-    training_config = backbone_config.get('training')
-    if training_config is None:
+    if backbone_config.get('training') is None:
         raise ValueError('Backbone config must define exactly one of `training` or `source_experiment`.')
+    training = _parse_backbone_training_config(
+        training_config=backbone_config.get('training'),
+        config_name='Backbone config',
+    )
+
+    return BackboneConfig(
+        name=backbone_name,
+        kwargs=backbone_kwargs,
+        training=training,
+        source_experiment=None,
+        source_experiment_id=None,
+    )
+
+
+def _parse_backbone_training_config(
+    *,
+    training_config: object,
+    config_name: str,
+) -> TrainingConfig:
+    if training_config is None:
+        raise ValueError(f'{config_name} must define `training`.')
     if not isinstance(training_config, dict):
-        raise ValueError('Backbone config `training` must be a mapping when provided.')
+        raise ValueError(f'{config_name} `training` must be a mapping when provided.')
     if 'num_epochs' not in training_config:
-        raise ValueError('Backbone config `training` must include `num_epochs`.')
+        raise ValueError(f'{config_name} `training` must include `num_epochs`.')
     lr_scheduler = _parse_lr_scheduler_config(training_config)
     if lr_scheduler is not None:
         _validate_lr_scheduler_config(
@@ -759,7 +750,7 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
         grad_clip_max_norm = float(grad_clip_raw)
         if grad_clip_max_norm <= 0.0:
             raise ValueError('`backbone.training.grad_clip_max_norm` must be > 0.')
-    training = TrainingConfig(
+    return TrainingConfig(
         num_epochs=training_config['num_epochs'],
         strategy=_parse_strategy_config(training_config, config_name='Backbone training config'),
         optimizer=_parse_optimizer_config(training_config, config_name='Backbone training config'),
@@ -768,11 +759,50 @@ def _parse_backbone_config(config: dict[str, Any]) -> BackboneConfig | None:
         grad_clip_max_norm=grad_clip_max_norm,
     )
 
+
+def _parse_backbone_manifest(manifest_payload: dict[str, Any]) -> BackboneConfig:
+    backbone_config = manifest_payload.get(PARAM_BACKBONE)
+    if backbone_config is None:
+        raise ValueError('Run manifest must include a `backbone` mapping.')
+    if not isinstance(backbone_config, dict):
+        raise ValueError('Run manifest `backbone` must be a mapping.')
+
+    backbone_name = backbone_config.get('name')
+    if not isinstance(backbone_name, str):
+        raise ValueError('Run manifest `backbone.name` must be a string.')
+    backbone_name = backbone_name.strip()
+    if backbone_name == '':
+        raise ValueError('Run manifest `backbone.name` must be non-empty.')
+
+    backbone_kwargs_payload = backbone_config.get('kwargs')
+    if backbone_kwargs_payload is None:
+        backbone_kwargs_payload = {}
+    if not isinstance(backbone_kwargs_payload, Mapping):
+        raise ValueError('Run manifest `backbone.kwargs` must be a mapping when provided.')
+
+    source_experiment_raw = backbone_config.get('source_experiment')
+    source_experiment: str | None = None
+    if source_experiment_raw not in (None, ''):
+        if not isinstance(source_experiment_raw, (str, int)):
+            raise ValueError('Run manifest `backbone.source_experiment` must be a string when provided.')
+        source_experiment = str(source_experiment_raw)
+
+    source_experiment_id_raw = backbone_config.get('source_experiment_id')
+    source_experiment_id: str | None = None
+    if source_experiment_id_raw not in (None, ''):
+        if not isinstance(source_experiment_id_raw, (str, int)):
+            raise ValueError('Run manifest `backbone.source_experiment_id` must be a string when provided.')
+        source_experiment_id = str(source_experiment_id_raw)
+
     return BackboneConfig(
         name=backbone_name,
-        kwargs=backbone_kwargs,
-        training=training,
-        source_experiment=None,
+        kwargs=dict(backbone_kwargs_payload),
+        training=_parse_backbone_training_config(
+            training_config=backbone_config.get('training'),
+            config_name='Run manifest `backbone`',
+        ),
+        source_experiment=source_experiment,
+        source_experiment_id=source_experiment_id,
     )
 
 
@@ -788,24 +818,22 @@ def _parse_repair_config(config: dict[str, Any]) -> RepairConfig:
     """
     repair_config = config.get('repair')
     if repair_config is None:
-        raise ValueError(
-            'Experiment config must include a `repair` section to define data splitting. '
-            'Use `split_fraction: 0.0` if using the full dataset (no repair split).'
-        )
+        raise ValueError('Experiment config must include a `repair` section to define data splitting. '
+                         'Use `split_fraction: 0.0` if using the full dataset (no repair split).')
     if not isinstance(repair_config, dict):
         raise ValueError('`repair` must be a mapping when provided.')
 
     if 'split_fraction' not in repair_config:
         raise ValueError('`repair.split_fraction` is required.')
     split_fraction = float(repair_config.get('split_fraction'))
-    if not (0.0 <= split_fraction < 1.0):
+    if split_fraction < 0.0 or split_fraction >= 1.0:
         raise ValueError('`repair.split_fraction` must be in the range [0, 1).')
 
     budget_raw = repair_config.get('budget_fraction')
     budget_fraction: float | None = None
     if budget_raw is not None:
         budget_fraction = float(budget_raw)
-        if not (0.0 < budget_fraction <= 1.0):
+        if budget_fraction <= 0.0 or budget_fraction > 1.0:
             raise ValueError('`repair.budget_fraction` must be in the range (0, 1].')
 
     fit_schedule_raw = repair_config.get('fit_schedule')
@@ -862,10 +890,8 @@ def _validate_repair_config_for_runs(
         missing_fields.append('repair.batch_size')
     if missing_fields:
         missing_str = ', '.join(missing_fields)
-        raise ValueError(
-            'Repair-controller runs require explicit repair settings. '
-            f'Missing: {missing_str}.'
-        )
+        raise ValueError('Repair-controller runs require explicit repair settings. '
+                         f'Missing: {missing_str}.')
 
 
 def _parse_transforms_config(payload: dict[str, Any]) -> TransformsConfig:
@@ -895,10 +921,8 @@ def _parse_evaluation_config(payload: dict[str, Any]) -> EvaluationConfig:
 
     avalanche_schedule = evaluation_config.get('avalanche_schedule', 'per_experience')
     if avalanche_schedule not in {'per_experience', 'final_only'}:
-        raise ValueError(
-            '`evaluation.avalanche_schedule` must be one of: '
-            '`per_experience`, `final_only`.'
-        )
+        raise ValueError('`evaluation.avalanche_schedule` must be one of: '
+                         '`per_experience`, `final_only`.')
 
     return EvaluationConfig(
         batch_size=evaluation_config.get('batch_size', 128),
@@ -943,50 +967,42 @@ def _parse_runs(payload: dict[str, Any]) -> list[RunConfig] | None:
         if not isinstance(run_name, str):
             raise ValueError('Run config `name` must be a string.')
         if run_name == RUN_NAME_BACKBONE:
-            raise ValueError(
-                f"Run name '{RUN_NAME_BACKBONE}' is reserved and cannot be used in runs."
-            )
-        runs.append(
-            RunConfig(
-                name=run_name,
-                controller=_parse_controller_config(run_cfg),
-            )
-        )
+            raise ValueError(f"Run name '{RUN_NAME_BACKBONE}' is reserved and cannot be used in runs.")
+        runs.append(RunConfig(
+            name=run_name,
+            controller=_parse_controller_config(run_cfg),
+        ))
     return runs
 
 
-def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
+def _load_yaml_payload(config_path: str | Path) -> dict[str, Any]:
     """
-    Load an experiment configuration from a YAML file.
+    Load a YAML payload from disk.
 
     Args:
         config_path (str | Path): Path to the YAML file.
 
     Returns:
-        ExperimentConfig: Parsed experiment configuration instance.
+        dict[str, Any]: Parsed mapping payload, or an empty dict for empty files.
     """
-    # Load the YAML payload
     path = Path(config_path)
     with path.open('r', encoding='utf-8') as f:
-        payload = yaml.safe_load(f) or {}
+        return yaml.safe_load(f) or {}
 
-    # Check for reserved param conflicts in `kwargs` across the entire payload before parsing
-    _guard_kwargs_conflicts(payload=payload)
 
-    # Check for invalid experiment config overrides in nested run configs before parsing
-    _guard_experiment_config_overrides(payload)
-
-    # Get dataset path
+def _parse_experiment_config_body(
+    *,
+    payload: dict[str, Any],
+    parsed_backbone: BackboneConfig | None,
+    parsed_runs: list[RunConfig] | None,
+) -> ExperimentConfig:
     dataset_path_value = payload.get('dataset_path')
     dataset_path = Path(dataset_path_value) if dataset_path_value is not None else None
 
-    parsed_backbone = _parse_backbone_config(payload)
     parsed_repair = _parse_repair_config(payload)
     parsed_transforms = _parse_transforms_config(payload)
-    parsed_runs = _parse_runs(payload)
     _validate_repair_config_for_runs(repair=parsed_repair, runs=parsed_runs)
 
-    # Build the experiment config instance
     return ExperimentConfig(
         experiment_name=payload['experiment_name'],
         scenario=payload[PARAM_SCENARIO],
@@ -1002,4 +1018,51 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
         deterministic=payload.get('deterministic', False),
         dataset_path=dataset_path,
         debug=payload.get('debug', False),
+    )
+
+
+def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
+    """
+    Load an experiment configuration from a YAML file.
+
+    Args:
+        config_path (str | Path): Path to the YAML file.
+
+    Returns:
+        ExperimentConfig: Parsed experiment configuration instance.
+    """
+    payload = _load_yaml_payload(config_path)
+
+    # Check for reserved param conflicts in `kwargs` across the entire payload before parsing
+    _guard_kwargs_conflicts(payload=payload)
+
+    # Check for invalid experiment config overrides in nested run configs before parsing
+    _guard_experiment_config_overrides(payload)
+
+    return _parse_experiment_config_body(
+        payload=payload,
+        parsed_backbone=_parse_backbone_config(payload),
+        parsed_runs=_parse_runs(payload),
+    )
+
+
+def load_run_manifest(manifest_path: str | Path) -> ExperimentConfig:
+    """
+    Load a runner-emitted manifest from a YAML file.
+
+    Args:
+        manifest_path (str | Path): Path to the manifest YAML file.
+
+    Returns:
+        ExperimentConfig: Parsed manifest payload with resolved backbone metadata.
+    """
+    payload = _load_yaml_payload(manifest_path)
+
+    _guard_kwargs_conflicts(payload=payload)
+    _guard_experiment_config_overrides(payload)
+
+    return _parse_experiment_config_body(
+        payload=payload,
+        parsed_backbone=_parse_backbone_manifest(payload),
+        parsed_runs=None,
     )

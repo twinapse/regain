@@ -9,6 +9,7 @@ import yaml
 
 from regain.experiments.config import EvaluationConfig
 from regain.experiments.config import load_experiment_config
+from regain.experiments.config import load_run_manifest
 from regain.experiments.config import TransformsConfig
 
 ################
@@ -40,8 +41,13 @@ def _build_base_payload() -> dict[str, object]:
     }
 
 
-def _write_payload(*, tmp_path: Path, payload: dict[str, object]) -> Path:
-    config_path = tmp_path / 'config.yaml'
+def _write_payload(
+    *,
+    tmp_path: Path,
+    payload: dict[str, object],
+    file_name: str = 'config.yaml',
+) -> Path:
+    config_path = tmp_path / file_name
     with config_path.open('w', encoding='utf-8') as f:
         yaml.safe_dump(payload, f, sort_keys=False)
     return config_path
@@ -53,6 +59,7 @@ def _write_payload(*, tmp_path: Path, payload: dict[str, object]) -> Path:
 
 
 class TestEvaluationConfigParsing:
+
     def test_parses_nested_evaluation_config(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
         payload['evaluation'] = {
@@ -116,6 +123,7 @@ class TestEvaluationConfigParsing:
 
 
 class TestTransformsConfigParsing:
+
     def test_parses_nested_transforms_config(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
         payload['evaluation'] = {}
@@ -192,7 +200,9 @@ class TestTransformsConfigParsing:
         with pytest.raises(ValueError, match='keys should not override `transforms`'):
             load_experiment_config(config_path)
 
+
 class TestRepairConfigParsing:
+
     def test_parses_repair_split_fraction_field(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
         payload['evaluation'] = {}
@@ -280,6 +290,7 @@ class TestRepairConfigParsing:
 
 
 class TestBackboneConfigParsing:
+
     def test_accepts_registered_vit_backbone_name(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
         payload['evaluation'] = {}
@@ -332,8 +343,8 @@ class TestBackboneConfigParsing:
         config_path = _write_payload(tmp_path=tmp_path, payload=payload)
 
         with pytest.raises(
-            ValueError,
-            match='must be the only field under `backbone`',
+                ValueError,
+                match='must be the only field under `backbone`',
         ):
             load_experiment_config(config_path)
 
@@ -419,4 +430,132 @@ class TestBackboneConfigParsing:
         config_path = _write_payload(tmp_path=tmp_path, payload=payload)
 
         with pytest.raises(ValueError, match='warmup_epochs'):
+            load_experiment_config(config_path)
+
+
+class TestLoadManifest:
+
+    def test_loads_resolved_local_reuse_manifest(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload.pop('runs')
+        payload['run'] = {
+            'name': 'repair_run',
+        }
+        payload['backbone']['kwargs'] = {
+            'pretrained_backbone': False,
+        }
+        manifest_path = _write_payload(
+            tmp_path=tmp_path,
+            payload=payload,
+            file_name='manifest.yaml',
+        )
+
+        manifest = load_run_manifest(manifest_path)
+
+        assert manifest.backbone is not None
+        assert manifest.backbone.name == 'resnet18'
+        assert manifest.backbone.kwargs == {'pretrained_backbone': False}
+        assert manifest.backbone.training is not None
+        assert manifest.backbone.training.strategy.name == 'naive'
+        assert manifest.backbone.source_experiment is None
+        assert manifest.backbone.source_experiment_id is None
+
+    def test_loads_resolved_cross_experiment_manifest(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload.pop('runs')
+        payload['run'] = {
+            'name': 'repair_run',
+        }
+        payload['backbone'] = {
+            'name': 'resnet18',
+            'kwargs': {
+                'pretrained_backbone': False,
+            },
+            'training': {
+                'num_epochs': 1,
+                'strategy': {
+                    'name': 'naive',
+                    'kwargs': {},
+                },
+            },
+            'source_experiment': 'other_exp',
+            'source_experiment_id': '42',
+        }
+        manifest_path = _write_payload(
+            tmp_path=tmp_path,
+            payload=payload,
+            file_name='manifest.yaml',
+        )
+
+        manifest = load_run_manifest(manifest_path)
+
+        assert manifest.backbone is not None
+        assert manifest.backbone.name == 'resnet18'
+        assert manifest.backbone.kwargs == {'pretrained_backbone': False}
+        assert manifest.backbone.training is not None
+        assert manifest.backbone.training.strategy.name == 'naive'
+        assert manifest.backbone.source_experiment == 'other_exp'
+        assert manifest.backbone.source_experiment_id == '42'
+
+    def test_rejects_manifest_missing_training(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload.pop('runs')
+        payload['backbone'] = {
+            'name': 'resnet18',
+        }
+        manifest_path = _write_payload(
+            tmp_path=tmp_path,
+            payload=payload,
+            file_name='manifest.yaml',
+        )
+
+        with pytest.raises(ValueError, match='training'):
+            load_run_manifest(manifest_path)
+
+    def test_rejects_manifest_missing_name(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload.pop('runs')
+        payload['backbone'] = {
+            'training': {
+                'num_epochs': 1,
+                'strategy': {
+                    'name': 'naive',
+                    'kwargs': {},
+                },
+            },
+        }
+        manifest_path = _write_payload(
+            tmp_path=tmp_path,
+            payload=payload,
+            file_name='manifest.yaml',
+        )
+
+        with pytest.raises(ValueError, match='name'):
+            load_run_manifest(manifest_path)
+
+    def test_load_experiment_config_still_rejects_resolved_shape(self, tmp_path: Path) -> None:
+        payload = _build_base_payload()
+        payload['evaluation'] = {}
+        payload['backbone'] = {
+            'name': 'resnet18',
+            'kwargs': {
+                'pretrained_backbone': False,
+            },
+            'training': {
+                'num_epochs': 1,
+                'strategy': {
+                    'name': 'naive',
+                    'kwargs': {},
+                },
+            },
+            'source_experiment': 'other_exp',
+            'source_experiment_id': '42',
+        }
+        config_path = _write_payload(tmp_path=tmp_path, payload=payload)
+
+        with pytest.raises(ValueError, match='must be the only field'):
             load_experiment_config(config_path)

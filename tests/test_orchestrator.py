@@ -10,8 +10,8 @@ import torch
 from torch import nn
 import yaml
 
-from regain.experiments.config import ControllerConfig
 from regain.experiments.config import BackboneConfig
+from regain.experiments.config import ControllerConfig
 from regain.experiments.config import EvaluationConfig
 from regain.experiments.config import ExperimentConfig
 from regain.experiments.config import OptimizerConfig
@@ -25,6 +25,7 @@ import regain.experiments.orchestrator as orchestrator_module
 
 
 class _FakeStrategy:
+
     def __init__(self) -> None:
         self.train_kwargs: dict[str, object] | None = None
 
@@ -34,6 +35,7 @@ class _FakeStrategy:
 
 
 class _FakeRegainEvaluationPlugin:
+
     def __init__(self, **kwargs) -> None:
         del kwargs
         self.last_posthoc_scalar_results = {
@@ -42,6 +44,7 @@ class _FakeRegainEvaluationPlugin:
 
 
 class _FakeRegainEvaluator:
+
     def __init__(self, **kwargs) -> None:
         del kwargs
 
@@ -51,6 +54,7 @@ class _FakeRepairController:
 
 
 class _FakeRepairControllerPlugin:
+
     def __init__(self, controller: _FakeRepairController) -> None:
         self.controller = controller
 
@@ -59,11 +63,13 @@ class _FakeRepairControllerPlugin:
 
 
 class _FakeSeenClassesObserver:
+
     def __init__(self) -> None:
         self.seen_classes: set[int] = set()
 
 
 class _FakePredictionRecorder:
+
     def __init__(self, *, artifact_root: Path, num_classes: int) -> None:
         del num_classes
         self.artifact_root = artifact_root
@@ -73,6 +79,7 @@ class _FakePredictionRecorder:
 
 
 class _FakeMlflowClient:
+
     def __init__(self, experiment_name: str | None = None) -> None:
         self._experiment_name = experiment_name
 
@@ -84,6 +91,7 @@ class _FakeMlflowClient:
 
 
 class _DummyContextManager:
+
     def __enter__(self):
         return None
 
@@ -93,6 +101,7 @@ class _DummyContextManager:
 
 
 class TestTrainInvocation:
+
     def test_train_call_omits_eval_streams(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -135,7 +144,9 @@ class TestTrainInvocation:
             'build_optimizer',
             lambda **kwargs: (
                 torch.optim.SGD(nn.Linear(1, 2).parameters(), lr=0.1),
-                {'lr': 0.1},
+                {
+                    'lr': 0.1
+                },
             ),
         )
         monkeypatch.setattr(orchestrator_module, 'make_strategy', lambda **kwargs: strategy)
@@ -221,7 +232,10 @@ def _make_backbone_run_params(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]
 
     log_run_params(
         experiment_config=experiment_config,
-        run_config_payload={'name': 'backbone', 'controller': None},
+        run_config_payload={
+            'name': 'backbone',
+            'controller': None
+        },
         controller_name=None,
         deterministic_algorithms_enabled=False,
         optimizer_kwargs={'lr': 0.01},
@@ -258,7 +272,7 @@ def _make_repair_experiment_config(*, backbone: BackboneConfig | None) -> Experi
 def _patch_execution_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    captured_configs: list[dict[str, object]],
+    captured_manifests: list[dict[str, object]],
 ) -> None:
     strategy = _FakeStrategy()
 
@@ -310,7 +324,9 @@ def _patch_execution_dependencies(
         'build_optimizer',
         lambda **kwargs: (
             torch.optim.SGD(kwargs['model'].parameters(), lr=0.1),
-            {'lr': 0.1},
+            {
+                'lr': 0.1
+            },
         ),
     )
     monkeypatch.setattr(orchestrator_module, 'make_strategy', lambda **kwargs: strategy)
@@ -322,26 +338,26 @@ def _patch_execution_dependencies(
 
     def _log_artifact(path: str) -> None:
         with Path(path).open('r', encoding='utf-8') as stream:
-            captured_configs.append(yaml.safe_load(stream))
+            captured_manifests.append(yaml.safe_load(stream))
 
     monkeypatch.setattr(orchestrator_module.mlflow, 'log_artifact', _log_artifact)
 
 
-class TestBackboneReuseConfigArtifact:
+class TestBackboneReuseManifestArtifact:
     """
-    Regression tests for reused-backbone config artifact logging.
+    Regression tests for reused-backbone manifest artifact logging.
     """
 
-    def test_local_backbone_reuse_logs_full_training_in_config_artifact(
+    def test_local_backbone_reuse_logs_full_training_in_manifest_artifact(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         backbone_run = _make_backbone_run(params=_make_backbone_run_params(monkeypatch))
-        captured_configs: list[dict[str, object]] = []
+        captured_manifests: list[dict[str, object]] = []
 
         _patch_execution_dependencies(
             monkeypatch,
-            captured_configs=captured_configs,
+            captured_manifests=captured_manifests,
         )
         monkeypatch.setattr(orchestrator_module, 'MlflowClient', lambda: _FakeMlflowClient())
         monkeypatch.setattr(
@@ -352,20 +368,21 @@ class TestBackboneReuseConfigArtifact:
         monkeypatch.setattr(
             orchestrator_module,
             'load_backbone_from_existing_run',
-            lambda **kwargs: ([], {'backbone_metric': 1.0}, {}),
+            lambda **kwargs: ([], {
+                'backbone_metric': 1.0
+            }, {}),
         )
 
-        orchestrator_module.run_experiment(
-            _make_repair_experiment_config(backbone=None),
-        )
+        orchestrator_module.run_experiment(_make_repair_experiment_config(backbone=None),)
 
-        assert len(captured_configs) == 1
-        backbone_config = captured_configs[0]['backbone']
+        assert len(captured_manifests) == 1
+        backbone_config = captured_manifests[0]['backbone']
         assert backbone_config['name'] == 'resnet18'
         assert backbone_config['training']['strategy']['name'] == 'naive'
         assert backbone_config['training']['num_epochs'] == 7
+        assert backbone_config['source_experiment_id'] is None
 
-    def test_source_experiment_backbone_reuse_logs_full_training_in_config_artifact(
+    def test_source_experiment_backbone_reuse_logs_full_training_in_manifest_artifact(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -373,11 +390,11 @@ class TestBackboneReuseConfigArtifact:
             params=_make_backbone_run_params(monkeypatch),
             experiment_id='source_exp_id',
         )
-        captured_configs: list[dict[str, object]] = []
+        captured_manifests: list[dict[str, object]] = []
 
         _patch_execution_dependencies(
             monkeypatch,
-            captured_configs=captured_configs,
+            captured_manifests=captured_manifests,
         )
         monkeypatch.setattr(
             orchestrator_module,
@@ -392,29 +409,26 @@ class TestBackboneReuseConfigArtifact:
         monkeypatch.setattr(
             orchestrator_module,
             'resolve_experiment_id',
-            lambda **kwargs: (
-                'current_exp_id'
-                if kwargs['experiment'] == 'unit_test_experiment'
-                else 'source_exp_id'
-            ),
+            lambda **kwargs: ('current_exp_id' if kwargs['experiment'] == 'unit_test_experiment' else 'source_exp_id'),
         )
         monkeypatch.setattr(
             orchestrator_module,
             'load_backbone_from_source_experiment',
-            lambda **kwargs: ([], {'backbone_metric': 1.0}, {}, backbone_run),
+            lambda **kwargs: ([], {
+                'backbone_metric': 1.0
+            }, {}, backbone_run),
         )
 
         orchestrator_module.run_experiment(
-            _make_repair_experiment_config(
-                backbone=BackboneConfig(
-                    source_experiment='other_exp',
-                    training=None,
-                ),
-            ),
-        )
+            _make_repair_experiment_config(backbone=BackboneConfig(
+                source_experiment='other_exp',
+                training=None,
+            ),),)
 
-        assert len(captured_configs) == 1
-        backbone_config = captured_configs[0]['backbone']
+        assert len(captured_manifests) == 1
+        backbone_config = captured_manifests[0]['backbone']
         assert backbone_config['name'] == 'resnet18'
         assert backbone_config['training']['strategy']['name'] == 'naive'
         assert backbone_config['training']['num_epochs'] == 7
+        assert backbone_config['source_experiment'] == 'other_exp'
+        assert backbone_config['source_experiment_id'] == 'source_exp_id'

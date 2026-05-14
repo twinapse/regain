@@ -116,7 +116,7 @@ __all__ = [
     'EXPERIENCE_KEY_PREFIX',
     'MLFLOW_ARTIFACT_ANALYSIS_FILE',
     'MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR',
-    'MLFLOW_ARTIFACT_CONFIG_FILE',
+    'MLFLOW_ARTIFACT_MANIFEST_FILE',
     'MLFLOW_ARTIFACT_ERROR_FILE',
     'MLFLOW_ARTIFACT_PREDICTIONS_DIR',
     'MLFLOW_ARTIFACT_SPLITS_FILE',
@@ -214,12 +214,8 @@ _RUN = NAMESPACE_RUN  # shorthand for building metric strings
 # Unified test-only accuracy metrics under `run.eval.acc.*`.
 RUN_ACC_REF = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}ref'
 RUN_ACC_FINAL = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final'
-RUN_ACC_FINAL_AVG_BASE = (
-    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
-)
-RUN_ACC_FINAL_AVG_CTRL = (
-    f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
-)
+RUN_ACC_FINAL_AVG_BASE = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}avg{NS_SEP}base'
+RUN_ACC_FINAL_AVG_CTRL = f'{NAMESPACE_EVAL}{NS_SEP}acc{NS_SEP}final{NS_SEP}avg{NS_SEP}ctrl'
 
 # Retained Avalanche eval metrics
 RUN_EVAL_FORGETTING = f'{NAMESPACE_EVAL}{NS_SEP}forgetting'
@@ -231,13 +227,11 @@ RUN_EVAL_TRANSFER_STREAM = f'{RUN_EVAL_TRANSFER}{NS_SEP}stream'
 RUN_TRAIN_LOSS = f'{NAMESPACE_TRAIN}{NS_SEP}loss'
 
 # Status
-RUN_STATUS_INCOMPLETE_ACC_EXP_BASE = (
-    f'{NAMESPACE_RUN}{NS_SEP}status{NS_SEP}incomplete_acc_exp_base'
-)
+RUN_STATUS_INCOMPLETE_ACC_EXP_BASE = f'{NAMESPACE_RUN}{NS_SEP}status{NS_SEP}incomplete_acc_exp_base'
 
 # Rho (correctable fraction)
-RUN_RHO = f'{_RUN}{NS_SEP}repair{NS_SEP}rho'                          # run.repair.rho (+ .exp###)
-RUN_RHO_AVG = f'{_RUN}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'           # run.repair.rho.avg
+RUN_RHO = f'{_RUN}{NS_SEP}repair{NS_SEP}rho'  # run.repair.rho (+ .exp###)
+RUN_RHO_AVG = f'{_RUN}{NS_SEP}repair{NS_SEP}rho{NS_SEP}avg'  # run.repair.rho.avg
 
 # Calibration
 RUN_CALIB_AECE = f'{_RUN}{NS_SEP}calibration{NS_SEP}aece'
@@ -326,7 +320,7 @@ _DEBUG_HEALTH_S3_DIV = 's3_div'
 
 MLFLOW_ARTIFACT_ANALYSIS_FILE = 'analysis_artifacts.json'
 MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR = 'checkpoints'
-MLFLOW_ARTIFACT_CONFIG_FILE = 'config.yaml'
+MLFLOW_ARTIFACT_MANIFEST_FILE = 'manifest.yaml'
 MLFLOW_ARTIFACT_ERROR_FILE = 'error.txt'
 MLFLOW_ARTIFACT_PREDICTIONS_DIR = 'predictions'
 MLFLOW_ARTIFACT_SPLITS_FILE = 'splits.tar.gz'
