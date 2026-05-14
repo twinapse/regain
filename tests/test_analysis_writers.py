@@ -110,6 +110,8 @@ def _run_row(
     calib_max_ece: float = 0.3,
     latency_ratio: float | None = 1.2,
     repair_seconds: float | None = 10.0,
+    replay_mem_size: int | None = None,
+    replay_batch_size_mem: int | None = None,
 ) -> dict[str, object]:
     return {
         COLUMN_RUN_ID: run_id,
@@ -128,6 +130,8 @@ def _run_row(
         COLUMN_NUM_CLASSES: num_classes,
         COLUMN_B: budget_fraction,
         COLUMN_CONTROLLER_MODEL_PARAM_COUNT: param_count,
+        'replay_mem_size': replay_mem_size,
+        'replay_batch_size_mem': replay_batch_size_mem,
         RUN_RHO_AVG: 0.3,
         RUN_ACC_FINAL_AVG_CTRL: 0.7,
         RUN_ACC_FINAL_AVG_BASE: 0.6,
@@ -337,11 +341,22 @@ class TestWriteRepairabilityFrontierOutputs:
         )
 
         assert paths['repair_outcomes'].exists()
-        assert paths['repair_frontier'].exists()
-        assert paths['repair_pareto'].exists()
-        assert paths['repair_impact'].exists()
-        assert paths['repair_selection'].exists()
+        assert paths['candidates'].exists()
+        assert paths['pareto'].exists()
+        assert paths['impact'].exists()
+        assert paths['selection'].exists()
         assert paths['manifest'].exists()
+        assert paths['candidates'].name == 'candidates.csv'
+        assert paths['pareto'].name == 'pareto.csv'
+        assert paths['impact'].name == 'impact.csv'
+        assert paths['selection'].name == 'selection.csv'
+        assert {path.name for path in (tmp_path / 'frontier').iterdir()} == {
+            'candidates.csv',
+            'pareto.csv',
+            'impact.csv',
+            'selection.csv',
+            'manifest.json',
+        }
         assert not (tmp_path / 'frontier' / 'frontier_points.csv').exists()
         assert not (tmp_path / 'frontier' / 'frontier_pareto.csv').exists()
 
@@ -475,7 +490,7 @@ class TestWriteRepairabilityFrontierOutputs:
             for row in no_op_rows
         )
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         no_op_frontier_row = next(row for row in frontier_rows if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME)
         assert int(no_op_frontier_row['num_runs']) == 1
 
@@ -576,7 +591,7 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        selection_rows = _read_rows(paths['repair_selection'])
+        selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 1
         selection_row = selection_rows[0]
 
@@ -623,7 +638,7 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         no_op_row = next(row for row in frontier_rows if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME)
 
         assert float(no_op_row[_COLUMN_ACTION_REPAIR_BUDGET_FRACTION]) == pytest.approx(0.0)
@@ -843,7 +858,7 @@ class TestWriteRepairabilityFrontierOutputs:
         } == {5, 10}
         assert len({str(row[COLUMN_RUN_ID]) for row in no_op_rows}) == 2
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         no_op_frontier_rows = [
             row for row in frontier_rows
             if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME
@@ -854,7 +869,7 @@ class TestWriteRepairabilityFrontierOutputs:
             for row in no_op_frontier_rows
         } == {5, 10}
 
-        selection_rows = _read_rows(paths['repair_selection'])
+        selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 2
         assert {
             int(float(row[COLUMN_REPAIR_BUDGET_TOTAL]))
@@ -962,7 +977,7 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         frontier_by_controller = {
             row[COLUMN_CONTROLLER_NAME]: row
             for row in frontier_rows
@@ -972,7 +987,7 @@ class TestWriteRepairabilityFrontierOutputs:
         assert frontier_by_controller['Repair A']['is_pareto'] == 'True'
         assert frontier_by_controller['repair_a']['is_pareto'] == 'False'
 
-        selection_rows = _read_rows(paths['repair_selection'])
+        selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 1
         selection_row = selection_rows[0]
         assert 'utility_primary__repair_a' in selection_row
@@ -1001,7 +1016,7 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         frontier_by_controller = {
             row[COLUMN_CONTROLLER_NAME]: row
             for row in frontier_rows
@@ -1037,13 +1052,13 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         repair_rows = [row for row in frontier_rows if row[COLUMN_CONTROLLER_NAME] == 'repair_a']
         assert len(repair_rows) == 2
         assert _COLUMN_BACKBONE_NAME in frontier_rows[0]
         assert {row[_COLUMN_BACKBONE_NAME] for row in repair_rows} == {'vit_small', 'resnet18'}
 
-        selection_rows = _read_rows(paths['repair_selection'])
+        selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 2
         assert _COLUMN_BACKBONE_NAME in selection_rows[0]
         assert {row[_COLUMN_BACKBONE_NAME] for row in selection_rows} == {'vit_small', 'resnet18'}
@@ -1075,11 +1090,11 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         repair_rows = [row for row in frontier_rows if row[COLUMN_CONTROLLER_NAME] == 'repair_a']
         assert len(repair_rows) == 2
 
-        selection_rows = _read_rows(paths['repair_selection'])
+        selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 2
         selection_keys = {
             (
@@ -1122,7 +1137,7 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        frontier_rows = _read_rows(paths['repair_frontier'])
+        frontier_rows = _read_rows(paths['candidates'])
         repair_rows = [row for row in frontier_rows if row[COLUMN_CONTROLLER_NAME] in {'repair_a', 'repair_b'}]
         assert len(repair_rows) == 2
         assert all(row['is_pareto'] == 'True' for row in repair_rows)
@@ -1162,7 +1177,7 @@ class TestWriteRepairabilityFrontierOutputs:
             out_dir=tmp_path,
         )
 
-        selection_rows = _read_rows(paths['repair_selection'])
+        selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 2
         rows_by_budget = {
             int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])): row
@@ -1257,7 +1272,7 @@ class TestWriteRepairabilityFrontierOutputs:
         manifest_path = frontier_dir / 'manifest.json'
         manifest_payload = {
             'schema': {
-                'name': 'regain.repair_frontier.manifest',
+                'name': 'regain.analysis.frontier.manifest',
                 'version': 1,
             },
             'plots': {
@@ -1300,6 +1315,65 @@ class TestWriteRepairabilityFrontierOutputs:
         with manifest_path.open('r', encoding='utf-8') as f:
             after_payload = json.load(f)
         assert after_payload == manifest_payload
+
+    def test_selection_outputs_include_replay_metadata_and_task_age_summaries(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runs_table = [
+            _run_row(
+                run_id='run_a',
+                controller_name='repair_a',
+                replay_mem_size=200,
+                replay_batch_size_mem=64,
+            )
+        ]
+        experiences_table = [
+            _experience_row(
+                run_id='run_a',
+                controller_name='repair_a',
+                exp_idx=0,
+                a_ref=0.90,
+                a_post=0.60,
+                a_ctrl=0.82,
+                task_age=2,
+            ),
+            _experience_row(
+                run_id='run_a',
+                controller_name='repair_a',
+                exp_idx=1,
+                a_ref=0.80,
+                a_post=0.70,
+                a_ctrl=0.78,
+                task_age=1,
+            ),
+            _experience_row(
+                run_id='run_a',
+                controller_name='repair_a',
+                exp_idx=2,
+                a_ref=0.75,
+                a_post=0.72,
+                a_ctrl=0.74,
+                task_age=0,
+            ),
+        ]
+
+        paths = write_repairability_frontier_outputs(
+            runs_table=runs_table,
+            experiences_table=experiences_table,
+            out_dir=tmp_path,
+        )
+
+        selection_rows = _read_rows(paths['selection'])
+        assert selection_rows
+        first = selection_rows[0]
+        assert int(float(first['replay_mem_size'])) == 200
+        assert int(float(first['replay_batch_size_mem'])) == 64
+        assert float(first['task_age_mean']) == pytest.approx(1.0)
+        assert float(first['task_age_min']) == pytest.approx(0.0)
+        assert float(first['task_age_max']) == pytest.approx(2.0)
+        assert float(first['oldest_task_forgetting']) == pytest.approx(0.30)
+        assert float(first['newest_task_forgetting']) == pytest.approx(0.03)
 
 
 class TestWritePredictiveCorrelations:

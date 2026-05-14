@@ -6,6 +6,7 @@ from regain.experiments.config import BackboneConfig
 from regain.experiments.config import ControllerConfig
 from regain.experiments.config import ExperimentConfig
 from regain.experiments.config import load_experiment_config
+from regain.experiments.config import load_run_manifest
 from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import RepairConfig
 from regain.experiments.config import RunConfig
@@ -23,5 +24,6 @@ __all__ = [
     'RunConfig',
     'ExperimentConfig',
     'load_experiment_config',
+    'load_run_manifest',
     'run_experiment',
 ]

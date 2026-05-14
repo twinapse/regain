@@ -212,13 +212,13 @@ def test_frontier_uses_collect_outputs_directly(
         tables_dir = Path(out_dir) / 'tables'
         frontier_dir.mkdir(parents=True, exist_ok=True)
         tables_dir.mkdir(parents=True, exist_ok=True)
-        repair_frontier_path = frontier_dir / 'repair_frontier.csv'
+        repair_frontier_path = frontier_dir / 'candidates.csv'
         repair_frontier_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_pareto_path = frontier_dir / 'repair_pareto.csv'
+        repair_pareto_path = frontier_dir / 'pareto.csv'
         repair_pareto_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_selection_path = frontier_dir / 'repair_selection.csv'
+        repair_selection_path = frontier_dir / 'selection.csv'
         repair_selection_path.write_text('best_controller_by_utility_primary\nrepair_a\n', encoding='utf-8')
-        repair_impact_path = frontier_dir / 'repair_impact.csv'
+        repair_impact_path = frontier_dir / 'impact.csv'
         repair_impact_path.write_text('scenario\ncifar100\n', encoding='utf-8')
         manifest_path = frontier_dir / 'manifest.json'
         manifest_path.write_text('{}', encoding='utf-8')
@@ -226,10 +226,10 @@ def test_frontier_uses_collect_outputs_directly(
         repair_outcomes_path.write_text('{}\n', encoding='utf-8')
         return {
             'repair_outcomes': repair_outcomes_path,
-            'repair_frontier': repair_frontier_path,
-            'repair_pareto': repair_pareto_path,
-            'repair_impact': repair_impact_path,
-            'repair_selection': repair_selection_path,
+            'candidates': repair_frontier_path,
+            'pareto': repair_pareto_path,
+            'impact': repair_impact_path,
+            'selection': repair_selection_path,
             'manifest': manifest_path,
         }
 
@@ -331,13 +331,13 @@ def test_run_analysis_save_plots_writes_manifest_plot_metadata(
         tables_dir = Path(out_dir) / 'tables'
         frontier_dir.mkdir(parents=True, exist_ok=True)
         tables_dir.mkdir(parents=True, exist_ok=True)
-        repair_frontier_path = frontier_dir / 'repair_frontier.csv'
+        repair_frontier_path = frontier_dir / 'candidates.csv'
         repair_frontier_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_pareto_path = frontier_dir / 'repair_pareto.csv'
+        repair_pareto_path = frontier_dir / 'pareto.csv'
         repair_pareto_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_selection_path = frontier_dir / 'repair_selection.csv'
+        repair_selection_path = frontier_dir / 'selection.csv'
         repair_selection_path.write_text('best_controller_by_utility_primary\nrepair_a\n', encoding='utf-8')
-        repair_impact_path = frontier_dir / 'repair_impact.csv'
+        repair_impact_path = frontier_dir / 'impact.csv'
         repair_impact_path.write_text('scenario\ncifar100\n', encoding='utf-8')
         manifest_path = frontier_dir / 'manifest.json'
         manifest_path.write_text(
@@ -348,10 +348,10 @@ def test_run_analysis_save_plots_writes_manifest_plot_metadata(
         repair_outcomes_path.write_text('{}\n', encoding='utf-8')
         return {
             'repair_outcomes': repair_outcomes_path,
-            'repair_frontier': repair_frontier_path,
-            'repair_pareto': repair_pareto_path,
-            'repair_impact': repair_impact_path,
-            'repair_selection': repair_selection_path,
+            'candidates': repair_frontier_path,
+            'pareto': repair_pareto_path,
+            'impact': repair_impact_path,
+            'selection': repair_selection_path,
             'manifest': manifest_path,
         }
 
@@ -438,22 +438,22 @@ def test_run_analysis_save_plots_requires_existing_frontier_manifest(
         tables_dir = Path(out_dir) / 'tables'
         frontier_dir.mkdir(parents=True, exist_ok=True)
         tables_dir.mkdir(parents=True, exist_ok=True)
-        repair_frontier_path = frontier_dir / 'repair_frontier.csv'
+        repair_frontier_path = frontier_dir / 'candidates.csv'
         repair_frontier_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_pareto_path = frontier_dir / 'repair_pareto.csv'
+        repair_pareto_path = frontier_dir / 'pareto.csv'
         repair_pareto_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_selection_path = frontier_dir / 'repair_selection.csv'
+        repair_selection_path = frontier_dir / 'selection.csv'
         repair_selection_path.write_text('best_controller_by_utility_primary\nrepair_a\n', encoding='utf-8')
-        repair_impact_path = frontier_dir / 'repair_impact.csv'
+        repair_impact_path = frontier_dir / 'impact.csv'
         repair_impact_path.write_text('scenario\ncifar100\n', encoding='utf-8')
         repair_outcomes_path = tables_dir / 'repair_outcomes.jsonl'
         repair_outcomes_path.write_text('{}\n', encoding='utf-8')
         return {
             'repair_outcomes': repair_outcomes_path,
-            'repair_frontier': repair_frontier_path,
-            'repair_pareto': repair_pareto_path,
-            'repair_impact': repair_impact_path,
-            'repair_selection': repair_selection_path,
+            'candidates': repair_frontier_path,
+            'pareto': repair_pareto_path,
+            'impact': repair_impact_path,
+            'selection': repair_selection_path,
             'manifest': frontier_dir / 'manifest.json',
         }
 
@@ -534,13 +534,13 @@ def test_run_analysis_save_plots_allow_partial_does_not_publish_unpublishable_pl
         tables_dir = Path(out_dir) / 'tables'
         frontier_dir.mkdir(parents=True, exist_ok=True)
         tables_dir.mkdir(parents=True, exist_ok=True)
-        repair_frontier_path = frontier_dir / 'repair_frontier.csv'
+        repair_frontier_path = frontier_dir / 'candidates.csv'
         repair_frontier_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_pareto_path = frontier_dir / 'repair_pareto.csv'
+        repair_pareto_path = frontier_dir / 'pareto.csv'
         repair_pareto_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_selection_path = frontier_dir / 'repair_selection.csv'
+        repair_selection_path = frontier_dir / 'selection.csv'
         repair_selection_path.write_text('best_controller_by_utility_primary\nrepair_a\n', encoding='utf-8')
-        repair_impact_path = frontier_dir / 'repair_impact.csv'
+        repair_impact_path = frontier_dir / 'impact.csv'
         repair_impact_path.write_text('scenario\ncifar100\n', encoding='utf-8')
         manifest_path = frontier_dir / 'manifest.json'
         manifest_path.write_text(
@@ -551,10 +551,10 @@ def test_run_analysis_save_plots_allow_partial_does_not_publish_unpublishable_pl
         repair_outcomes_path.write_text('{}\n', encoding='utf-8')
         return {
             'repair_outcomes': repair_outcomes_path,
-            'repair_frontier': repair_frontier_path,
-            'repair_pareto': repair_pareto_path,
-            'repair_impact': repair_impact_path,
-            'repair_selection': repair_selection_path,
+            'candidates': repair_frontier_path,
+            'pareto': repair_pareto_path,
+            'impact': repair_impact_path,
+            'selection': repair_selection_path,
             'manifest': manifest_path,
         }
 
@@ -637,13 +637,13 @@ def test_run_analysis_save_plots_records_skipped_manifest_metadata_when_all_plot
         tables_dir = Path(out_dir) / 'tables'
         frontier_dir.mkdir(parents=True, exist_ok=True)
         tables_dir.mkdir(parents=True, exist_ok=True)
-        repair_frontier_path = frontier_dir / 'repair_frontier.csv'
+        repair_frontier_path = frontier_dir / 'candidates.csv'
         repair_frontier_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_pareto_path = frontier_dir / 'repair_pareto.csv'
+        repair_pareto_path = frontier_dir / 'pareto.csv'
         repair_pareto_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
-        repair_selection_path = frontier_dir / 'repair_selection.csv'
+        repair_selection_path = frontier_dir / 'selection.csv'
         repair_selection_path.write_text('best_controller_by_utility_primary\nrepair_a\n', encoding='utf-8')
-        repair_impact_path = frontier_dir / 'repair_impact.csv'
+        repair_impact_path = frontier_dir / 'impact.csv'
         repair_impact_path.write_text('scenario\ncifar100\n', encoding='utf-8')
         manifest_path = frontier_dir / 'manifest.json'
         manifest_path.write_text(
@@ -654,10 +654,10 @@ def test_run_analysis_save_plots_records_skipped_manifest_metadata_when_all_plot
         repair_outcomes_path.write_text('{}\n', encoding='utf-8')
         return {
             'repair_outcomes': repair_outcomes_path,
-            'repair_frontier': repair_frontier_path,
-            'repair_pareto': repair_pareto_path,
-            'repair_impact': repair_impact_path,
-            'repair_selection': repair_selection_path,
+            'candidates': repair_frontier_path,
+            'pareto': repair_pareto_path,
+            'impact': repair_impact_path,
+            'selection': repair_selection_path,
             'manifest': manifest_path,
         }
 
@@ -715,3 +715,258 @@ def test_run_analysis_save_plots_records_skipped_manifest_metadata_when_all_plot
         'context': {},
     }]
     assert not (output_root / 'exp_1' / 'plots').exists()
+
+
+def _stub_frontier_and_router(
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Install fake collect, frontier, and router writers for CLI tests.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+
+    def _fake_collect_experiment_tables(
+        **kwargs,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        out_dir = Path(kwargs['out_dir'])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
+        (out_dir / 'experience_metrics.jsonl').write_text('{}\n', encoding='utf-8')
+        return ([{'run_id': 'run_1'}], [{'run_id': 'run_1', 'exp_idx': 0}], [])
+
+    def _fake_write_repairability_frontier_outputs(
+        *,
+        runs_table: list[dict[str, object]],
+        experiences_table: list[dict[str, object]],
+        out_dir: str | Path,
+    ) -> dict[str, Path]:
+        del runs_table, experiences_table
+        frontier_dir = Path(out_dir) / 'frontier'
+        tables_dir = Path(out_dir) / 'tables'
+        frontier_dir.mkdir(parents=True, exist_ok=True)
+        tables_dir.mkdir(parents=True, exist_ok=True)
+        repair_frontier_path = frontier_dir / 'candidates.csv'
+        repair_frontier_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
+        repair_pareto_path = frontier_dir / 'pareto.csv'
+        repair_pareto_path.write_text('controller_name\nrepair_a\n', encoding='utf-8')
+        repair_selection_path = frontier_dir / 'selection.csv'
+        repair_selection_path.write_text(
+            'best_controller_by_utility_primary\nrepair_a\n',
+            encoding='utf-8',
+        )
+        repair_impact_path = frontier_dir / 'impact.csv'
+        repair_impact_path.write_text('scenario\ncifar100\n', encoding='utf-8')
+        manifest_path = frontier_dir / 'manifest.json'
+        manifest_path.write_text('{}', encoding='utf-8')
+        repair_outcomes_path = tables_dir / 'repair_outcomes.jsonl'
+        repair_outcomes_path.write_text('{}\n', encoding='utf-8')
+        return {
+            'repair_outcomes': repair_outcomes_path,
+            'candidates': repair_frontier_path,
+            'pareto': repair_pareto_path,
+            'impact': repair_impact_path,
+            'selection': repair_selection_path,
+            'manifest': manifest_path,
+        }
+
+    def _fake_write_repair_router_outputs(
+        *,
+        analysis_dir: Path,
+        out_dir: Path,
+        random_state: int = 0,
+    ) -> dict[str, Path]:
+        del analysis_dir, random_state
+        router_dir = Path(out_dir)
+        router_dir.mkdir(parents=True, exist_ok=True)
+        features_path = router_dir / 'features.csv'
+        features_path.write_text('scenario\ncifar100\n', encoding='utf-8')
+        labels_path = router_dir / 'labels.csv'
+        labels_path.write_text('oracle_action_conservative\nno_op\n', encoding='utf-8')
+        predictions_path = router_dir / 'predictions.csv'
+        predictions_path.write_text('policy_name\nalways_no_op\n', encoding='utf-8')
+        summary_path = router_dir / 'policy_summary.csv'
+        summary_path.write_text('policy_name\nalways_no_op\n', encoding='utf-8')
+        decision_gate_path = router_dir / 'decision_gate.json'
+        decision_gate_path.write_text('{}', encoding='utf-8')
+        manifest_path = router_dir / 'manifest.json'
+        manifest_path.write_text('{}', encoding='utf-8')
+        return {
+            'features': features_path,
+            'labels': labels_path,
+            'predictions': predictions_path,
+            'policy_summary': summary_path,
+            'decision_gate': decision_gate_path,
+            'manifest': manifest_path,
+        }
+
+    monkeypatch.setattr(run_analysis_cli, 'collect_experiment_tables', _fake_collect_experiment_tables)
+    monkeypatch.setattr(
+        run_analysis_cli,
+        'write_repairability_frontier_outputs',
+        _fake_write_repairability_frontier_outputs,
+    )
+    monkeypatch.setattr(
+        run_analysis_cli,
+        'write_repair_router_outputs',
+        _fake_write_repair_router_outputs,
+    )
+    monkeypatch.setattr(run_analysis_cli, 'print_failure_summary', lambda **kwargs: None)
+
+
+def test_router_command_publishes_frontier_and_router_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured_outputs: list[run_analysis_cli.StagedOutput] = []
+
+    def _fake_finalize_staged_outputs(
+        *,
+        outputs: list[run_analysis_cli.StagedOutput],
+        failures: list[CliFailure],
+        allow_partial: bool,
+        overwrite: bool,
+    ) -> int:
+        captured_outputs.extend(list(outputs))
+        return len(outputs)
+
+    _stub_frontier_and_router(monkeypatch=monkeypatch)
+    monkeypatch.setattr(run_analysis_cli, 'finalize_staged_outputs', _fake_finalize_staged_outputs)
+    monkeypatch.setattr(
+        sys,
+        'argv',
+        [
+            'regain-analysis-tool',
+            '--experiments',
+            'exp_1',
+            '--output-dir',
+            str(tmp_path),
+            'router',
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_analysis_cli.main()
+
+    assert int(exc_info.value.code) == 0
+    destinations = {output.destination for output in captured_outputs}
+    assert destinations == {
+        tmp_path / 'exp_1' / 'tables',
+        tmp_path / 'exp_1' / 'frontier',
+        tmp_path / 'exp_1' / 'router',
+    }
+
+
+def test_all_command_includes_router_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured_outputs: list[run_analysis_cli.StagedOutput] = []
+
+    def _fake_finalize_staged_outputs(
+        *,
+        outputs: list[run_analysis_cli.StagedOutput],
+        failures: list[CliFailure],
+        allow_partial: bool,
+        overwrite: bool,
+    ) -> int:
+        captured_outputs.extend(list(outputs))
+        return len(outputs)
+
+    _stub_frontier_and_router(monkeypatch=monkeypatch)
+    monkeypatch.setattr(run_analysis_cli, 'finalize_staged_outputs', _fake_finalize_staged_outputs)
+    monkeypatch.setattr(
+        run_analysis_cli,
+        'write_recoverability_curves',
+        lambda **kwargs: (
+            Path(kwargs['out_dir']) / 'recoverability_curve.csv',
+            Path(kwargs['out_dir']) / 'task_age_rho.csv',
+            Path(kwargs['out_dir']) / 'calibration_vs_budget.csv',
+            Path(kwargs['out_dir']) / 'latency_vs_budget.csv',
+        ),
+    )
+    monkeypatch.setattr(
+        run_analysis_cli,
+        'write_predictive_correlations',
+        lambda **kwargs: Path(kwargs['out_dir']) / 'predictive_correlations.csv',
+    )
+    monkeypatch.setattr(
+        sys,
+        'argv',
+        [
+            'regain-analysis-tool',
+            '--experiments',
+            'exp_1',
+            '--output-dir',
+            str(tmp_path),
+            'all',
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_analysis_cli.main()
+
+    assert int(exc_info.value.code) == 0
+    destinations = {output.destination for output in captured_outputs}
+    assert tmp_path / 'exp_1' / 'router' in destinations
+    assert tmp_path / 'exp_1' / 'frontier' in destinations
+
+
+def test_router_command_skips_when_frontier_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured_failures: list[CliFailure] = []
+
+    def _fake_collect_experiment_tables(
+        **kwargs,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        out_dir = Path(kwargs['out_dir'])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
+        (out_dir / 'experience_metrics.jsonl').write_text('{}\n', encoding='utf-8')
+        return ([{'run_id': 'run_1'}], [{'run_id': 'run_1', 'exp_idx': 0}], [])
+
+    def _failing_frontier(**kwargs) -> dict[str, Path]:
+        raise ValueError('forced frontier failure')
+
+    def _fake_finalize_staged_outputs(
+        *,
+        outputs: list[run_analysis_cli.StagedOutput],
+        failures: list[CliFailure],
+        allow_partial: bool,
+        overwrite: bool,
+    ) -> int:
+        del outputs, allow_partial, overwrite
+        captured_failures.extend(list(failures))
+        return 0
+
+    monkeypatch.setattr(run_analysis_cli, 'collect_experiment_tables', _fake_collect_experiment_tables)
+    monkeypatch.setattr(run_analysis_cli, 'write_repairability_frontier_outputs', _failing_frontier)
+    monkeypatch.setattr(
+        run_analysis_cli,
+        'write_repair_router_outputs',
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError('router must not run')),
+    )
+    monkeypatch.setattr(run_analysis_cli, 'finalize_staged_outputs', _fake_finalize_staged_outputs)
+    monkeypatch.setattr(run_analysis_cli, 'print_failure_summary', lambda **kwargs: None)
+    monkeypatch.setattr(
+        sys,
+        'argv',
+        [
+            'regain-analysis-tool',
+            '--experiments',
+            'exp_1',
+            '--output-dir',
+            str(tmp_path),
+            'router',
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_analysis_cli.main()
+
+    assert int(exc_info.value.code) == 1
+    assert any('Skipped because frontier stage failed' in failure.message for failure in captured_failures)

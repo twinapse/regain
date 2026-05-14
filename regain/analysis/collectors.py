@@ -43,9 +43,11 @@ from regain.constants import COLUMN_TASK_AGE
 from regain.constants import DIAG_VECTOR_KEYS
 from regain.constants import EXPERIENCE_KEY_PREFIX
 from regain.constants import MLFLOW_ARTIFACT_ANALYSIS_FILE
-from regain.constants import MLFLOW_ARTIFACT_CONFIG_FILE
+from regain.constants import MLFLOW_ARTIFACT_MANIFEST_FILE
 from regain.constants import MLFLOW_ARTIFACT_SPLITS_FILE
 from regain.constants import NS_SEP
+from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
+from regain.constants import PARAM_BACKBONE_REPLAY_MEM_SIZE
 from regain.constants import PARAM_CONTROLLER_MODEL_PARAM_COUNT
 from regain.constants import PARAM_CONTROLLER_TYPE
 from regain.constants import PARAM_NUM_CLASSES
@@ -76,7 +78,7 @@ from regain.constants import RUN_REPAIR_STEPS
 from regain.constants import RUN_RHO
 from regain.constants import RUN_RHO_AVG
 from regain.constants import STREAM_REPAIR
-from regain.experiments.config import load_experiment_config
+from regain.experiments.config import load_run_manifest
 from regain.mlflow_utils import download_json_artifact
 from regain.mlflow_utils import resolve_experiment_id
 from regain.mlflow_utils import resolve_mlflow_run_name
@@ -116,55 +118,42 @@ _EXPERIENCE_METRIC_KEYS = (
     RUN_DIAG_LOGIT_AVG_DRIFT,
 )
 
-
 _NS_SEP_ESCAPED = re.escape(NS_SEP)
 
 # Regex patterns for parsing per-experience MLflow metric keys.
 # Example keys:
 # `run.eval.acc.ref.exp000.base`, `run.eval.acc.final.exp000.ctrl`,
 # `run.repair.rho.exp000`, etc.
-_ACC_EXP_BASE_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_REF)}'
-    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
-    rf'{_NS_SEP_ESCAPED}base$'
-)
-_ACC_FINAL_BASE_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_FINAL)}'
-    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
-    rf'{_NS_SEP_ESCAPED}base$'
-)
-_ACC_FINAL_CTRL_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_FINAL)}'
-    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
-    rf'{_NS_SEP_ESCAPED}ctrl$'
-)
-_RHO_RE = re.compile(
-    rf'^{re.escape(RUN_RHO)}'
-    rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$'
-)
+_ACC_EXP_BASE_RE = re.compile(rf'^{re.escape(RUN_ACC_REF)}'
+                              rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
+                              rf'{_NS_SEP_ESCAPED}base$')
+_ACC_FINAL_BASE_RE = re.compile(rf'^{re.escape(RUN_ACC_FINAL)}'
+                                rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
+                                rf'{_NS_SEP_ESCAPED}base$')
+_ACC_FINAL_CTRL_RE = re.compile(rf'^{re.escape(RUN_ACC_FINAL)}'
+                                rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)'
+                                rf'{_NS_SEP_ESCAPED}ctrl$')
+_RHO_RE = re.compile(rf'^{re.escape(RUN_RHO)}'
+                     rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$')
 _EXTRA_EXPERIENCE_REGEXES: dict[str, re.Pattern[str]] = {
-    metric_key: re.compile(
-        rf'^{re.escape(metric_key)}'
-        rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$'
-    )
-    for metric_key in (
-        RUN_CALIB_ECE,
-        RUN_CALIB_AECE,
-        RUN_CALIB_MCE,
-        RUN_CALIB_NLL,
-        RUN_CALIB_BRIER,
-        RUN_DIAG_OUT_OF_TASK_RATE,
-        RUN_DIAG_AVG_CONF,
-        RUN_DIAG_AVG_ENTROPY,
-        RUN_DIAG_LOGIT_AVG_DRIFT,
-    )
+    metric_key: re.compile(rf'^{re.escape(metric_key)}'
+                           rf'{_NS_SEP_ESCAPED}{EXPERIENCE_KEY_PREFIX}(?P<idx>\d+)$') for metric_key in (
+                               RUN_CALIB_ECE,
+                               RUN_CALIB_AECE,
+                               RUN_CALIB_MCE,
+                               RUN_CALIB_NLL,
+                               RUN_CALIB_BRIER,
+                               RUN_DIAG_OUT_OF_TASK_RATE,
+                               RUN_DIAG_AVG_CONF,
+                               RUN_DIAG_AVG_ENTROPY,
+                               RUN_DIAG_LOGIT_AVG_DRIFT,
+                           )
 }
 _REPAIR_SPLIT_FILE_RE = re.compile(
     rf'^{re.escape(STREAM_REPAIR)}'
     rf'/'
     rf'{re.escape(EXPERIENCE_KEY_PREFIX)}_\d+'
-    rf'\.txt$',
-)
+    rf'\.txt$',)
 
 
 def _extract_repair_set_total_from_splits_artifact(
@@ -195,9 +184,7 @@ def _extract_repair_set_total_from_splits_artifact(
         if local_path.is_dir():
             local_path = local_path / MLFLOW_ARTIFACT_SPLITS_FILE
         if not local_path.exists():
-            raise ValueError(
-                f'Run `{run_id}` is missing required split archive `{MLFLOW_ARTIFACT_SPLITS_FILE}`.'
-            )
+            raise ValueError(f'Run `{run_id}` is missing required split archive `{MLFLOW_ARTIFACT_SPLITS_FILE}`.')
 
         total = 0
         found_any = False
@@ -211,86 +198,76 @@ def _extract_repair_set_total_from_splits_artifact(
                 found_any = True
                 extracted_file = archive.extractfile(member)
                 if extracted_file is None:
-                    raise ValueError(
-                        f'Run `{run_id}` has unreadable repair split file `{member_name}`.'
-                    )
+                    raise ValueError(f'Run `{run_id}` has unreadable repair split file `{member_name}`.')
                 payload = extracted_file.read().decode('utf-8')
                 total += sum(1 for line in payload.splitlines() if line.strip() != '')
         if not found_any:
-            raise ValueError(
-                f'Run `{run_id}` split archive `{MLFLOW_ARTIFACT_SPLITS_FILE}` '
-                'contains no repair split files.'
-            )
+            raise ValueError(f'Run `{run_id}` split archive `{MLFLOW_ARTIFACT_SPLITS_FILE}` '
+                             'contains no repair split files.')
         return int(total)
 
 
-def _extract_analysis_identity_from_config_artifact(
+def _extract_analysis_identity_from_manifest_artifact(
     *,
     client: MlflowClient,
     run_id: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, Optional[int], Optional[int]]:
     """
-    Extract analysis identity from a run's logged experiment config.
+    Extract analysis identity from a run's logged manifest artifact.
 
     Args:
         client (MlflowClient): MLflow client.
         run_id (str): Run identifier.
 
     Returns:
-        tuple[str, str]: Backbone name and backbone training strategy name.
+        tuple[str, str, Optional[int], Optional[int]]: Backbone name, backbone training
+            strategy name, replay memory size, and replay memory batch size. The replay
+            fields are `None` when the configured strategy is not a replay-based one.
 
     Raises:
-        ValueError: If `config.yaml` is missing, cannot be parsed by the official
-            experiment config parser, or lacks resolved backbone/strategy identity.
+        ValueError: If the manifest is missing, cannot be parsed by the official
+            run-manifest parser, or lacks resolved backbone/strategy identity.
     """
     with tempfile.TemporaryDirectory() as temp_dir:
         downloaded_path = client.download_artifacts(
             run_id,
-            MLFLOW_ARTIFACT_CONFIG_FILE,
+            MLFLOW_ARTIFACT_MANIFEST_FILE,
             temp_dir,
         )
-        config_path = Path(downloaded_path)
-        if config_path.is_dir():
-            config_path = config_path / MLFLOW_ARTIFACT_CONFIG_FILE
-        if not config_path.exists():
-            raise ValueError(
-                f'Run `{run_id}` is missing required config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}`.'
-            )
+        manifest_path = Path(downloaded_path)
+        if manifest_path.is_dir():
+            manifest_path = manifest_path / MLFLOW_ARTIFACT_MANIFEST_FILE
+        if not manifest_path.exists():
+            raise ValueError(f'Run `{run_id}` is missing required manifest artifact `{MLFLOW_ARTIFACT_MANIFEST_FILE}`.')
 
         try:
-            experiment_config = load_experiment_config(config_path)
+            manifest = load_run_manifest(manifest_path)
         except Exception as exc:
-            raise ValueError(
-                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
-                f'could not be parsed by `load_experiment_config`: {exc}'
-            ) from exc
+            raise ValueError(f'Run `{run_id}` manifest artifact `{MLFLOW_ARTIFACT_MANIFEST_FILE}` '
+                             f'could not be parsed by `load_run_manifest`: {exc}') from exc
 
-        if experiment_config.backbone is None:
-            raise ValueError(
-                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
-                'is missing required `backbone`.'
-            )
-        backbone_name = str(experiment_config.backbone.name or '').strip()
+        if manifest.backbone is None:
+            raise ValueError(f'Run `{run_id}` manifest artifact `{MLFLOW_ARTIFACT_MANIFEST_FILE}` '
+                             'is missing required `backbone`.')
+        backbone_name = str(manifest.backbone.name or '').strip()
         if not backbone_name:
-            raise ValueError(
-                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
-                'is missing required `backbone.name`.'
-            )
+            raise ValueError(f'Run `{run_id}` manifest artifact `{MLFLOW_ARTIFACT_MANIFEST_FILE}` '
+                             'is missing required `backbone.name`.')
 
-        if experiment_config.backbone.training is None:
-            raise ValueError(
-                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
-                'is missing required `backbone.training`.'
-            )
-        strategy = getattr(experiment_config.backbone.training, 'strategy', None)
+        if manifest.backbone.training is None:
+            raise ValueError(f'Run `{run_id}` manifest artifact `{MLFLOW_ARTIFACT_MANIFEST_FILE}` '
+                             'is missing required `backbone.training`.')
+        strategy = getattr(manifest.backbone.training, 'strategy', None)
         strategy_name = str(getattr(strategy, 'name', '') or '').strip()
         if not strategy_name:
-            raise ValueError(
-                f'Run `{run_id}` config artifact `{MLFLOW_ARTIFACT_CONFIG_FILE}` '
-                'is missing required `backbone.training.strategy.name`.'
-            )
+            raise ValueError(f'Run `{run_id}` manifest artifact `{MLFLOW_ARTIFACT_MANIFEST_FILE}` '
+                             'is missing required `backbone.training.strategy.name`.')
 
-        return backbone_name, strategy_name
+        strategy_kwargs = getattr(strategy, 'kwargs', None) or {}
+        replay_mem_size = to_int(strategy_kwargs.get('mem_size'))
+        replay_batch_size_mem = to_int(strategy_kwargs.get('batch_size_mem'))
+
+        return backbone_name, strategy_name, replay_mem_size, replay_batch_size_mem
 
 
 def _extract_experience_metrics(metrics: dict[str, float]) -> dict[int, dict[str, Optional[float]]]:
@@ -376,11 +353,7 @@ def _merge_experience_artifacts(
     if not artifacts:
         return exp_metrics
 
-    artifact_keys = (
-        list(include_keys)
-        if include_keys is not None
-        else list(_EXPERIENCE_METRIC_KEYS)
-    )
+    artifact_keys = (list(include_keys) if include_keys is not None else list(_EXPERIENCE_METRIC_KEYS))
 
     def _ingest_vector(key: str) -> None:
         vec = artifacts.get(key)
@@ -413,10 +386,7 @@ def _has_logged_ctrl_metrics(
     Returns:
         bool: True if repair-controller metrics are available, else False.
     """
-    if (
-        RUN_ACC_FINAL_AVG_CTRL in metrics
-        or RUN_RHO_AVG in metrics
-    ):
+    if (RUN_ACC_FINAL_AVG_CTRL in metrics or RUN_RHO_AVG in metrics):
         return True
 
     for values in experience_metrics.values():
@@ -441,9 +411,7 @@ def _validate_required_repair_diagnostics(
         ValueError: If any diagnostic vector is missing for one or more experiences.
     """
     if not experience_metrics:
-        raise ValueError(
-            f'Repair run `{run_id}` is missing per-experience metrics required for diagnostic validation.'
-        )
+        raise ValueError(f'Repair run `{run_id}` is missing per-experience metrics required for diagnostic validation.')
 
     missing_by_key: dict[str, list[int]] = {}
     for exp_idx, values in sorted(experience_metrics.items()):
@@ -452,17 +420,11 @@ def _validate_required_repair_diagnostics(
                 missing_by_key.setdefault(diag_key, []).append(int(exp_idx))
 
     if missing_by_key:
-        details = ', '.join(
-            (
-                f'{metric_key}: '
-                f'{"/".join(f"exp{idx:03d}" for idx in missing_indices)}'
-            )
-            for metric_key, missing_indices in sorted(missing_by_key.items())
-        )
-        raise ValueError(
-            f'Repair run `{run_id}` is missing required baseline diagnostic metrics '
-            f'in `analysis_artifacts.json`: {details}.'
-        )
+        details = ', '.join((f'{metric_key}: '
+                             f'{"/".join(f"exp{idx:03d}" for idx in missing_indices)}')
+                            for metric_key, missing_indices in sorted(missing_by_key.items()))
+        raise ValueError(f'Repair run `{run_id}` is missing required baseline diagnostic metrics '
+                         f'in `analysis_artifacts.json`: {details}.')
 
 
 def _controller_expects_ctrl_metrics(*, params: dict[str, Any]) -> bool:
@@ -483,10 +445,8 @@ def _controller_expects_ctrl_metrics(*, params: dict[str, Any]) -> bool:
         return True
     if controller_type in {_CONTROLLER_TYPE_PREVENTION, _CONTROLLER_TYPE_NONE}:
         return False
-    raise ValueError(
-        'Run is missing a valid `controller.type` param. '
-        'Expected one of: `repair`, `prevention`, `none`.'
-    )
+    raise ValueError('Run is missing a valid `controller.type` param. '
+                     'Expected one of: `repair`, `prevention`, `none`.')
 
 
 def collect_experiment_tables(
@@ -595,10 +555,21 @@ def collect_experiment_tables(
             repair_seconds = to_float(metrics.get(RUN_REPAIR_SECONDS))
             repair_steps = to_float(metrics.get(RUN_REPAIR_STEPS))
 
-            backbone_name, strategy_name = _extract_analysis_identity_from_config_artifact(
+            (
+                backbone_name,
+                strategy_name,
+                manifest_replay_mem_size,
+                manifest_replay_batch_size_mem,
+            ) = _extract_analysis_identity_from_manifest_artifact(
                 client=client,
                 run_id=str(info.run_id),
             )
+            replay_mem_size = to_int(params.get(PARAM_BACKBONE_REPLAY_MEM_SIZE))
+            if replay_mem_size is None:
+                replay_mem_size = manifest_replay_mem_size
+            replay_batch_size_mem = to_int(params.get(PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM))
+            if replay_batch_size_mem is None:
+                replay_batch_size_mem = manifest_replay_batch_size_mem
 
             experience_metrics = _extract_experience_metrics(metrics)
             has_logged_ctrl_metrics = _has_logged_ctrl_metrics(
@@ -607,19 +578,15 @@ def collect_experiment_tables(
             )
             is_repair_controller = _controller_expects_ctrl_metrics(params=params)
             if is_repair_controller and b is None:
-                raise ValueError(
-                    'Repair run is missing required `repair.budget_fraction` param.'
-                )
+                raise ValueError('Repair run is missing required `repair.budget_fraction` param.')
             expects_ctrl_metrics = bool(has_logged_ctrl_metrics)
             if is_repair_controller:
                 expects_ctrl_metrics = True
 
             repair_set_total: int | None
             if repair_split_fraction is None:
-                raise ValueError(
-                    'Run is missing required `repair.split_fraction` param. '
-                    'This parameter is required for analysis table derivations.'
-                )
+                raise ValueError('Run is missing required `repair.split_fraction` param. '
+                                 'This parameter is required for analysis table derivations.')
             if repair_split_fraction < 0.0:
                 raise ValueError('`repair.split_fraction` must be non-negative.')
             if repair_split_fraction <= 0.0:
@@ -657,14 +624,11 @@ def collect_experiment_tables(
                 )
                 if not isinstance(artifacts, dict):
                     raise ValueError(
-                        f'Repair run `{info.run_id}` is missing required `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.'
-                    )
+                        f'Repair run `{info.run_id}` is missing required `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.')
                 calib_max_ece = to_float(artifacts.get(RUN_CALIB_MAX_ECE))
                 if calib_max_ece is None:
-                    raise ValueError(
-                        f'Repair run `{info.run_id}` is missing required '
-                        f'`{RUN_CALIB_MAX_ECE}` in `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.'
-                    )
+                    raise ValueError(f'Repair run `{info.run_id}` is missing required '
+                                     f'`{RUN_CALIB_MAX_ECE}` in `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.')
                 experience_metrics = _merge_experience_artifacts(
                     experience_metrics,
                     artifacts,
@@ -676,9 +640,7 @@ def collect_experiment_tables(
                 required_experience_keys.append(ARTIFACT_ACC_FINAL_CTRL)
 
             if not experience_metrics:
-                raise ValueError(
-                    f'Run `{info.run_id}` is missing required per-experience analysis metrics.'
-                )
+                raise ValueError(f'Run `{info.run_id}` is missing required per-experience analysis metrics.')
 
             missing_experience_metrics: list[str] = []
             for exp_idx, row in sorted(experience_metrics.items()):
@@ -687,9 +649,7 @@ def collect_experiment_tables(
                         missing_experience_metrics.append(f'exp{exp_idx:03d}:{key}')
             if missing_experience_metrics:
                 details = ', '.join(missing_experience_metrics)
-                raise ValueError(
-                    f'Run `{info.run_id}` is missing required per-experience metrics: {details}.'
-                )
+                raise ValueError(f'Run `{info.run_id}` is missing required per-experience metrics: {details}.')
 
             if is_repair_controller:
                 _validate_required_repair_diagnostics(
@@ -698,9 +658,7 @@ def collect_experiment_tables(
                 )
 
             if calib_max_ece is None:
-                raise ValueError(
-                    f'Run `{info.run_id}` is missing required `{RUN_CALIB_MAX_ECE}` metric.'
-                )
+                raise ValueError(f'Run `{info.run_id}` is missing required `{RUN_CALIB_MAX_ECE}` metric.')
 
             # Compute missing summary fields from per-experience metrics if needed.
             if rho_avg is None and expects_ctrl_metrics:
@@ -727,6 +685,8 @@ def collect_experiment_tables(
                 COLUMN_NUM_CLASSES: num_classes,
                 COLUMN_B: b,
                 COLUMN_CONTROLLER_MODEL_PARAM_COUNT: ctrl_param_count,
+                'replay_mem_size': replay_mem_size,
+                'replay_batch_size_mem': replay_batch_size_mem,
                 RUN_RHO_AVG: rho_avg,
                 RUN_ACC_FINAL_AVG_CTRL: a_ctrl_avg,
                 RUN_ACC_FINAL_AVG_BASE: a_base_avg,
@@ -786,7 +746,11 @@ def collect_experiment_tables(
                 'run_name': run_name,
                 'error': str(exc),
             })
-            logger.warning(f'Skipping run `{info.run_id}` due to analysis collection error: {exc}')
+            logger.warning(
+                'Skipping run `%s` due to analysis collection error: %s',
+                info.run_id,
+                exc,
+            )
             continue
 
     # Optional writeout (JSONL for robustness; analysis tool scripts write CSV).
@@ -802,6 +766,6 @@ def collect_experiment_tables(
             '\n'.join(json.dumps(r, default=str) for r in experiences_table) + ('\n' if experiences_table else ''),
             encoding='utf-8',
         )
-        logger.warning(f'Wrote tables to {outp}')
+        logger.warning('Wrote tables to %s', outp)
 
     return runs_table, experiences_table, run_failures

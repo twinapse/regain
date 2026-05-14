@@ -165,17 +165,24 @@ def export_analysis_to_json(
     """
     curves_dir = experiment_dir / 'curves'
     frontier_dir = experiment_dir / 'frontier'
+    router_dir = experiment_dir / 'router'
     recoverability_path = curves_dir / 'recoverability_curve.csv'
     task_age_path = curves_dir / 'task_age_rho.csv'
     calibration_budget_path = curves_dir / 'calibration_vs_budget.csv'
     latency_budget_path = curves_dir / 'latency_vs_budget.csv'
     repair_outcomes_path = experiment_dir / 'tables' / 'repair_outcomes.jsonl'
-    repair_frontier_path = frontier_dir / 'repair_frontier.csv'
-    repair_pareto_path = frontier_dir / 'repair_pareto.csv'
-    repair_impact_path = frontier_dir / 'repair_impact.csv'
-    repair_selection_path = frontier_dir / 'repair_selection.csv'
+    candidates_path = frontier_dir / 'candidates.csv'
+    pareto_path = frontier_dir / 'pareto.csv'
+    impact_path = frontier_dir / 'impact.csv'
+    selection_path = frontier_dir / 'selection.csv'
     manifest_path = frontier_dir / 'manifest.json'
     predictive_corr_path = experiment_dir / 'predictive' / 'predictive_correlations.csv'
+    router_features_path = router_dir / 'features.csv'
+    router_labels_path = router_dir / 'labels.csv'
+    router_predictions_path = router_dir / 'predictions.csv'
+    router_summary_path = router_dir / 'policy_summary.csv'
+    router_decision_gate_path = router_dir / 'decision_gate.json'
+    router_manifest_path = router_dir / 'manifest.json'
 
     missing_sections: list[str] = []
     resolved_tracking_uri = resolve_tracking_uri(tracking_uri=tracking_uri)
@@ -203,7 +210,7 @@ def export_analysis_to_json(
     export_payload: dict[str, Any] = {
         'schema': {
             'name': 'regain.analysis.export',
-            'version': 3,
+            'version': 4,
         },
         'generated_at_utc': datetime.now(timezone.utc).isoformat(),
         'mlflow': {
@@ -241,21 +248,21 @@ def export_analysis_to_json(
             ),
         },
         'frontier': {
-            'repair_frontier': _read_section(
-                repair_frontier_path,
-                'frontier.repair_frontier',
+            'candidates': _read_section(
+                candidates_path,
+                'frontier.candidates',
             ),
-            'repair_pareto': _read_section(
-                repair_pareto_path,
-                'frontier.repair_pareto',
+            'pareto': _read_section(
+                pareto_path,
+                'frontier.pareto',
             ),
-            'repair_impact': _read_section(
-                repair_impact_path,
-                'frontier.repair_impact',
+            'impact': _read_section(
+                impact_path,
+                'frontier.impact',
             ),
-            'repair_selection': _read_section(
-                repair_selection_path,
-                'frontier.repair_selection',
+            'selection': _read_section(
+                selection_path,
+                'frontier.selection',
             ),
             'manifest': _read_json_section(
                 manifest_path,
@@ -267,6 +274,14 @@ def export_analysis_to_json(
                 predictive_corr_path,
                 'predictive.correlations',
             ),
+        },
+        'router': {
+            'features': _read_section(router_features_path, 'router.features'),
+            'labels': _read_section(router_labels_path, 'router.labels'),
+            'predictions': _read_section(router_predictions_path, 'router.predictions'),
+            'policy_summary': _read_section(router_summary_path, 'router.policy_summary'),
+            'decision_gate': _read_json_section(router_decision_gate_path, 'router.decision_gate'),
+            'manifest': _read_json_section(router_manifest_path, 'router.manifest'),
         },
         'notes': {
             'plots_embedded': False,

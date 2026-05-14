@@ -138,22 +138,22 @@ def test_export_analysis_includes_no_op_rows(
         ]),
         encoding='utf-8',
     )
-    (frontier_dir / 'repair_frontier.csv').write_text(
+    (frontier_dir / 'candidates.csv').write_text(
         (
             'controller_name,controller_id,is_no_op_action,action_repair_budget_fraction,utility_primary\n'
             'no-op,no_op,True,0.0,0.0\n'
         ),
         encoding='utf-8',
     )
-    (frontier_dir / 'repair_pareto.csv').write_text(
+    (frontier_dir / 'pareto.csv').write_text(
         'controller_name,controller_id\nno-op,no_op\n',
         encoding='utf-8',
     )
-    (frontier_dir / 'repair_impact.csv').write_text(
+    (frontier_dir / 'impact.csv').write_text(
         'controller_name,controller_id\nno-op,no_op\n',
         encoding='utf-8',
     )
-    (frontier_dir / 'repair_selection.csv').write_text(
+    (frontier_dir / 'selection.csv').write_text(
         'best_controller_by_utility_primary,utility_primary__no_op\nno_op,0.0\n',
         encoding='utf-8',
     )
@@ -180,9 +180,86 @@ def test_export_analysis_includes_no_op_rows(
     )
 
     payload = json.loads(export_path.read_text(encoding='utf-8'))
-    assert payload['schema']['version'] == 3
+    assert payload['schema']['version'] == 4
     assert payload['mlflow']['git_commit'] == 'd' * 40
     assert payload['tables']['repair_outcomes'][0]['controller_name'] == 'no-op'
     assert payload['tables']['repair_outcomes'][0]['is_no_op_action'] is True
-    assert payload['frontier']['repair_frontier'][0]['controller_id'] == 'no_op'
-    assert payload['frontier']['repair_selection'][0]['best_controller_by_utility_primary'] == 'no_op'
+    assert payload['frontier']['candidates'][0]['controller_id'] == 'no_op'
+    assert payload['frontier']['selection'][0]['best_controller_by_utility_primary'] == 'no_op'
+
+
+def test_export_analysis_includes_router_section(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    experiment_dir = tmp_path / 'analysis' / 'exp_1'
+    tables_dir = experiment_dir / 'tables'
+    frontier_dir = experiment_dir / 'frontier'
+    router_dir = experiment_dir / 'router'
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    frontier_dir.mkdir(parents=True, exist_ok=True)
+    router_dir.mkdir(parents=True, exist_ok=True)
+
+    (tables_dir / 'repair_outcomes.jsonl').write_text('{}\n', encoding='utf-8')
+    (frontier_dir / 'candidates.csv').write_text('controller_name\nno-op\n', encoding='utf-8')
+    (frontier_dir / 'pareto.csv').write_text('controller_name\nno-op\n', encoding='utf-8')
+    (frontier_dir / 'impact.csv').write_text('controller_name\nno-op\n', encoding='utf-8')
+    (frontier_dir / 'selection.csv').write_text(
+        'best_controller_by_utility_primary\nno_op\n',
+        encoding='utf-8',
+    )
+    (frontier_dir / 'manifest.json').write_text('{}', encoding='utf-8')
+    (router_dir / 'features.csv').write_text(
+        'scenario,backbone_name\ncifar100,vit_small\n',
+        encoding='utf-8',
+    )
+    (router_dir / 'labels.csv').write_text(
+        'oracle_action_conservative\nno_op\n',
+        encoding='utf-8',
+    )
+    (router_dir / 'predictions.csv').write_text(
+        'policy_name,selected_action_id\nalways_no_op,no_op\n',
+        encoding='utf-8',
+    )
+    (router_dir / 'policy_summary.csv').write_text(
+        'policy_name,validation_level\nalways_no_op,held_seed\n',
+        encoding='utf-8',
+    )
+    (router_dir / 'decision_gate.json').write_text(
+        '{"levels": {"held_seed": {"success": false}}}',
+        encoding='utf-8',
+    )
+    (router_dir / 'manifest.json').write_text(
+        '{"schema": {"name": "regain.analysis.router", "version": 1}}',
+        encoding='utf-8',
+    )
+
+    export_path = tmp_path / 'exports' / 'analysis.json'
+    monkeypatch.setattr(
+        'regain.analysis.exports.resolve_git_commit',
+        lambda: 'e' * 40,
+    )
+    export_analysis_to_json(
+        experiment='exp_1',
+        experiment_dir=experiment_dir,
+        export_path=export_path,
+        tracking_uri=None,
+        artifact_location=None,
+        runs_table=[{'run_id': 'run_1'}],
+        experiences_table=[{'run_id': 'run_1', 'exp_idx': 0}],
+        include_controllers=None,
+        exclude_controllers=None,
+        max_runs=None,
+        default_num_classes=None,
+        require_finished=False,
+    )
+
+    payload = json.loads(export_path.read_text(encoding='utf-8'))
+    assert payload['schema']['version'] == 4
+    router_payload = payload['router']
+    assert router_payload['features'][0]['scenario'] == 'cifar100'
+    assert router_payload['labels'][0]['oracle_action_conservative'] == 'no_op'
+    assert router_payload['predictions'][0]['policy_name'] == 'always_no_op'
+    assert router_payload['policy_summary'][0]['policy_name'] == 'always_no_op'
+    assert router_payload['decision_gate']['levels']['held_seed']['success'] is False
+    assert router_payload['manifest']['schema']['version'] == 1

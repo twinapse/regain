@@ -28,7 +28,7 @@ from regain.avalanche_utils.plugins import RegainEvaluationPlugin
 from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.avalanche_utils.plugins import SeenClassesObserver
 from regain.constants import MLFLOW_ARTIFACT_BACKBONE_CHECKPOINTS_DIR
-from regain.constants import MLFLOW_ARTIFACT_CONFIG_FILE
+from regain.constants import MLFLOW_ARTIFACT_MANIFEST_FILE
 from regain.constants import MLFLOW_ARTIFACT_PREDICTIONS_DIR
 from regain.constants import NS_SEP
 from regain.constants import PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM
@@ -134,10 +134,10 @@ def _train_and_evaluate_strategy(
 
     # Initialize MLflow experiment and run
     with init_mlflow(
-        experiment_name=experiment_config.experiment_name,
-        run_name=run_config.name,
-        tracking_uri=tracking_uri,
-        artifact_location=artifact_location,
+            experiment_name=experiment_config.experiment_name,
+            run_name=run_config.name,
+            tracking_uri=tracking_uri,
+            artifact_location=artifact_location,
     ), log_fatal_error_context(run_name=str(run_config.name)):
         with tempfile.TemporaryDirectory() as artifacts_dir:
             # Validate backbone checkpoint usage
@@ -156,19 +156,10 @@ def _train_and_evaluate_strategy(
                     PARAM_BACKBONE_REPLAY_MEM_SIZE.rsplit(NS_SEP, 1)[-1],
                     200,
                 )
-                replay_batch_value = strategy_kwargs.get(
-                    PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM.rsplit(NS_SEP, 1)[-1]
-                )
-                replay_memory_size = (
-                    int(replay_memory_value)
-                    if replay_memory_value is not None
-                    else None
-                )
-                replay_batch_size = (
-                    int(replay_batch_value)
-                    if replay_batch_value is not None
-                    else int(backbone_training.batch_size)
-                )
+                replay_batch_value = strategy_kwargs.get(PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM.rsplit(NS_SEP, 1)[-1])
+                replay_memory_size = (int(replay_memory_value) if replay_memory_value is not None else None)
+                replay_batch_size = (int(replay_batch_value)
+                                     if replay_batch_value is not None else int(backbone_training.batch_size))
 
             # Instantiate and validate the controller
             controller_config = run_config.controller
@@ -187,18 +178,14 @@ def _train_and_evaluate_strategy(
             backbone_checkpoint_paths_local: list[Path] | None = None
             if use_backbone_checkpoints:
                 if not isinstance(controller, RepairController):
-                    raise ValueError(
-                        'Backbone checkpoints can only be used with repair-controller runs.'
-                    )
+                    raise ValueError('Backbone checkpoints can only be used with repair-controller runs.')
                 backbone_checkpoint_paths_local = [Path(path) for path in backbone_checkpoint_paths]
 
             # Validate strategy-controller compatibility
             if isinstance(controller, PreventionController):
                 # Check if the controller requires a replay-based strategy
                 if controller.requires_replay() and backbone_training.strategy.name != 'replay':
-                    raise ValueError(
-                        f'Controller `{type(controller).__name__}` requires a replay-based strategy.'
-                    )
+                    raise ValueError(f'Controller `{type(controller).__name__}` requires a replay-based strategy.')
                 # Add additional validations here if needed
 
             # Resolve repair split settings for scenario creation.
@@ -212,9 +199,7 @@ def _train_and_evaluate_strategy(
                 if repair_budget_fraction is not None
                 else 1.0
             )
-            repair_fit_after_experience = (
-                experiment_config.repair.fit_schedule == 'per_experience'
-            )
+            repair_fit_after_experience = experiment_config.repair.fit_schedule == 'per_experience'
 
             # Build the benchmark scenario
             benchmark = build_benchmark(
@@ -257,16 +242,10 @@ def _train_and_evaluate_strategy(
                 controller_plugin: ControllerPlugin = build_controller_plugin(
                     controller=controller,
                     fit_after_experience=repair_fit_after_experience,
-                    num_epochs=(
-                        int(repair_num_epochs)
-                        if repair_num_epochs is not None
-                        else int(backbone_training.num_epochs)
-                    ),
-                    batch_size=(
-                        int(repair_batch_size)
-                        if repair_batch_size is not None
-                        else int(backbone_training.batch_size)
-                    ),
+                    num_epochs=(int(repair_num_epochs)
+                                if repair_num_epochs is not None else int(backbone_training.num_epochs)),
+                    batch_size=(int(repair_batch_size)
+                                if repair_batch_size is not None else int(backbone_training.batch_size)),
                     budget_fraction=repair_budget_fraction_value,
                     seed=int(experiment_config.seed),
                     debug=experiment_config.debug,
@@ -285,29 +264,16 @@ def _train_and_evaluate_strategy(
                 strategy_plugins.append(checkpoint_writer_plugin)
             if use_backbone_checkpoints and backbone_checkpoint_paths_local is not None:
                 strategy_plugins.append(
-                    BackboneCheckpointLoaderPlugin(
-                        checkpoint_paths=backbone_checkpoint_paths_local,
-                    )
-                )
+                    BackboneCheckpointLoaderPlugin(checkpoint_paths=backbone_checkpoint_paths_local,))
             if controller_plugin is not None:
                 strategy_plugins.append(controller_plugin)
             strategy_plugins.append(numerical_stability_guard_plugin)
 
             # Build the backbone model
-            backbone_name = (
-                experiment_config.backbone.name
-                if experiment_config.backbone is not None
-                else None
-            )
+            backbone_name = (experiment_config.backbone.name if experiment_config.backbone is not None else None)
             if not isinstance(backbone_name, str) or backbone_name.strip() == '':
-                raise RuntimeError(
-                    'Backbone name must be resolved before strategy construction.'
-                )
-            backbone_kwargs = (
-                experiment_config.backbone.kwargs
-                if experiment_config.backbone is not None
-                else {}
-            )
+                raise RuntimeError('Backbone name must be resolved before strategy construction.')
+            backbone_kwargs = (experiment_config.backbone.kwargs if experiment_config.backbone is not None else {})
             backbone = build_backbone(
                 name=backbone_name,
                 num_classes=benchmark.n_classes,
@@ -345,9 +311,7 @@ def _train_and_evaluate_strategy(
                 batch_size=experiment_config.evaluation.batch_size,
                 num_epochs_per_experience=backbone_training.num_epochs,
                 repair_after_experience=repair_fit_after_experience,
-                include_forward_transfer=(
-                    experiment_config.evaluation.avalanche_schedule == 'per_experience'
-                ),
+                include_forward_transfer=(experiment_config.evaluation.avalanche_schedule == 'per_experience'),
                 backbone_analysis_baseline=backbone_analysis_baseline,
                 eps=1e-4,
             )
@@ -358,10 +322,7 @@ def _train_and_evaluate_strategy(
             strategy_plugins.append(regain_evaluation_plugin)
 
             # Attach LR scheduler plugin if configured
-            if (
-                backbone_training.lr_scheduler is not None
-                and not use_backbone_checkpoints
-            ):
+            if (backbone_training.lr_scheduler is not None and not use_backbone_checkpoints):
                 initial_lr = float(optimizer_kwargs.get('lr', 0.1))
                 lr_scheduler_plugin = build_lr_scheduler_plugin(
                     name=backbone_training.lr_scheduler.name,
@@ -371,11 +332,7 @@ def _train_and_evaluate_strategy(
                 )
                 strategy_plugins.append(lr_scheduler_plugin)
             if backbone_training.grad_clip_max_norm is not None:
-                strategy_plugins.append(
-                    build_gradient_clipping_plugin(
-                        max_norm=backbone_training.grad_clip_max_norm
-                    )
-                )
+                strategy_plugins.append(build_gradient_clipping_plugin(max_norm=backbone_training.grad_clip_max_norm))
 
             # Build the strategy
             strategy = make_strategy(
@@ -396,11 +353,7 @@ def _train_and_evaluate_strategy(
             log_run_params(
                 experiment_config=experiment_config,
                 run_config_payload=asdict(run_config),
-                controller_name=(
-                    run_config.controller.name
-                    if run_config.controller is not None
-                    else None
-                ),
+                controller_name=(run_config.controller.name if run_config.controller is not None else None),
                 deterministic_algorithms_enabled=deterministic_algorithms_enabled,
                 optimizer_kwargs=optimizer_kwargs,
                 include_backbone_params=run_config.controller is None,
@@ -421,9 +374,7 @@ def _train_and_evaluate_strategy(
 
             checkpoint_paths: list[Path] | None = None
             if checkpoint_writer_plugin is not None:
-                checkpoint_paths = checkpoint_writer_plugin.checkpoint_paths(
-                    expected_count=len(benchmark.train_stream)
-                )
+                checkpoint_paths = checkpoint_writer_plugin.checkpoint_paths(expected_count=len(benchmark.train_stream))
 
             if log_checkpoint_artifacts:
                 if checkpoint_dir is None:
@@ -447,21 +398,21 @@ def _train_and_evaluate_strategy(
             if eval_scalar_results is None:
                 raise RuntimeError('Posthoc evaluation results missing from evaluation plugin.')
 
-            # Log the configuration used for the run to MLflow
-            config_path = Path(artifacts_dir) / MLFLOW_ARTIFACT_CONFIG_FILE
+            # Log the resolved manifest used for the run to MLflow
+            manifest_path = Path(artifacts_dir) / MLFLOW_ARTIFACT_MANIFEST_FILE
 
-            with config_path.open('w', encoding='utf-8') as f:
-                dumped_config = asdict(experiment_config)
+            with manifest_path.open('w', encoding='utf-8') as f:
+                dumped_manifest = asdict(experiment_config)
 
                 # Note: We exclude `dataset_path` because it is environment-specific.
-                dumped_config.pop('dataset_path')
-                dumped_config.pop('runs')
+                dumped_manifest.pop('dataset_path')
+                dumped_manifest.pop('runs')
 
-                dumped_config['run'] = asdict(run_config)
+                dumped_manifest['run'] = asdict(run_config)
 
-                yaml.safe_dump(data=dumped_config, stream=f, sort_keys=False)
+                yaml.safe_dump(data=dumped_manifest, stream=f, sort_keys=False)
 
-            mlflow.log_artifact(str(config_path))
+            mlflow.log_artifact(str(manifest_path))
 
             # Log per-experience dataset indices for reproducibility checks
             log_dataset_indices(benchmark=benchmark, artifacts_dir=Path(artifacts_dir))
@@ -547,9 +498,7 @@ def run_experiment(
     has_repair_runs = False
     for run_config in run_configs:
         if run_config.name == RUN_NAME_BACKBONE:
-            raise ValueError(
-                f"Run name '{RUN_NAME_BACKBONE}' is reserved and cannot be used in runs."
-            )
+            raise ValueError(f"Run name '{RUN_NAME_BACKBONE}' is reserved and cannot be used in runs.")
         if run_config.controller is None:
             raise ValueError(f'Run `{run_config.name}` is missing `controller`.')
         try:
@@ -573,10 +522,8 @@ def run_experiment(
             missing_fields.append('repair.batch_size')
         if missing_fields:
             missing_str = ', '.join(missing_fields)
-            raise ValueError(
-                'Repair-controller runs require explicit repair settings. '
-                f'Missing: {missing_str}.'
-            )
+            raise ValueError('Repair-controller runs require explicit repair settings. '
+                             f'Missing: {missing_str}.')
 
     set_tracking_uri(tracking_uri=tracking_uri)
     mlflow_client = MlflowClient()
@@ -587,26 +534,14 @@ def run_experiment(
     )
     backbone_config = experiment_config.backbone
     if backbone_config is None and local_backbone_run is None:
-        raise ValueError(
-            'Experiment config must define a non-null `backbone` when no local `backbone` run exists.'
-        )
+        raise ValueError('Experiment config must define a non-null `backbone` when no local `backbone` run exists.')
 
-    source_experiment = (
-        backbone_config.source_experiment
-        if backbone_config is not None
-        else None
-    )
+    source_experiment = (backbone_config.source_experiment if backbone_config is not None else None)
     source_experiment_id_for_logging: str | None = None
     source_experiment_name_for_logging: str | None = None
-    backbone_training = (
-        backbone_config.training
-        if backbone_config is not None
-        else None
-    )
+    backbone_training = (backbone_config.training if backbone_config is not None else None)
     non_repair_run_names = [
-        run_config.name
-        for run_config, controller_type in run_entries
-        if controller_type != 'repair'
+        run_config.name for run_config, controller_type in run_entries if controller_type != 'repair'
     ]
 
     backbone_checkpoint_dir = Path(tempfile.mkdtemp(prefix='regain_backbone_'))
@@ -631,14 +566,11 @@ def run_experiment(
                 pass
             else:
                 if source_experiment_id == current_experiment_id:
-                    raise ValueError(
-                        '`backbone.source_experiment` must be different from the current experiment.'
-                    )
+                    raise ValueError('`backbone.source_experiment` must be different from the current experiment.')
         if local_backbone_run is not None and backbone_config is not None:
             raise RuntimeError(
                 f'Experiment `{experiment_config.experiment_name}` already has a local `backbone` run. '
-                'Providing a non-null `backbone` config is not allowed when a local `backbone` run exists.'
-            )
+                'Providing a non-null `backbone` config is not allowed when a local `backbone` run exists.')
 
         if source_experiment:
             (
@@ -652,21 +584,13 @@ def run_experiment(
                 checkpoint_dir=backbone_checkpoint_dir,
                 expected_num_experiences=experiment_config.num_experiences,
             )
-            local_backbone_name = extract_backbone_name_from_run(
-                run=source_backbone_run
-            )
-            local_backbone_kwargs = extract_backbone_kwargs_from_run(
-                run=source_backbone_run
-            )
+            local_backbone_name = extract_backbone_name_from_run(run=source_backbone_run)
+            local_backbone_kwargs = extract_backbone_kwargs_from_run(run=source_backbone_run)
+            local_backbone_training = extract_backbone_training_config_from_run(run=source_backbone_run)
             source_experiment_id_for_logging = str(source_backbone_run.info.experiment_id)
-            source_experiment_entity = mlflow_client.get_experiment(
-                experiment_id=source_experiment_id_for_logging
-            )
-            source_experiment_name_for_logging = (
-                str(source_experiment_entity.name)
-                if source_experiment_entity is not None
-                else None
-            )
+            source_experiment_entity = mlflow_client.get_experiment(experiment_id=source_experiment_id_for_logging)
+            source_experiment_name_for_logging = (str(source_experiment_entity.name)
+                                                  if source_experiment_entity is not None else None)
             if logger is not None:
                 logger.info(
                     'Using backbone run `%s` from source experiment `%s`.',
@@ -680,10 +604,7 @@ def run_experiment(
         elif backbone_config is None:
             local_backbone_name = extract_backbone_name_from_run(run=local_backbone_run)
             local_backbone_kwargs = extract_backbone_kwargs_from_run(run=local_backbone_run)
-            if non_repair_run_names:
-                local_backbone_training = extract_backbone_training_config_from_run(
-                    run=local_backbone_run
-                )
+            local_backbone_training = extract_backbone_training_config_from_run(run=local_backbone_run)
             (
                 backbone_checkpoint_paths,
                 backbone_eval_results,
@@ -704,10 +625,8 @@ def run_experiment(
                 logger.info('Resolved backbone name from local run: %s', local_backbone_name)
         else:
             if backbone_training is None:
-                raise ValueError(
-                    '`backbone.training` is required when `backbone.source_experiment` is not set '
-                    'and no local `backbone` run exists.'
-                )
+                raise ValueError('`backbone.training` is required when `backbone.source_experiment` is not set '
+                                 'and no local `backbone` run exists.')
             (
                 backbone_checkpoint_paths,
                 backbone_eval_results,
@@ -730,49 +649,28 @@ def run_experiment(
             if experiment_config.backbone is None:
                 experiment_config.backbone = BackboneConfig(
                     name=local_backbone_name,
-                    kwargs=(
-                        local_backbone_kwargs
-                        if local_backbone_kwargs is not None
-                        else {}
-                    ),
-                    training=(
-                        local_backbone_training
-                        if local_backbone_training is not None
-                        else None
-                    ),
+                    kwargs=(local_backbone_kwargs if local_backbone_kwargs is not None else {}),
+                    training=(local_backbone_training if local_backbone_training is not None else None),
                 )
             else:
                 experiment_config.backbone.name = local_backbone_name
-                experiment_config.backbone.kwargs = (
-                    local_backbone_kwargs
-                    if local_backbone_kwargs is not None
-                    else {}
-                )
+                experiment_config.backbone.kwargs = (local_backbone_kwargs if local_backbone_kwargs is not None else {})
+                if local_backbone_training is not None:
+                    experiment_config.backbone.training = local_backbone_training
+                if source_experiment_id_for_logging is not None:
+                    experiment_config.backbone.source_experiment_id = source_experiment_id_for_logging
 
-        resolved_backbone_name = (
-            experiment_config.backbone.name
-            if experiment_config.backbone is not None
-            else None
-        )
+        resolved_backbone_name = (experiment_config.backbone.name if experiment_config.backbone is not None else None)
         if not isinstance(resolved_backbone_name, str) or resolved_backbone_name.strip() == '':
-            raise RuntimeError(
-                'Backbone name resolution failed. Ensure a valid `backbone` run is available.'
-            )
+            raise RuntimeError('Backbone name resolution failed. Ensure a valid `backbone` run is available.')
 
-        resolved_backbone_training = (
-            experiment_config.backbone.training
-            if experiment_config.backbone is not None
-            else None
-        )
+        resolved_backbone_training = (experiment_config.backbone.training
+                                      if experiment_config.backbone is not None else None)
         if non_repair_run_names and resolved_backbone_training is None:
-            raise ValueError(
-                '`backbone.training` is required for non-repair runs. '
-                f'Invalid runs: {non_repair_run_names}'
-            )
+            raise ValueError('`backbone.training` is required for non-repair runs. '
+                             f'Invalid runs: {non_repair_run_names}')
 
-        if has_repair_runs and (
-            backbone_checkpoint_paths is None or backbone_analysis_baseline is None
-        ):
+        if has_repair_runs and (backbone_checkpoint_paths is None or backbone_analysis_baseline is None):
             raise RuntimeError('If repair controllers are configured, a `backbone` run must always exist.')
 
         for run_config, controller_type in run_entries:
@@ -782,12 +680,8 @@ def run_experiment(
                     run_config=run_config,
                     tracking_uri=tracking_uri,
                     artifact_location=artifact_location,
-                    backbone_checkpoint_paths=(
-                        backbone_checkpoint_paths if controller_type == 'repair' else None
-                    ),
-                    backbone_analysis_baseline=(
-                        backbone_analysis_baseline if controller_type == 'repair' else None
-                    ),
+                    backbone_checkpoint_paths=(backbone_checkpoint_paths if controller_type == 'repair' else None),
+                    backbone_analysis_baseline=(backbone_analysis_baseline if controller_type == 'repair' else None),
                     backbone_source_experiment_id=source_experiment_id_for_logging,
                     backbone_source_experiment_name=source_experiment_name_for_logging,
                 )

@@ -137,6 +137,16 @@ _PAIRWISE_UTILITY_METRICS = (
     _COLUMN_ACTION_REPAIR_BUDGET_TOTAL,
     _COLUMN_IS_NO_OP_ACTION,
 )
+_COLUMN_REPLAY_BATCH_SIZE_MEM = 'replay_batch_size_mem'
+_COLUMN_REPLAY_MEM_SIZE = 'replay_mem_size'
+_COLUMN_TASK_AGE_MEAN = 'task_age_mean'
+_COLUMN_TASK_AGE_MIN = 'task_age_min'
+_COLUMN_TASK_AGE_MAX = 'task_age_max'
+_COLUMN_TASK_AGE_STD = 'task_age_std'
+_COLUMN_OLDEST_TASK_FORGETTING = 'oldest_task_forgetting'
+_COLUMN_NEWEST_TASK_FORGETTING = 'newest_task_forgetting'
+_COLUMN_AGE_WEIGHTED_FORGETTING = 'age_weighted_forgetting'
+
 _PRE_REPAIR_SELECTION_COLUMNS = (
     COLUMN_EXPERIMENT_ID,
     _COLUMN_SCENARIO,
@@ -149,9 +159,18 @@ _PRE_REPAIR_SELECTION_COLUMNS = (
     COLUMN_REPAIR_SET_TOTAL,
     COLUMN_REPAIR_SPLIT_FRACTION,
     COLUMN_NUM_CLASSES,
+    _COLUMN_REPLAY_MEM_SIZE,
+    _COLUMN_REPLAY_BATCH_SIZE_MEM,
     _COLUMN_MEAN_ACC_REF,
     _COLUMN_MEAN_ACC_POST,
     _COLUMN_MEAN_FORGETTING,
+    _COLUMN_TASK_AGE_MEAN,
+    _COLUMN_TASK_AGE_MIN,
+    _COLUMN_TASK_AGE_MAX,
+    _COLUMN_TASK_AGE_STD,
+    _COLUMN_OLDEST_TASK_FORGETTING,
+    _COLUMN_NEWEST_TASK_FORGETTING,
+    _COLUMN_AGE_WEIGHTED_FORGETTING,
     RUN_CALIB_MAX_ECE,
     f'mean_{RUN_CALIB_ECE}',
     f'mean_{RUN_CALIB_AECE}',
@@ -804,6 +823,8 @@ def _build_repair_outcome_candidates(
             _COLUMN_SOURCE_STAGE: 'collect',
             _COLUMN_IS_NO_OP_ACTION: False,
             _COLUMN_BACKBONE_NAME: run_row.get(_COLUMN_BACKBONE_NAME),
+            _COLUMN_REPLAY_MEM_SIZE: run_row.get(_COLUMN_REPLAY_MEM_SIZE),
+            _COLUMN_REPLAY_BATCH_SIZE_MEM: run_row.get(_COLUMN_REPLAY_BATCH_SIZE_MEM),
         }
         candidate.update(
             _derive_outcome_metrics(
@@ -992,6 +1013,71 @@ def _first_non_null(rows: list[dict[str, Any]], *, key: str) -> Any:
     return None
 
 
+def _compute_task_age_summaries(*, rows: list[dict[str, Any]]) -> dict[str, float | None]:
+    """
+    Compute controller-independent task-age summary fields.
+
+    Args:
+        rows: Per-task repair-outcome rows for a single setting.
+
+    Returns:
+        dict[str, float | None]: Task-age summary values keyed by column name.
+    """
+    task_age_values: list[float] = []
+    forgetting_by_age: list[tuple[float, float]] = []
+    for item in rows:
+        task_age_value = to_float(item.get(COLUMN_TASK_AGE))
+        if task_age_value is None:
+            continue
+        task_age_values.append(task_age_value)
+        forgetting_value = to_float(item.get(_COLUMN_FORGETTING))
+        if forgetting_value is not None:
+            forgetting_by_age.append((task_age_value, forgetting_value))
+
+    if not task_age_values:
+        return {
+            _COLUMN_TASK_AGE_MEAN: None,
+            _COLUMN_TASK_AGE_MIN: None,
+            _COLUMN_TASK_AGE_MAX: None,
+            _COLUMN_TASK_AGE_STD: None,
+            _COLUMN_OLDEST_TASK_FORGETTING: None,
+            _COLUMN_NEWEST_TASK_FORGETTING: None,
+            _COLUMN_AGE_WEIGHTED_FORGETTING: None,
+        }
+
+    task_age_min = min(task_age_values)
+    task_age_max = max(task_age_values)
+
+    oldest_forgetting: float | None = None
+    newest_forgetting: float | None = None
+    weighted_sum = 0.0
+    weight_sum = 0.0
+    for age_value, forgetting_value in forgetting_by_age:
+        weight = age_value + 1.0
+        weighted_sum += weight * forgetting_value
+        weight_sum += weight
+        if age_value == task_age_max and oldest_forgetting is None:
+            oldest_forgetting = forgetting_value
+        if age_value == task_age_min and newest_forgetting is None:
+            newest_forgetting = forgetting_value
+
+    age_weighted_forgetting: float | None
+    if weight_sum > 0.0 and forgetting_by_age:
+        age_weighted_forgetting = float(weighted_sum / weight_sum)
+    else:
+        age_weighted_forgetting = None
+
+    return {
+        _COLUMN_TASK_AGE_MEAN: mean(task_age_values),
+        _COLUMN_TASK_AGE_MIN: float(task_age_min),
+        _COLUMN_TASK_AGE_MAX: float(task_age_max),
+        _COLUMN_TASK_AGE_STD: stdev(task_age_values),
+        _COLUMN_OLDEST_TASK_FORGETTING: oldest_forgetting,
+        _COLUMN_NEWEST_TASK_FORGETTING: newest_forgetting,
+        _COLUMN_AGE_WEIGHTED_FORGETTING: age_weighted_forgetting,
+    }
+
+
 def _aggregate_frontier_rows(*, repair_outcomes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Aggregate repair outcomes into per-setting frontier rows.
@@ -1098,7 +1184,10 @@ def _aggregate_frontier_rows(*, repair_outcomes: list[dict[str, Any]]) -> list[d
             RUN_LATENCY_MS_RATIO: mean([to_float(item.get(RUN_LATENCY_MS_RATIO)) for item in rows]),
             RUN_REPAIR_SECONDS: mean([to_float(item.get(RUN_REPAIR_SECONDS)) for item in rows]),
             RUN_REPAIR_STEPS: mean([to_float(item.get(RUN_REPAIR_STEPS)) for item in rows]),
+            _COLUMN_REPLAY_MEM_SIZE: _first_non_null(rows, key=_COLUMN_REPLAY_MEM_SIZE),
+            _COLUMN_REPLAY_BATCH_SIZE_MEM: _first_non_null(rows, key=_COLUMN_REPLAY_BATCH_SIZE_MEM),
         }
+        row.update(_compute_task_age_summaries(rows=rows))
         row[_COLUMN_UTILITY_PRIMARY] = _compute_utility_primary(row=row)
         row[_COLUMN_UTILITY_CONSERVATIVE] = _compute_utility_conservative(row=row)
         row[_COLUMN_UTILITY_COST_AWARE] = _compute_utility_cost_aware(row=row)
@@ -1626,7 +1715,7 @@ def write_repairability_frontier_outputs(
 
     manifest: dict[str, Any] = {
         'schema': {
-            'name': 'regain.repair_frontier.manifest',
+            'name': 'regain.analysis.frontier.manifest',
             'version': 1,
         },
         'plots': {
@@ -1666,30 +1755,30 @@ def write_repairability_frontier_outputs(
         '\n'.join(json.dumps(row, default=str) for row in repair_outcomes) + ('\n' if repair_outcomes else ''),
         encoding='utf-8',
     )
-    repair_frontier_path = frontier_dir / 'repair_frontier.csv'
-    repair_pareto_path = frontier_dir / 'repair_pareto.csv'
-    repair_impact_path = frontier_dir / 'repair_impact.csv'
-    repair_selection_path = frontier_dir / 'repair_selection.csv'
+    candidates_path = frontier_dir / 'candidates.csv'
+    pareto_path = frontier_dir / 'pareto.csv'
+    impact_path = frontier_dir / 'impact.csv'
+    selection_path = frontier_dir / 'selection.csv'
     manifest_path = frontier_dir / 'manifest.json'
 
-    write_csv(repair_frontier_path, frontier_rows)
-    write_csv(repair_pareto_path, repair_pareto_rows)
-    write_csv(repair_impact_path, repair_impact_rows)
-    write_csv(repair_selection_path, repair_selection_rows)
+    write_csv(candidates_path, frontier_rows)
+    write_csv(pareto_path, repair_pareto_rows)
+    write_csv(impact_path, repair_impact_rows)
+    write_csv(selection_path, repair_selection_rows)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 
     logger.warning(f'Wrote {repair_outcomes_path}')
-    logger.warning(f'Wrote {repair_frontier_path}')
-    logger.warning(f'Wrote {repair_pareto_path}')
-    logger.warning(f'Wrote {repair_impact_path}')
-    logger.warning(f'Wrote {repair_selection_path}')
+    logger.warning(f'Wrote {candidates_path}')
+    logger.warning(f'Wrote {pareto_path}')
+    logger.warning(f'Wrote {impact_path}')
+    logger.warning(f'Wrote {selection_path}')
     logger.warning(f'Wrote {manifest_path}')
 
     return {
         'repair_outcomes': repair_outcomes_path,
-        'repair_frontier': repair_frontier_path,
-        'repair_pareto': repair_pareto_path,
-        'repair_impact': repair_impact_path,
-        'repair_selection': repair_selection_path,
+        'candidates': candidates_path,
+        'pareto': pareto_path,
+        'impact': impact_path,
+        'selection': selection_path,
         'manifest': manifest_path,
     }

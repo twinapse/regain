@@ -21,6 +21,7 @@ from regain.analysis.frontier import write_repairability_frontier_outputs
 from regain.analysis.plotting import plot_analysis_outputs
 from regain.analysis.plotting import write_plot_manifest_update
 from regain.analysis.predictive import write_predictive_correlations
+from regain.analysis.router import write_repair_router_outputs
 from regain.cli._utils.output_helpers import add_failure
 from regain.cli._utils.output_helpers import CliFailure
 from regain.cli._utils.output_helpers import finalize_staged_outputs
@@ -156,7 +157,8 @@ def main() -> None:
     sub.add_parser('curves', help='Compute recoverability curves.')
     sub.add_parser('frontier', help='Compute repairability-frontier outputs.')
     sub.add_parser('predictive', help='Compute predictive correlations.')
-    sub.add_parser('all', help='Run collect + curves + frontier + predictive.')
+    sub.add_parser('router', help='Evaluate repair router policies.')
+    sub.add_parser('all', help='Run collect + curves + frontier + predictive + router.')
 
     args = parser.parse_args()
 
@@ -187,7 +189,7 @@ def main() -> None:
             experiences_table: list[dict[str, Any]] = []
             collect_completed = False
 
-            if args.cmd in ['collect', 'all', 'curves', 'frontier', 'predictive']:
+            if args.cmd in ['collect', 'all', 'curves', 'frontier', 'predictive', 'router']:
                 tables_dir = staged_experiment_dir / 'tables'
                 try:
                     runs_table, experiences_table, run_failures = collect_experiment_tables(
@@ -246,7 +248,8 @@ def main() -> None:
                             error=exc,
                         )
 
-            if args.cmd in ['frontier', 'all']:
+            frontier_completed = False
+            if args.cmd in ['frontier', 'all', 'router']:
                 if not collect_completed:
                     add_failure(
                         failures=failures,
@@ -261,16 +264,44 @@ def main() -> None:
                             out_dir=staged_experiment_dir,
                         )
                         analysis_output_names.add('frontier')
+                        frontier_completed = True
                         logger.info(
                             'Frontier written: '
-                            f'{frontier_paths["repair_frontier"]}, '
-                            f'{frontier_paths["repair_pareto"]}, '
-                            f'{frontier_paths["repair_selection"]}'
+                            f'{frontier_paths["candidates"]}, '
+                            f'{frontier_paths["pareto"]}, '
+                            f'{frontier_paths["selection"]}'
                         )
                     except Exception as exc:
                         add_failure(
                             failures=failures,
                             scope=f'experiment={experiment_name} stage=frontier',
+                            error=exc,
+                        )
+
+            if args.cmd in ['router', 'all']:
+                if not frontier_completed:
+                    add_failure(
+                        failures=failures,
+                        scope=f'experiment={experiment_name} stage=router',
+                        error='Skipped because frontier stage failed.',
+                    )
+                else:
+                    try:
+                        router_paths = write_repair_router_outputs(
+                            analysis_dir=staged_experiment_dir,
+                            out_dir=staged_experiment_dir / 'router',
+                        )
+                        analysis_output_names.add('router')
+                        logger.info(
+                            'Repair router outputs written: '
+                            f'{router_paths["features"]}, '
+                            f'{router_paths["policy_summary"]}, '
+                            f'{router_paths["decision_gate"]}'
+                        )
+                    except Exception as exc:
+                        add_failure(
+                            failures=failures,
+                            scope=f'experiment={experiment_name} stage=router',
                             error=exc,
                         )
 
