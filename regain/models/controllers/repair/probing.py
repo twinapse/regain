@@ -173,7 +173,7 @@ class LinearProbeController(RepairController):
         model_device = module_device(model, self.device)
         with preserve_model_mode_after_eval(model):
             with torch.inference_mode():
-                feats = backbone(inputs.to(model_device))
+                feats = backbone(inputs.to(model_device))  # pylint: disable=not-callable
                 logits = self._probe(feats)
         return logits
 
@@ -238,7 +238,7 @@ class PrototypeBlendController(RepairController):
         self.score_scale = float(score_scale)
         self.normalize = bool(normalize)
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        if not (0.0 <= self.blend <= 1.0):
+        if not 0.0 <= self.blend <= 1.0:
             raise ValueError('`blend` must be in the range [0, 1].')
 
         self._fitted = False
@@ -332,7 +332,7 @@ class PrototypeBlendController(RepairController):
         model_device = module_device(model, self.device)
         with preserve_model_mode_after_eval(model):
             with torch.inference_mode():
-                feats = backbone(inputs.to(model_device))
+                feats = backbone(inputs.to(model_device))  # pylint: disable=not-callable
         if not torch.is_tensor(feats) or feats.ndim != 2:
             return outputs
 

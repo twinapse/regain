@@ -64,7 +64,7 @@ def _patch_collectors(
     monkeypatch.setattr(
         collectors_module,
         'MlflowClient',
-        client_factory if client_factory is not None else (lambda: object()),
+        client_factory if client_factory is not None else object,
     )
     monkeypatch.setattr(
         collectors_module,
@@ -127,6 +127,9 @@ def _write_splits_archive(
 
 
 class _FakeMlflowClient:
+    """
+    Fake MLflow client stub.
+    """
 
     def __init__(self, *, splits_archive_path: Path) -> None:
         self._splits_archive_path = Path(splits_archive_path)
@@ -142,6 +145,9 @@ class _FakeMlflowClient:
 
 
 class _MissingSplitsMlflowClient:
+    """
+    Fake MLflow client with missing splits.
+    """
 
     def download_artifacts(
         self,
@@ -154,6 +160,9 @@ class _MissingSplitsMlflowClient:
 
 
 class _ManifestArtifactMlflowClient:
+    """
+    Fake MLflow client returning manifest artifacts.
+    """
 
     def __init__(
         self,
@@ -179,6 +188,9 @@ class _ManifestArtifactMlflowClient:
 
 
 class TestRepairSetTotalExtraction:
+    """
+    Tests for repair set total extraction.
+    """
 
     def test_extracts_exact_total_from_splits_archive(self, tmp_path: Path) -> None:
         archive_path = _write_splits_archive(
@@ -213,6 +225,9 @@ class TestRepairSetTotalExtraction:
 
 
 class TestCollectExperimentTablesPredictiveBaselinePolicy:
+    """
+    Tests for predictive baseline policy collection.
+    """
 
     def test_repair_run_identity_comes_from_manifest_parser(
         self,
@@ -291,7 +306,7 @@ class TestCollectExperimentTablesPredictiveBaselinePolicy:
             monkeypatch=monkeypatch,
             runs=[run],
             artifact_payload=None,
-            client_factory=lambda: _ManifestArtifactMlflowClient(),
+            client_factory=_ManifestArtifactMlflowClient,
             analysis_identity=None,
         )
 

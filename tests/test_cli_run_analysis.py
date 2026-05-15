@@ -40,8 +40,7 @@ def _run_collect_main(
     captured_failures: list[CliFailure] = []
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         return collect_result
 
     def _fake_finalize_staged_outputs(
@@ -90,7 +89,7 @@ def test_collect_zero_success_runs_fails_without_allow_partial(
     )
 
     assert exit_code == 1
-    assert staged_outputs == []
+    assert not staged_outputs
     assert any('No successful runs were collected' in failure.message for failure in failures)
 
 
@@ -104,20 +103,18 @@ def test_collect_zero_success_runs_fails_with_allow_partial(
         collect_result=(
             [],
             [],
-            [
-                {
-                    'run_id': 'run_1',
-                    'run_name': 'bad_run',
-                    'error': 'invalid payload',
-                }
-            ],
+            [{
+                'run_id': 'run_1',
+                'run_name': 'bad_run',
+                'error': 'invalid payload',
+            }],
         ),
         experiments='exp',
         allow_partial=True,
     )
 
     assert exit_code == 1
-    assert staged_outputs == []
+    assert not staged_outputs
     assert any('run=run_1' in failure.scope for failure in failures)
     assert any('No successful runs were collected' in failure.message for failure in failures)
 
@@ -185,15 +182,22 @@ def test_frontier_uses_collect_outputs_directly(
     captured_outputs: list[run_analysis_cli.StagedOutput] = []
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         out_dir = Path(kwargs['out_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
         (out_dir / 'experience_metrics.jsonl').write_text('{}\n', encoding='utf-8')
         return (
-            [{'run_id': 'run_1', 'controller_name': 'repair_a', 'b': 0.5}],
-            [{'run_id': 'run_1', 'controller_name': 'repair_a', 'exp_idx': 0}],
+            [{
+                'run_id': 'run_1',
+                'controller_name': 'repair_a',
+                'b': 0.5
+            }],
+            [{
+                'run_id': 'run_1',
+                'controller_name': 'repair_a',
+                'exp_idx': 0
+            }],
             [],
         )
 
@@ -270,9 +274,11 @@ def test_frontier_uses_collect_outputs_directly(
     assert int(exc_info.value.code) == 0
     assert len(captured_frontier_calls) == 1
     assert captured_frontier_calls[0]['runs_table'] == [{'run_id': 'run_1', 'controller_name': 'repair_a', 'b': 0.5}]
-    assert captured_frontier_calls[0]['experiences_table'] == [
-        {'run_id': 'run_1', 'controller_name': 'repair_a', 'exp_idx': 0}
-    ]
+    assert captured_frontier_calls[0]['experiences_table'] == [{
+        'run_id': 'run_1',
+        'controller_name': 'repair_a',
+        'exp_idx': 0
+    }]
     destinations = {output.destination for output in captured_outputs}
     assert destinations == {
         tmp_path / 'exp_1' / 'tables',
@@ -312,8 +318,7 @@ def test_run_analysis_save_plots_writes_manifest_plot_metadata(
     output_root = tmp_path / 'analysis_outputs'
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         out_dir = Path(kwargs['out_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
@@ -419,8 +424,7 @@ def test_run_analysis_save_plots_requires_existing_frontier_manifest(
     output_root = tmp_path / 'analysis_outputs'
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         out_dir = Path(kwargs['out_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
@@ -515,8 +519,7 @@ def test_run_analysis_save_plots_allow_partial_does_not_publish_unpublishable_pl
     (existing_plots_dir / 'existing.png').write_text('existing', encoding='utf-8')
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         out_dir = Path(kwargs['out_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
@@ -618,8 +621,7 @@ def test_run_analysis_save_plots_records_skipped_manifest_metadata_when_all_plot
     output_root = tmp_path / 'analysis_outputs'
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         out_dir = Path(kwargs['out_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
@@ -729,8 +731,7 @@ def _stub_frontier_and_router(
     """
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         out_dir = Path(kwargs['out_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')
@@ -921,8 +922,7 @@ def test_router_command_skips_when_frontier_fails(
     captured_failures: list[CliFailure] = []
 
     def _fake_collect_experiment_tables(
-        **kwargs,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
+        **kwargs,) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, str]]]:
         out_dir = Path(kwargs['out_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / 'run_metrics.jsonl').write_text('{}\n', encoding='utf-8')

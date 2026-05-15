@@ -16,13 +16,11 @@ def test_finalize_staged_outputs_rejects_empty_source(tmp_path: Path) -> None:
     failures: list[CliFailure] = []
 
     published_count = finalize_staged_outputs(
-        outputs=[
-            StagedOutput(
-                scope='empty-source',
-                source=empty_source,
-                destination=destination,
-            )
-        ],
+        outputs=[StagedOutput(
+            scope='empty-source',
+            source=empty_source,
+            destination=destination,
+        )],
         failures=failures,
         allow_partial=False,
         overwrite=False,

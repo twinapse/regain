@@ -104,12 +104,7 @@ def find_config_files(*, config_dir: str) -> list[str]:
         raise ValueError(f'Config directory is not a directory: {config_dir}')
 
     config_paths = sorted(
-        [
-            path
-            for path in root_dir.rglob('*')
-            if path.is_file() and path.suffix.lower() in ['.yaml', '.yml']
-        ]
-    )
+        [path for path in root_dir.rglob('*') if path.is_file() and path.suffix.lower() in ['.yaml', '.yml']])
     return [str(path) for path in config_paths]
 
 
@@ -172,7 +167,7 @@ def _resolve_experiment_targets_from_configs(
         config_scope = f'config={config_path}'
         try:
             experiment_config = load_experiment_config(config_path)
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             add_failure(
                 failures=failures,
                 scope=config_scope,
@@ -185,12 +180,10 @@ def _resolve_experiment_targets_from_configs(
             continue
 
         seen_experiments.add(experiment_name)
-        targets.append(
-            ExperimentTarget(
-                experiment_name=experiment_name,
-                tracking_uri=tracking_uri,
-            )
-        )
+        targets.append(ExperimentTarget(
+            experiment_name=experiment_name,
+            tracking_uri=tracking_uri,
+        ))
 
     return targets
 
@@ -216,12 +209,10 @@ def _resolve_experiment_targets_from_names(
         if experiment_name in seen_names:
             continue
         seen_names.add(experiment_name)
-        targets.append(
-            ExperimentTarget(
-                experiment_name=experiment_name,
-                tracking_uri=tracking_uri,
-            )
-        )
+        targets.append(ExperimentTarget(
+            experiment_name=experiment_name,
+            tracking_uri=tracking_uri,
+        ))
     return targets
 
 
@@ -248,9 +239,7 @@ def resolve_experiment_targets(
     Returns:
         list[ExperimentTarget]: Resolved targets.
     """
-    normalized_tracking_uri = normalize_tracking_uri(
-        tracking_uri=tracking_uri,
-    )
+    normalized_tracking_uri = normalize_tracking_uri(tracking_uri=tracking_uri,)
 
     if experiments is not None:
         experiment_names = _parse_csv_argument(

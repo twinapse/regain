@@ -59,6 +59,9 @@ def _write_payload(
 
 
 class TestEvaluationConfigParsing:
+    """
+    Tests for evaluation config parsing.
+    """
 
     def test_parses_nested_evaluation_config(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
@@ -123,6 +126,9 @@ class TestEvaluationConfigParsing:
 
 
 class TestTransformsConfigParsing:
+    """
+    Tests for transforms config parsing.
+    """
 
     def test_parses_nested_transforms_config(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
@@ -202,6 +208,9 @@ class TestTransformsConfigParsing:
 
 
 class TestRepairConfigParsing:
+    """
+    Tests for repair config parsing.
+    """
 
     def test_parses_repair_split_fraction_field(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
@@ -290,6 +299,9 @@ class TestRepairConfigParsing:
 
 
 class TestBackboneConfigParsing:
+    """
+    Tests for backbone config parsing.
+    """
 
     def test_accepts_registered_vit_backbone_name(self, tmp_path: Path) -> None:
         payload = _build_base_payload()
@@ -434,6 +446,9 @@ class TestBackboneConfigParsing:
 
 
 class TestLoadManifest:
+    """
+    Tests for manifest loading.
+    """
 
     def test_loads_resolved_local_reuse_manifest(self, tmp_path: Path) -> None:
         payload = _build_base_payload()

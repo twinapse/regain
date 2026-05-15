@@ -60,8 +60,8 @@ def _pearson(*, x: np.ndarray, y: np.ndarray) -> float | None:
         return None
     x_centered = x - np.mean(x)
     y_centered = y - np.mean(y)
-    x_norm = float(np.sqrt(np.sum(x_centered ** 2)))
-    y_norm = float(np.sqrt(np.sum(y_centered ** 2)))
+    x_norm = float(np.sqrt(np.sum(x_centered**2)))
+    y_norm = float(np.sqrt(np.sum(y_centered**2)))
     if x_norm <= 0.0 or y_norm <= 0.0:
         return None
     numerator = float(np.sum(x_centered * y_centered))
@@ -123,17 +123,17 @@ def _r2_linear(*, x: np.ndarray, y: np.ndarray) -> float | None:
         return None
     x_mean = float(np.mean(x))
     y_mean = float(np.mean(y))
-    var_x = float(np.sum((x - x_mean) ** 2))
+    var_x = float(np.sum((x - x_mean)**2))
     if var_x <= 0.0:
         return None
     cov_xy = float(np.sum((x - x_mean) * (y - y_mean)))
     slope = cov_xy / var_x
     intercept = y_mean - slope * x_mean
     y_hat = intercept + slope * x
-    denom = float(np.sum((y - y_mean) ** 2))
+    denom = float(np.sum((y - y_mean)**2))
     if denom <= 0.0:
         return None
-    sse = float(np.sum((y - y_hat) ** 2))
+    sse = float(np.sum((y - y_hat)**2))
     return float(1.0 - (sse / denom))
 
 
@@ -219,5 +219,5 @@ def write_predictive_correlations(
 
     output_path = outp / 'predictive_correlations.csv'
     write_csv(output_path, result_rows)
-    logger.warning(f'Wrote {output_path}')
+    logger.warning('Wrote %s', output_path)
     return output_path

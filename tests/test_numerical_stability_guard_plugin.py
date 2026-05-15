@@ -12,10 +12,14 @@ from regain.analysis.metrics import MetricContext
 from regain.analysis.metrics import MetricPhase
 from regain.avalanche_utils.plugins import NumericalStabilityGuardPlugin
 # Ensure a stable import order for plugin module initialization.
-import regain.experiments.orchestrator  # noqa: F401
+import regain.experiments.orchestrator  # noqa: F401  # pylint: disable=unused-import
 
 
 class _DummyStrategy:
+    """
+    Dummy strategy for testing.
+    """
+
     def __init__(
         self,
         *,
@@ -33,6 +37,10 @@ class _DummyStrategy:
 
 
 class TestNumericalStabilityGuardPlugin:
+    """
+    Tests for NumericalStabilityGuardPlugin.
+    """
+
     def test_before_backward_raises_with_context_on_non_finite_loss(self) -> None:
         context = MetricContext()
         context.set_phase(MetricPhase.TRAIN)

@@ -1,3 +1,6 @@
+"""
+Experiment-level utility helpers for determinism, backbone, and controller resolution.
+"""
 import inspect
 from typing import Any
 
@@ -57,18 +60,12 @@ def resolve_backbone_training_config(
         TrainingConfig: Backbone training configuration for this run.
     """
     backbone_config = experiment_config.backbone
-    training_config = (
-        backbone_config.training
-        if backbone_config is not None
-        else None
-    )
+    training_config = (backbone_config.training if backbone_config is not None else None)
     if training_config is not None:
         return training_config
     if not use_backbone_checkpoints:
-        raise ValueError(
-            '`backbone.training` must be provided for runs that train backbone '
-            'weights.'
-        )
+        raise ValueError('`backbone.training` must be provided for runs that train backbone '
+                         'weights.')
     return TrainingConfig(
         num_epochs=1,
         strategy=StrategyConfig(name='naive'),
@@ -135,7 +132,7 @@ def to_scalar(value: object) -> float | None:
     if hasattr(value, 'item'):
         try:
             return float(value.item())
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
     try:
         return float(value)

@@ -67,7 +67,6 @@ from regain.utils import module_device
 
 __all__ = ['RegainEvaluator']
 
-
 _STATUS_INCOMPLETE_ACC_EXP_BASE = 'incomplete_acc_exp_base'
 
 
@@ -104,9 +103,7 @@ def _resolve_experience_dataset(experience: CLExperience) -> object:
     if dataset is None:
         raise TypeError('Evaluation experience must expose a dataset.')
     if not hasattr(dataset, '__len__') or not hasattr(dataset, '__getitem__'):
-        raise TypeError(
-            'Evaluation experience must expose a dataset compatible with `torch.utils.data.DataLoader`.'
-        )
+        raise TypeError('Evaluation experience must expose a dataset compatible with `torch.utils.data.DataLoader`.')
     return dataset
 
 
@@ -215,11 +212,7 @@ class RegainEvaluator:
         self.mask_value = float(mask_value)
 
         self._forgetting = ForgettingTracker()
-        self._forward_transfer = (
-            ForwardTransferTracker()
-            if self.include_forward_transfer
-            else None
-        )
+        self._forward_transfer = (ForwardTransferTracker() if self.include_forward_transfer else None)
 
         self.acc_exp_base: list[float] = []
         self.artifacts: AnalysisArtifacts | None = None
@@ -255,15 +248,10 @@ class RegainEvaluator:
                 self._backbone_diag_vectors = diag_vectors
 
         if self._is_repair_controller():
-            if (
-                self._backbone_acc_exp_base is None
-                or self._backbone_acc_base is None
-                or self._backbone_diag_vectors is None
-            ):
-                raise ValueError(
-                    'Repair-controller runs require `backbone_analysis_baseline` '
-                    'with baseline accuracy and diagnostic vectors.'
-                )
+            if (self._backbone_acc_exp_base is None or self._backbone_acc_base is None or
+                    self._backbone_diag_vectors is None):
+                raise ValueError('Repair-controller runs require `backbone_analysis_baseline` '
+                                 'with baseline accuracy and diagnostic vectors.')
 
     @staticmethod
     def _coerce_backbone_vector(
@@ -288,10 +276,8 @@ class RegainEvaluator:
             raise ValueError(f'Backbone baseline `{key}` must be a numeric sequence.')
         vector = [float(value) for value in values]
         if len(vector) != int(expected_len):
-            raise ValueError(
-                f'Backbone baseline `{key}` length mismatch. '
-                f'expected={int(expected_len)}, observed={len(vector)}'
-            )
+            raise ValueError(f'Backbone baseline `{key}` length mismatch. '
+                             f'expected={int(expected_len)}, observed={len(vector)}')
         return vector
 
     @staticmethod
@@ -322,16 +308,12 @@ class RegainEvaluator:
                 continue
             value_float = float(value)
             if not math.isfinite(value_float):
-                raise ValueError(
-                    f'Backbone baseline `{key}` contains non-finite value '
-                    f'at index {idx}: {value!r}'
-                )
+                raise ValueError(f'Backbone baseline `{key}` contains non-finite value '
+                                 f'at index {idx}: {value!r}')
             vector.append(value_float)
         if len(vector) != int(expected_len):
-            raise ValueError(
-                f'Backbone baseline `{key}` length mismatch. '
-                f'expected={int(expected_len)}, observed={len(vector)}'
-            )
+            raise ValueError(f'Backbone baseline `{key}` length mismatch. '
+                             f'expected={int(expected_len)}, observed={len(vector)}')
         return vector
 
     def run_before_training(self) -> None:
@@ -393,15 +375,9 @@ class RegainEvaluator:
         capture_auxiliary_metrics = True
         checkpoint_exp_idx = None
         if isinstance(capture_context, Mapping):
-            capture_auxiliary_metrics = bool(
-                capture_context.get('capture_auxiliary_metrics', True)
-            )
+            capture_auxiliary_metrics = bool(capture_context.get('capture_auxiliary_metrics', True))
             checkpoint_exp_idx_raw = capture_context.get('checkpoint_exp_idx')
-            checkpoint_exp_idx = (
-                int(checkpoint_exp_idx_raw)
-                if checkpoint_exp_idx_raw is not None
-                else None
-            )
+            checkpoint_exp_idx = (int(checkpoint_exp_idx_raw) if checkpoint_exp_idx_raw is not None else None)
 
         self.calibration.begin_pass(
             eval_tag=str(getattr(strategy, '_regain_eval_tag', '') or ''),
@@ -542,16 +518,8 @@ class RegainEvaluator:
         per_exp_acc: dict[int, float] = {}
         per_exp_loss: dict[int, float] = {}
         per_exp_logits: dict[int, np.ndarray] | None = {} if capture_logits else None
-        per_exp_backbone_logits: dict[int, np.ndarray] | None = (
-            {}
-            if capture_backbone_logits
-            else None
-        )
-        per_exp_targets: dict[int, np.ndarray] | None = (
-            {}
-            if (capture_logits or capture_backbone_logits)
-            else None
-        )
+        per_exp_backbone_logits: dict[int, np.ndarray] | None = ({} if capture_backbone_logits else None)
+        per_exp_targets: dict[int, np.ndarray] | None = ({} if (capture_logits or capture_backbone_logits) else None)
         per_exp_class_ids: dict[int, list[int]] = {}
 
         started_at = time.perf_counter()
@@ -619,9 +587,7 @@ class RegainEvaluator:
                                         train_seen_classes=self.seen_classes,
                                     )
                                     if not torch.is_tensor(outputs):
-                                        raise TypeError(
-                                            'Repair controller correction must return a tensor of logits.'
-                                        )
+                                        raise TypeError('Repair controller correction must return a tensor of logits.')
 
                                 check_eval_batch(
                                     logits=outputs,
@@ -656,17 +622,13 @@ class RegainEvaluator:
                                     )
 
                                 if capture_logits:
-                                    logits_chunks.append(
-                                        outputs.detach().to(device='cpu', dtype=torch.float32).numpy()
-                                    )
+                                    logits_chunks.append(outputs.detach().to(device='cpu', dtype=torch.float32).numpy())
                                 if capture_backbone_logits and backbone_logits is not None:
-                                    backbone_logits_chunks.append(
-                                        backbone_logits.detach().to(device='cpu', dtype=torch.float32).numpy()
-                                    )
+                                    backbone_logits_chunks.append(backbone_logits.detach().to(
+                                        device='cpu', dtype=torch.float32).numpy())
                                 if per_exp_targets is not None:
-                                    targets_chunks.append(
-                                        batch_targets.detach().to(device='cpu', dtype=torch.int32).numpy()
-                                    )
+                                    targets_chunks.append(batch_targets.detach().to(device='cpu',
+                                                                                    dtype=torch.int32).numpy())
 
                             if self.calibration is not None:
                                 self.calibration.end_experience(log_step=log_step)
@@ -675,10 +637,8 @@ class RegainEvaluator:
                             self._controller_on_eval_experience_end()
 
                             if total_examples <= 0:
-                                raise RuntimeError(
-                                    'Evaluation pass produced no samples. '
-                                    f'label={label}, exp_idx={exp_idx}'
-                                )
+                                raise RuntimeError('Evaluation pass produced no samples. '
+                                                   f'label={label}, exp_idx={exp_idx}')
 
                             if compute_accuracy:
                                 per_exp_acc[exp_idx] = float(total_correct) / float(total_examples)
@@ -822,10 +782,8 @@ class RegainEvaluator:
             mask_value=self.mask_value,
         )
         if ref_test_accuracy is None:
-            raise RuntimeError(
-                'Missing derived current-test reference accuracy. '
-                f'eval_tag={eval_tag}, checkpoint_exp_idx={exp_idx}'
-            )
+            raise RuntimeError('Missing derived current-test reference accuracy. '
+                               f'eval_tag={eval_tag}, checkpoint_exp_idx={exp_idx}')
 
         self._log_current_experience_loss(
             experience=self.benchmark.train_stream[exp_idx],
@@ -900,14 +858,12 @@ class RegainEvaluator:
     def run_after_training(
         self,
         *,
-        strategy: BaseTemplate,
         seen_classes: Iterable[int],
     ) -> None:
         """
         Run the end-of-training evaluation schedule and artifact logging.
 
         Args:
-            strategy (BaseTemplate): Avalanche strategy.
             seen_classes (Iterable[int]): Class ids observed in training so far.
         """
         del seen_classes
@@ -917,14 +873,8 @@ class RegainEvaluator:
         eval_metric_step = self._avalanche_eval_metric_step()
         last_exp_idx = self._num_experiences - 1
 
-        should_run_final = (
-            self.last_posthoc_scalar_results is None
-            or self.last_posthoc_exp_idx != last_exp_idx
-            or (
-                self._is_repair_controller()
-                and not self.repair_after_experience
-            )
-        )
+        should_run_final = (self.last_posthoc_scalar_results is None or self.last_posthoc_exp_idx != last_exp_idx or
+                            (self._is_repair_controller() and not self.repair_after_experience))
         if should_run_final:
             final_ckpt = self.eval_pass(
                 self.benchmark.test_stream,
@@ -1128,8 +1078,7 @@ class RegainEvaluator:
         if log_ctrl_metrics and final_test_ctrl is not None:
             for exp_idx, value in enumerate(final_test_ctrl):
                 final_scalar_results[
-                    f'{RUN_ACC_FINAL}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}{NS_SEP}ctrl'
-                ] = float(value)
+                    f'{RUN_ACC_FINAL}{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}{NS_SEP}ctrl'] = float(value)
             final_scalar_results[RUN_ACC_FINAL_AVG_CTRL] = self._mean_accuracy(final_test_ctrl)
         self.last_posthoc_scalar_results = final_scalar_results
 
@@ -1330,18 +1279,11 @@ class RegainEvaluator:
         """
         if self._is_repair_controller():
             if self._backbone_diag_vectors is None:
-                raise RuntimeError(
-                    'Repair-controller runs require backbone diagnostic vectors '
-                    'for analysis artifacts.'
-                )
-            return {
-                key: [value for value in vector]
-                for key, vector in self._backbone_diag_vectors.items()
-            }
+                raise RuntimeError('Repair-controller runs require backbone diagnostic vectors '
+                                   'for analysis artifacts.')
+            return {key: [value for value in vector] for key, vector in self._backbone_diag_vectors.items()}
         if self.calibration is None:
-            raise RuntimeError(
-                'CalibrationCollector is required to produce diagnostic vectors.'
-            )
+            raise RuntimeError('CalibrationCollector is required to produce diagnostic vectors.')
         return self.calibration.base_diagnostic_vectors(expected_len=self._num_experiences)
 
     @staticmethod
@@ -1357,11 +1299,7 @@ class RegainEvaluator:
         """
         if values is None:
             return None
-        finite_values = [
-            float(value)
-            for value in values
-            if value is not None and math.isfinite(float(value))
-        ]
+        finite_values = [float(value) for value in values if value is not None and math.isfinite(float(value))]
         if not finite_values:
             return None
         return float(max(finite_values))
@@ -1375,16 +1313,12 @@ class RegainEvaluator:
         """
         if self._is_repair_controller():
             if self._backbone_diag_vectors is None:
-                raise RuntimeError(
-                    'Repair-controller runs require backbone calibration vectors '
-                    'to compute `calib.max_ece`.'
-                )
+                raise RuntimeError('Repair-controller runs require backbone calibration vectors '
+                                   'to compute `calib.max_ece`.')
             max_ece = self._max_optional_vector(self._backbone_diag_vectors.get(RUN_CALIB_ECE))
             if max_ece is None:
-                raise RuntimeError(
-                    'Repair-controller runs require finite `calib.ece` values '
-                    'to compute `calib.max_ece`.'
-                )
+                raise RuntimeError('Repair-controller runs require finite `calib.ece` values '
+                                   'to compute `calib.max_ece`.')
             return float(max_ece)
         if self.calibration is None:
             raise RuntimeError('CalibrationCollector is required to compute `calib.max_ece`.')

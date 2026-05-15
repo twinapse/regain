@@ -12,6 +12,10 @@ from regain.experiments.utils import resolve_avalanche_eval_every
 
 
 class TestResolveAvalancheEvalEvery:
+    """
+    Tests for Avalanche eval frequency resolution.
+    """
+
     def test_returns_zero_for_per_experience_schedule(self) -> None:
         assert resolve_avalanche_eval_every(avalanche_schedule='per_experience') == 0
 

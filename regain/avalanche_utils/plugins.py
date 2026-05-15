@@ -92,6 +92,7 @@ class MetricContextPlugin(SupervisedPlugin):
         return int(strategy.experience.current_experience)
 
     def before_training(self, strategy, **kwargs) -> None:
+        del strategy, kwargs
         self.context.set_phase(MetricPhase.TRAIN)
         self.context.set_log_namespace(NAMESPACE_TRAIN)
         self.context.set_log_enabled(True)
@@ -100,6 +101,7 @@ class MetricContextPlugin(SupervisedPlugin):
         self.context.set_log_step(0)
 
     def before_training_exp(self, strategy, **kwargs) -> None:
+        del kwargs
         self.context.set_phase(MetricPhase.TRAIN)
         self.context.set_log_namespace(NAMESPACE_TRAIN)
         self.context.set_log_enabled(True)
@@ -107,6 +109,7 @@ class MetricContextPlugin(SupervisedPlugin):
         self.context.reset_experience_counters()
 
     def before_training_epoch(self, strategy, **kwargs) -> None:
+        del kwargs
         self.context.set_phase(MetricPhase.TRAIN)
         self.context.set_log_namespace(NAMESPACE_TRAIN)
         self.context.set_log_enabled(True)
@@ -114,6 +117,7 @@ class MetricContextPlugin(SupervisedPlugin):
         self.context.advance_training_epoch()
 
     def before_eval(self, strategy, **kwargs) -> None:
+        del strategy, kwargs
         self.context.set_phase(MetricPhase.EVAL)
         if self.context.log_namespace in {NAMESPACE_TRAIN, NAMESPACE_EVAL}:
             self.context.set_log_namespace(NAMESPACE_EVAL)
@@ -121,6 +125,7 @@ class MetricContextPlugin(SupervisedPlugin):
         self.context.set_epoch(0)
 
     def before_eval_exp(self, strategy, **kwargs) -> None:
+        del kwargs
         self.context.set_phase(MetricPhase.EVAL)
         if self.context.log_namespace in {NAMESPACE_TRAIN, NAMESPACE_EVAL}:
             self.context.set_log_namespace(NAMESPACE_EVAL)
@@ -156,12 +161,10 @@ class BackboneCheckpointWriterPlugin(SupervisedPlugin):
         Returns:
             dict[str, torch.Tensor]: CPU copy of the model state dict.
         """
-        return {
-            name: tensor.detach().cpu().clone()
-            for name, tensor in model.state_dict().items()
-        }
+        return {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Persist a checkpoint for the completed training experience.
         model = strategy.model
         if not isinstance(model, nn.Module):
@@ -195,10 +198,8 @@ class BackboneCheckpointWriterPlugin(SupervisedPlugin):
         if expected_count is not None:
             expected_indices = list(range(int(expected_count)))
             if ordered_indices != expected_indices:
-                raise RuntimeError(
-                    'Backbone checkpoints are incomplete or out of order. '
-                    f'expected={expected_indices}, observed={ordered_indices}'
-                )
+                raise RuntimeError('Backbone checkpoints are incomplete or out of order. '
+                                   f'expected={expected_indices}, observed={ordered_indices}')
         return [self._checkpoint_paths[idx] for idx in ordered_indices]
 
 
@@ -237,6 +238,7 @@ class BackboneCheckpointLoaderPlugin(SupervisedPlugin):
         raise TypeError('Invalid checkpoint payload. Expected a state_dict mapping.')
 
     def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Restore the checkpoint tied to the upcoming training experience.
         model = strategy.model
         if not isinstance(model, nn.Module):
@@ -246,10 +248,8 @@ class BackboneCheckpointLoaderPlugin(SupervisedPlugin):
         exp_idx = int(experience.current_experience)
         # Ensure the requested experience index is backed by a checkpoint.
         if exp_idx < 0 or exp_idx >= len(self._checkpoint_paths):
-            raise ValueError(
-                'Missing backbone checkpoint for experience '
-                f'{exp_idx}. Available indices: 0..{max(0, len(self._checkpoint_paths) - 1)}'
-            )
+            raise ValueError('Missing backbone checkpoint for experience '
+                             f'{exp_idx}. Available indices: 0..{max(0, len(self._checkpoint_paths) - 1)}')
 
         checkpoint_path = self._checkpoint_paths[exp_idx]
         if not checkpoint_path.exists():
@@ -285,6 +285,7 @@ class LRSchedulerPlugin(SupervisedPlugin):
         self._scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
 
     def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         for param_group in strategy.optimizer.param_groups:
             param_group['lr'] = self._initial_lr
         self._scheduler = self._scheduler_cls(
@@ -293,6 +294,7 @@ class LRSchedulerPlugin(SupervisedPlugin):
         )
 
     def after_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
+        del strategy, kwargs
         if self._scheduler is not None:
             self._scheduler.step()
 
@@ -313,9 +315,9 @@ class GradientClippingPlugin(SupervisedPlugin):
         self.norm_type = float(norm_type)
 
     def before_update(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         trainable_params = [
-            parameter
-            for parameter in strategy.model.parameters()
+            parameter for parameter in strategy.model.parameters()
             if parameter.requires_grad and parameter.grad is not None
         ]
         if not trainable_params:
@@ -351,6 +353,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller: PreventionController = controller
 
     def before_training(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Initialize controller state from the strategy model once per training run.
         model = strategy.model
         if not isinstance(model, nn.Module):
@@ -363,6 +366,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
             self.controller.correct_backbone(model)
 
     def before_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Resolve the experience dataset and forward the start-of-experience hook.
         experience = strategy.experience
         dataset: RegainDataset | None = None
@@ -370,11 +374,12 @@ class PreventionControllerPlugin(SupervisedPlugin):
             if hasattr(experience, 'dataset'):
                 dataset = experience.dataset
             elif hasattr(experience, '_dataset'):
-                dataset = experience._dataset
+                dataset = experience._dataset  # pylint: disable=protected-access
 
         self.controller.on_train_experience_begin(dataset)
 
     def before_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Forward the epoch-start hook with a validated model instance.
         model = strategy.model
         if not isinstance(model, nn.Module):
@@ -383,6 +388,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller.on_train_epoch_begin(model)
 
     def before_backward(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Only objective-aware controllers are allowed to rewrite loss values.
         if not isinstance(self.controller, TrainingObjectiveControllerInterface):
             return
@@ -409,6 +415,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
             strategy.loss = updated_loss
 
     def after_training_epoch(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Forward the epoch-end hook to keep controller state synchronized.
         model = strategy.model
         if not isinstance(model, nn.Module):
@@ -417,6 +424,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller.on_train_epoch_end(model)
 
     def after_training_exp(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Notify controller that an experience has finished training.
         model = strategy.model
         if not isinstance(model, nn.Module):
@@ -425,6 +433,7 @@ class PreventionControllerPlugin(SupervisedPlugin):
         self.controller.on_train_experience_end(model)
 
     def after_training(self, strategy: BaseTemplate, **kwargs) -> None:
+        del kwargs
         # Notify controller that the full training lifecycle has completed.
         model = strategy.model
         if not isinstance(model, nn.Module):
@@ -504,7 +513,7 @@ class RepairControllerPlugin(SupervisedPlugin):
             raise ValueError('`repair_batch_size` must be positive.')
         if self.repair_epochs < 0:
             raise ValueError('`repair_epochs` must be non-negative.')
-        if not (0.0 < self.budget_fraction <= 1.0):
+        if not 0.0 < self.budget_fraction <= 1.0:
             raise ValueError('`budget_fraction` must be in the range (0, 1].')
         self._repair_datasets: list[Dataset] = []
         self._seen_classes: set[int] = set()
@@ -608,10 +617,8 @@ class RepairControllerPlugin(SupervisedPlugin):
         original_indices = dataset.original_indices
         values = [int(value) for value in list(original_indices)]
         if len(values) != len(dataset):
-            raise ValueError(
-                f'original_indices length ({len(values)}) does not match '
-                f'dataset length ({len(dataset)}).'
-            )
+            raise ValueError(f'original_indices length ({len(values)}) does not match '
+                             f'dataset length ({len(dataset)}).')
         return values
 
     def _select_budget_fraction(
@@ -648,10 +655,7 @@ class RepairControllerPlugin(SupervisedPlugin):
 
         # Compute deterministic stratified per-class selected counts.
         class_ids = sorted(int(cls) for cls in np.unique(targets_arr))
-        class_counts: dict[int, int] = {
-            class_id: int(np.sum(targets_arr == class_id))
-            for class_id in class_ids
-        }
+        class_counts: dict[int, int] = {class_id: int(np.sum(targets_arr == class_id)) for class_id in class_ids}
         class_target_counts: dict[int, float] = {}
         selected_count_by_class: dict[int, int] = {}
         selected_count_total = 0
@@ -666,22 +670,15 @@ class RepairControllerPlugin(SupervisedPlugin):
         remaining_slots = int(budget_size - selected_count_total)
         while remaining_slots > 0:
             candidate_class_ids = [
-                class_id
-                for class_id in class_ids
-                if selected_count_by_class[class_id] < class_counts[class_id]
+                class_id for class_id in class_ids if selected_count_by_class[class_id] < class_counts[class_id]
             ]
             if not candidate_class_ids:
-                raise ValueError(
-                    'Repair budget guard failed: could not place remaining stratified budget slots. '
-                    f'exp_idx={exp_idx}, remaining_slots={remaining_slots}.'
-                )
+                raise ValueError('Repair budget guard failed: could not place remaining stratified budget slots. '
+                                 f'exp_idx={exp_idx}, remaining_slots={remaining_slots}.')
             selected_class_id = min(
                 candidate_class_ids,
                 key=lambda class_id: (
-                    -(
-                        class_target_counts[class_id]
-                        - float(selected_count_by_class[class_id])
-                    ),
+                    -(class_target_counts[class_id] - float(selected_count_by_class[class_id])),
                     class_id,
                 ),
             )
@@ -697,10 +694,10 @@ class RepairControllerPlugin(SupervisedPlugin):
 
             class_local_indices = sorted(
                 class_local_indices,
-                key=lambda local_idx: self._sample_score(
+                key=lambda local_idx, cid=class_id: self._sample_score(
                     seed=self.seed,
                     exp_idx=exp_idx,
-                    class_id=class_id,
+                    class_id=cid,
                     sample_id=int(original_indices[local_idx]),
                 ),
             )
@@ -755,11 +752,7 @@ class RepairControllerPlugin(SupervisedPlugin):
             step=step,
         )
 
-        suffix = (
-            f'{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}'
-            if exp_idx is not None
-            else f'{NS_SEP}final'
-        )
+        suffix = (f'{NS_SEP}{EXPERIENCE_KEY_PREFIX}{int(exp_idx):03d}' if exp_idx is not None else f'{NS_SEP}final')
         mlflow.log_metric(
             key=f'{RUN_REPAIR_SECONDS}{suffix}',
             value=float(elapsed_seconds),
@@ -957,10 +950,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         model = strategy.model
         if not isinstance(model, nn.Module):
             raise TypeError('Strategy.model must be an nn.Module.')
-        if (
-            self._should_stash_ref_backbone_logits(strategy=strategy)
-            and torch.is_tensor(strategy.mb_output)
-        ):
+        if (self._should_stash_ref_backbone_logits(strategy=strategy) and torch.is_tensor(strategy.mb_output)):
             setattr(
                 strategy,
                 _REF_BACKBONE_LOGITS_ATTR,
@@ -1025,7 +1015,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         if hasattr(repair_exp, 'dataset'):
             return repair_exp.dataset
         if hasattr(repair_exp, '_dataset'):
-            return repair_exp._dataset
+            return repair_exp._dataset  # pylint: disable=protected-access
         return None
 
     @staticmethod
@@ -1131,9 +1121,7 @@ class NumericalStabilityGuardPlugin(SupervisedPlugin):
             total_non_finite += non_finite_count
             if first_param_name is None:
                 first_param_name = str(param_name)
-                first_non_finite_value = (
-                    param.detach()[mask].reshape(-1)[0].to(device='cpu').item()
-                )
+                first_non_finite_value = (param.detach()[mask].reshape(-1)[0].to(device='cpu').item())
         if total_non_finite <= 0:
             return
         context = self._error_context(
@@ -1165,11 +1153,8 @@ class NumericalStabilityGuardPlugin(SupervisedPlugin):
             phase_label = str(phase)
         experience = getattr(strategy, 'experience', None)
         exp_idx: int | None = None
-        if (
-            experience is not None
-            and hasattr(experience, 'current_experience')
-            and getattr(experience, 'current_experience') is not None
-        ):
+        if (experience is not None and hasattr(experience, 'current_experience') and
+                getattr(experience, 'current_experience') is not None):
             exp_idx = int(experience.current_experience)
         return {
             'phase': phase_label,
@@ -1191,9 +1176,7 @@ class NumericalStabilityGuardPlugin(SupervisedPlugin):
             non_finite_count = int(torch.sum(mask).item())
             if non_finite_count <= 0:
                 return
-            first_non_finite_value = (
-                value.detach()[mask].reshape(-1)[0].to(device='cpu').item()
-            )
+            first_non_finite_value = (value.detach()[mask].reshape(-1)[0].to(device='cpu').item())
             self._raise_non_finite(
                 tensor_name=tensor_name,
                 non_finite_count=non_finite_count,
@@ -1239,16 +1222,14 @@ class NumericalStabilityGuardPlugin(SupervisedPlugin):
         if extra is not None:
             for key, value in extra.items():
                 payload[str(key)] = value
-        raise RuntimeError(
-            'Non-finite tensor detected. '
-            f'tensor={payload["tensor_name"]}, '
-            f'non_finite_count={payload["non_finite_count"]}, '
-            f'phase={payload["phase"]}, '
-            f'exp_idx={payload["exp_idx"]}, '
-            f'step={payload["step"]}, '
-            f'batch={payload["batch"]}, '
-            f'eval_tag={payload["eval_tag"]}'
-        )
+        raise RuntimeError('Non-finite tensor detected. '
+                           f'tensor={payload["tensor_name"]}, '
+                           f'non_finite_count={payload["non_finite_count"]}, '
+                           f'phase={payload["phase"]}, '
+                           f'exp_idx={payload["exp_idx"]}, '
+                           f'step={payload["step"]}, '
+                           f'batch={payload["batch"]}, '
+                           f'eval_tag={payload["eval_tag"]}')
 
 
 class SeenClassesObserver(SupervisedPlugin):
@@ -1404,11 +1385,8 @@ class RegainEvaluationPlugin(SupervisedPlugin):
         Args:
             strategy (BaseTemplate): Avalanche strategy.
         """
-        del kwargs
-        self.evaluator.run_after_training(
-            strategy=strategy,
-            seen_classes=self.seen_classes_observer.seen_classes,
-        )
+        del strategy, kwargs
+        self.evaluator.run_after_training(seen_classes=self.seen_classes_observer.seen_classes,)
 
 
 def make_training_evaluation_plugin(

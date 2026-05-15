@@ -7,6 +7,10 @@ from regain.avalanche_utils.plugins import make_training_evaluation_plugin
 
 
 class TestTrainingEvaluationPluginFactory:
+    """
+    Tests for training evaluation plugin factory.
+    """
+
     def test_keeps_only_loss_and_timing_metrics(self) -> None:
         plugin = make_training_evaluation_plugin(
             context=MetricContext(),

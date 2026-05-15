@@ -105,11 +105,7 @@ class CalibrationCollector:
             capture_auxiliary_metrics (bool): Whether to collect metrics for the pass.
         """
         self._eval_tag = str(eval_tag)
-        self._checkpoint_exp_idx = (
-            int(checkpoint_exp_idx)
-            if checkpoint_exp_idx is not None
-            else None
-        )
+        self._checkpoint_exp_idx = (int(checkpoint_exp_idx) if checkpoint_exp_idx is not None else None)
         self._capture_auxiliary_metrics = bool(capture_auxiliary_metrics)
         self._current_eval_metrics = {}
         self._current_exp_stats = None
@@ -126,14 +122,8 @@ class CalibrationCollector:
             self._checkpoint_exp_idx = None
             return
 
-        self._latest_eval_metrics = {
-            int(exp_idx): values
-            for exp_idx, values in self._current_eval_metrics.items()
-        }
-        ece_values = [
-            float(values.ece)
-            for values in self._current_eval_metrics.values()
-        ]
+        self._latest_eval_metrics = {int(exp_idx): values for exp_idx, values in self._current_eval_metrics.items()}
+        ece_values = [float(values.ece) for values in self._current_eval_metrics.values()]
         if ece_values and log_step is not None and mlflow.active_run() is not None:
             mlflow.log_metric(
                 key=RUN_CALIB_MAX_ECE,
@@ -196,10 +186,8 @@ class CalibrationCollector:
 
         targets_vec = targets.reshape(-1).to(device=logits.device, dtype=torch.long)
         if int(targets_vec.shape[0]) != int(logits.shape[0]):
-            raise ValueError(
-                'Calibration collector batch mismatch. '
-                f'logits_batch={int(logits.shape[0])}, target_batch={int(targets_vec.shape[0])}'
-            )
+            raise ValueError('Calibration collector batch mismatch. '
+                             f'logits_batch={int(logits.shape[0])}, target_batch={int(targets_vec.shape[0])}')
         if targets_vec.numel() <= 0:
             return
 
@@ -209,11 +197,11 @@ class CalibrationCollector:
             corr = preds.eq(targets_vec).to(dtype=torch.float32)
             p_true = probs.gather(1, targets_vec.unsqueeze(1)).squeeze(1).clamp(min=1e-12)
             nll_sum = float(torch.sum(-torch.log(p_true)).item())
-            one_hot = torch.nn.functional.one_hot(
+            one_hot = torch.nn.functional.one_hot(  # pylint: disable=not-callable
                 targets_vec,
                 num_classes=int(probs.shape[1]),
             ).to(dtype=probs.dtype)
-            brier_sum = float(torch.sum(torch.sum((probs - one_hot) ** 2, dim=1)).item())
+            brier_sum = float(torch.sum(torch.sum((probs - one_hot)**2, dim=1)).item())
             entropy = -torch.sum(probs * torch.log(probs.clamp(min=1e-12)), dim=1)
 
             class_ids = self._current_exp_stats.class_ids
@@ -281,11 +269,7 @@ class CalibrationCollector:
         if class_ids:
             out_of_task_rate = 1.0 - (float(self._current_exp_stats.in_task_sum) / float(n))
         logit_sum_tensor = self._current_exp_stats.logit_sum
-        logit_mean = (
-            logit_sum_tensor / float(n)
-            if isinstance(logit_sum_tensor, torch.Tensor)
-            else None
-        )
+        logit_mean = (logit_sum_tensor / float(n) if isinstance(logit_sum_tensor, torch.Tensor) else None)
 
         exp_idx = int(self._current_exp_idx)
         metrics_payload = _EvalMetrics(
@@ -296,16 +280,8 @@ class CalibrationCollector:
             brier=float(brier),
             avg_conf=float(mean_conf),
             avg_entropy=float(mean_entropy),
-            logit_mean=(
-                logit_mean.detach().cpu().numpy()
-                if isinstance(logit_mean, torch.Tensor)
-                else None
-            ),
-            out_of_task_rate=(
-                float(out_of_task_rate)
-                if out_of_task_rate is not None
-                else None
-            ),
+            logit_mean=(logit_mean.detach().cpu().numpy() if isinstance(logit_mean, torch.Tensor) else None),
+            out_of_task_rate=(float(out_of_task_rate) if out_of_task_rate is not None else None),
         )
 
         self._current_eval_metrics[exp_idx] = metrics_payload
@@ -340,12 +316,8 @@ class CalibrationCollector:
 
         if self._eval_tag == 'ref' and metrics_payload.logit_mean is not None:
             self._ref_logit_means[exp_idx] = np.asarray(metrics_payload.logit_mean, dtype=np.float64)
-        if (
-            self._eval_tag == 'base'
-            and self._checkpoint_exp_idx is not None
-            and int(exp_idx) == int(self._checkpoint_exp_idx)
-            and metrics_payload.logit_mean is not None
-        ):
+        if (self._eval_tag == 'base' and self._checkpoint_exp_idx is not None and
+                int(exp_idx) == int(self._checkpoint_exp_idx) and metrics_payload.logit_mean is not None):
             self._ref_logit_means[exp_idx] = np.asarray(metrics_payload.logit_mean, dtype=np.float64)
         if self._eval_tag == 'base':
             if metrics_payload.logit_mean is not None:
@@ -358,9 +330,7 @@ class CalibrationCollector:
                 RUN_CALIB_NLL: float(metrics_payload.nll),
             }
             if metrics_payload.out_of_task_rate is not None:
-                self._base_diagnostics[exp_idx][RUN_DIAG_OUT_OF_TASK_RATE] = float(
-                    metrics_payload.out_of_task_rate
-                )
+                self._base_diagnostics[exp_idx][RUN_DIAG_OUT_OF_TASK_RATE] = float(metrics_payload.out_of_task_rate)
 
     def latest_max_ece(self) -> float | None:
         """
@@ -369,10 +339,7 @@ class CalibrationCollector:
         Returns:
             float | None: Maximum ECE or `None` when unavailable.
         """
-        ece_values = [
-            float(values.ece)
-            for values in self._latest_eval_metrics.values()
-        ]
+        ece_values = [float(values.ece) for values in self._latest_eval_metrics.values()]
         if not ece_values:
             return None
         return float(max(ece_values))
@@ -388,8 +355,7 @@ class CalibrationCollector:
             dict[str, list[float | None]]: Diagnostic vectors keyed by run metric name.
         """
         vectors: dict[str, list[float | None]] = {
-            key: [None for _ in range(int(expected_len))]
-            for key in DIAG_VECTOR_KEYS
+            key: [None for _ in range(int(expected_len))] for key in DIAG_VECTOR_KEYS
         }
 
         for exp_idx, payload in self._base_diagnostics.items():
@@ -406,9 +372,7 @@ class CalibrationCollector:
             base_mean = self._base_logit_means.get(exp_idx)
             if ref_mean is None or base_mean is None:
                 continue
-            vectors[RUN_DIAG_LOGIT_AVG_DRIFT][exp_idx] = float(
-                np.linalg.norm(ref_mean - base_mean, ord=2)
-            )
+            vectors[RUN_DIAG_LOGIT_AVG_DRIFT][exp_idx] = float(np.linalg.norm(ref_mean - base_mean, ord=2))
 
         return vectors
 

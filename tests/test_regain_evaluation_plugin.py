@@ -9,6 +9,10 @@ from regain.avalanche_utils.plugins import SeenClassesObserver
 
 
 class _FakeEvaluator:
+    """
+    Fake evaluator stub.
+    """
+
     def __init__(self) -> None:
         self.artifacts = {'ok': True}
         self.last_posthoc_scalar_results = {'metric': 1.0}
@@ -35,11 +39,15 @@ class _FakeEvaluator:
     def run_after_training_exp(self, *, strategy: object, seen_classes) -> None:
         self.calls.append(('after_training_exp', strategy, set(int(v) for v in seen_classes)))
 
-    def run_after_training(self, *, strategy: object, seen_classes) -> None:
-        self.calls.append(('after_training', strategy, set(int(v) for v in seen_classes)))
+    def run_after_training(self, *, seen_classes) -> None:
+        self.calls.append(('after_training', None, set(int(v) for v in seen_classes)))
 
 
 class TestRegainEvaluationPlugin:
+    """
+    Tests for RegainEvaluationPlugin.
+    """
+
     def test_delegates_to_helper_and_exposes_properties(self) -> None:
         evaluator = _FakeEvaluator()
         observer = SeenClassesObserver()
@@ -69,5 +77,5 @@ class TestRegainEvaluationPlugin:
             ('after_eval_exp', None, None),
             ('after_eval', None, None),
             ('after_training_exp', strategy, {1, 2}),
-            ('after_training', strategy, {1, 2}),
+            ('after_training', None, {1, 2}),
         ]

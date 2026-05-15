@@ -87,18 +87,16 @@ def test_parser_rejects_legacy_export_dir_flag() -> None:
     parser = export_analysis_cli._build_arg_parser()
 
     with pytest.raises(SystemExit):
-        parser.parse_args(
-            [
-                '--experiments',
-                'exp_1',
-                '--analysis-dir',
-                '/tmp/analysis',
-                '--output-dir',
-                '/tmp/exports',
-                '--export-dir',
-                '/tmp/legacy',
-            ]
-        )
+        parser.parse_args([
+            '--experiments',
+            'exp_1',
+            '--analysis-dir',
+            '/tmp/analysis',
+            '--output-dir',
+            '/tmp/exports',
+            '--export-dir',
+            '/tmp/legacy',
+        ])
 
 
 def test_load_analysis_tables_uses_renamed_jsonl_inputs(tmp_path: Path) -> None:
@@ -108,9 +106,7 @@ def test_load_analysis_tables_uses_renamed_jsonl_inputs(tmp_path: Path) -> None:
     (tables_dir / 'run_metrics.jsonl').write_text('{"run_id":"run_1"}\n', encoding='utf-8')
     (tables_dir / 'experience_metrics.jsonl').write_text('{"run_id":"run_1","exp_idx":0}\n', encoding='utf-8')
 
-    runs_table, experiences_table = export_analysis_cli._load_analysis_tables(
-        experiment_dir=experiment_dir,
-    )
+    runs_table, experiences_table = export_analysis_cli._load_analysis_tables(experiment_dir=experiment_dir,)
 
     assert runs_table == [{'run_id': 'run_1'}]
     assert experiences_table == [{'run_id': 'run_1', 'exp_idx': 0}]
@@ -139,10 +135,8 @@ def test_export_analysis_includes_no_op_rows(
         encoding='utf-8',
     )
     (frontier_dir / 'candidates.csv').write_text(
-        (
-            'controller_name,controller_id,is_no_op_action,action_repair_budget_fraction,utility_primary\n'
-            'no-op,no_op,True,0.0,0.0\n'
-        ),
+        ('controller_name,controller_id,is_no_op_action,action_repair_budget_fraction,utility_primary\n'
+         'no-op,no_op,True,0.0,0.0\n'),
         encoding='utf-8',
     )
     (frontier_dir / 'pareto.csv').write_text(
@@ -170,8 +164,13 @@ def test_export_analysis_includes_no_op_rows(
         export_path=export_path,
         tracking_uri=None,
         artifact_location=None,
-        runs_table=[{'run_id': 'run_1'}],
-        experiences_table=[{'run_id': 'run_1', 'exp_idx': 0}],
+        runs_table=[{
+            'run_id': 'run_1'
+        }],
+        experiences_table=[{
+            'run_id': 'run_1',
+            'exp_idx': 0
+        }],
         include_controllers=None,
         exclude_controllers=None,
         max_runs=None,
@@ -245,8 +244,13 @@ def test_export_analysis_includes_router_section(
         export_path=export_path,
         tracking_uri=None,
         artifact_location=None,
-        runs_table=[{'run_id': 'run_1'}],
-        experiences_table=[{'run_id': 'run_1', 'exp_idx': 0}],
+        runs_table=[{
+            'run_id': 'run_1'
+        }],
+        experiences_table=[{
+            'run_id': 'run_1',
+            'exp_idx': 0
+        }],
         include_controllers=None,
         exclude_controllers=None,
         max_runs=None,

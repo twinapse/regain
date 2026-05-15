@@ -98,7 +98,7 @@ def write_recoverability_curves(
 
     curve_path = outp / 'recoverability_curve.csv'
     write_csv(curve_path, curve_rows)
-    logger.warning(f'Wrote {curve_path}')
+    logger.warning('Wrote %s', curve_path)
 
     experience_groups: dict[tuple[str, Any, int, Any], list[dict[str, Any]]] = {}
     for row in experiences_table:
@@ -112,8 +112,8 @@ def write_recoverability_curves(
 
     task_rows: list[dict[str, Any]] = []
     for (controller, budget, exp_idx, task_age), rows in sorted(
-        experience_groups.items(),
-        key=lambda kv: (kv[0][0], kv[0][1], kv[0][2]),
+            experience_groups.items(),
+            key=lambda kv: (kv[0][0], kv[0][1], kv[0][2]),
     ):
         rho_vals = [to_float(row.get(ARTIFACT_RHO)) for row in rows]
         task_rows.append({
@@ -129,7 +129,7 @@ def write_recoverability_curves(
 
     task_path = outp / 'task_age_rho.csv'
     write_csv(task_path, task_rows)
-    logger.warning(f'Wrote {task_path}')
+    logger.warning('Wrote %s', task_path)
 
     calibration_rows: list[dict[str, Any]] = []
     for (controller, budget), rows in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
@@ -149,7 +149,7 @@ def write_recoverability_curves(
 
     calib_path = outp / 'calibration_vs_budget.csv'
     write_csv(calib_path, calibration_rows)
-    logger.warning(f'Wrote {calib_path}')
+    logger.warning('Wrote %s', calib_path)
 
     latency_rows: list[dict[str, Any]] = []
     for (controller, budget), rows in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
@@ -175,7 +175,7 @@ def write_recoverability_curves(
 
     latency_path = outp / 'latency_vs_budget.csv'
     write_csv(latency_path, latency_rows)
-    logger.warning(f'Wrote {latency_path}')
+    logger.warning('Wrote %s', latency_path)
 
     return curve_path, task_path, calib_path, latency_path
 

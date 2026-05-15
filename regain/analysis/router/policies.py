@@ -891,7 +891,7 @@ class _TwoStageExpectedUtilityRouter(RouterPolicy):
                 classes = list(self._gate_model.classes_)
                 positive_index = classes.index(1) if 1 in classes else 0
                 positive_probs = probabilities[:, positive_index]
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 positive_probs = np.zeros(len(train_indices), dtype=float)
             best_threshold = 0.5
             best_score = -math.inf
@@ -989,7 +989,7 @@ class _TwoStageExpectedUtilityRouter(RouterPolicy):
                     classes = list(self._gate_model.classes_)
                     positive_index = classes.index(1) if 1 in classes else 0
                     gate_pass = float(probabilities[0, positive_index]) >= self._gate_threshold
-                except Exception:
+                except Exception:  # pylint: disable=broad-exception-caught
                     gate_pass = False
             else:
                 gate_pass = False

@@ -48,6 +48,10 @@ def _resolve_center_crop_size(*, transform: CenterCrop) -> int:
 
 
 class TestSquareDatasetTransforms:
+    """
+    Tests for square dataset transforms.
+    """
+
     def test_cifar_like_transforms_disable_horizontal_flip_when_toggle_is_false(self) -> None:
         train_transform, _ = _build_square_dataset_train_eval_transforms(
             image_size=32,
@@ -76,10 +80,7 @@ class TestSquareDatasetTransforms:
             default_random_crop_padding=4,
         )
 
-        assert any(
-            isinstance(op, RandomHorizontalFlip)
-            for op in train_transform.transforms
-        )
+        assert any(isinstance(op, RandomHorizontalFlip) for op in train_transform.transforms)
 
     def test_random_resized_crop_replaces_default_random_crop(self) -> None:
         train_transform, _ = _build_square_dataset_train_eval_transforms(
@@ -94,13 +95,14 @@ class TestSquareDatasetTransforms:
         )
 
         assert isinstance(train_transform.transforms[0], RandomResizedCrop)
-        assert not any(
-            isinstance(op, RandomCrop)
-            for op in train_transform.transforms
-        )
+        assert not any(isinstance(op, RandomCrop) for op in train_transform.transforms)
 
 
 class TestImageNetTransforms:
+    """
+    Tests for ImageNet transforms.
+    """
+
     def test_resolve_imagenet_resize_size_scales_with_crop_size(self) -> None:
         assert _resolve_imagenet_eval_resize_size(image_size=224) == 256
         assert _resolve_imagenet_eval_resize_size(image_size=384) == 439
@@ -156,13 +158,14 @@ class TestImageNetTransforms:
             transform_image_size=224,
         )
 
-        assert any(
-            isinstance(op, RandomHorizontalFlip)
-            for op in train_transform.transforms
-        )
+        assert any(isinstance(op, RandomHorizontalFlip) for op in train_transform.transforms)
 
 
 class TestTransformToggleResolution:
+    """
+    Tests for transform toggle resolution.
+    """
+
     def test_resolve_transform_toggle_uses_default_true_when_toggle_is_none(self) -> None:
         assert _resolve_transform_toggle(toggle=None, default_toggle=True) is True
 

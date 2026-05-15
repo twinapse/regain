@@ -11,6 +11,10 @@ from regain.evaluation import PredictionRecorder
 
 
 class TestPredictionRecorder:
+    """
+    Tests for PredictionRecorder.
+    """
+
     def test_writes_npz_per_experience(self, tmp_path: Path) -> None:
         recorder = PredictionRecorder(
             artifact_root=tmp_path / 'predictions',

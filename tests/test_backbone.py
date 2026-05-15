@@ -53,16 +53,18 @@ def _make_run(
 
 
 class TestLoadBackboneAnalysisBaselineFromRun:
+    """
+    Tests for backbone analysis baseline loading.
+    """
+
     def test_requires_analysis_artifact_even_when_metrics_have_baselines(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.80,
-                f'{RUN_ACC_FINAL}.exp000.base': 0.55,
-            },
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.80,
+            f'{RUN_ACC_FINAL}.exp000.base': 0.55,
+        },)
         monkeypatch.setattr(
             backbone_module,
             'download_json_artifact',
@@ -195,6 +197,10 @@ class TestLoadBackboneAnalysisBaselineFromRun:
 
 
 class TestExtractBackboneKwargsFromRun:
+    """
+    Tests for backbone kwargs extraction from run.
+    """
+
     def test_extracts_non_training_backbone_params(self) -> None:
         run = _make_run(
             metrics={},
@@ -219,6 +225,10 @@ class TestExtractBackboneKwargsFromRun:
 
 
 class TestExtractBackboneTrainingConfigFromRun:
+    """
+    Tests for backbone training config extraction.
+    """
+
     def test_extracts_optimizer_scheduler_and_grad_clip_params(self) -> None:
         run = _make_run(
             metrics={},
@@ -265,6 +275,10 @@ class TestExtractBackboneTrainingConfigFromRun:
 
 
 class TestBackboneTrainingLoggingRoundTrip:
+    """
+    Tests for backbone training logging round-trip.
+    """
+
     def test_round_trips_adamw_scheduler_and_grad_clip_through_logged_params(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -316,7 +330,10 @@ class TestBackboneTrainingLoggingRoundTrip:
 
         log_run_params(
             experiment_config=experiment_config,
-            run_config_payload={'name': 'backbone', 'controller': None},
+            run_config_payload={
+                'name': 'backbone',
+                'controller': None
+            },
             controller_name=None,
             deterministic_algorithms_enabled=False,
             optimizer_kwargs={
@@ -331,7 +348,9 @@ class TestBackboneTrainingLoggingRoundTrip:
 
         run = _make_run(
             metrics={},
-            params={key: str(value) for key, value in captured.items()},
+            params={
+                key: str(value) for key, value in captured.items()
+            },
         )
         training = extract_backbone_training_config_from_run(run=run)
 
@@ -342,12 +361,20 @@ class TestBackboneTrainingLoggingRoundTrip:
 
 
 class _FakeEvaluator:
+    """
+    Fake evaluator stub.
+    """
+
     def __init__(self, artifacts: dict[str, object]) -> None:
         self.artifacts = artifacts
         self.last_posthoc_scalar_results = None
 
 
 class TestExtractBackboneAnalysisBaseline:
+    """
+    Tests for backbone analysis baseline extraction.
+    """
+
     def test_reads_artifacts_from_rewritten_regain_evaluation_plugin(self) -> None:
         artifacts: dict[str, object] = {
             ARTIFACT_ACC_EXP_BASE: [0.75],

@@ -11,6 +11,10 @@ from regain.models.classifiers import ViTSmallClassifier
 
 
 class _DummyPretrainedViT(torch.nn.Module):
+    """
+    Dummy pretrained ViT for testing.
+    """
+
     def __init__(self, out_dim: int) -> None:
         super().__init__()
         self.patch_embed = torch.nn.Module()
@@ -33,6 +37,10 @@ class _DummyPretrainedViT(torch.nn.Module):
 
 
 class TestVisionTransformerClassifiers:
+    """
+    Tests for VisionTransformer classifiers.
+    """
+
     def test_vit_small_classifier_produces_logits(self) -> None:
         model = ViTSmallClassifier(n_classes=10)
         x = torch.randn(2, 3, 32, 32)

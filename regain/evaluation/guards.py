@@ -54,38 +54,26 @@ def check_eval_batch(
     if not torch.is_tensor(logits):
         raise RuntimeError('Evaluation integrity violation: logits must be a tensor.')
     if logits.ndim != 2:
-        raise RuntimeError(
-            'Evaluation integrity violation: logits must be 2D. '
-            f'observed_shape={tuple(logits.shape)}'
-        )
+        raise RuntimeError('Evaluation integrity violation: logits must be 2D. '
+                           f'observed_shape={tuple(logits.shape)}')
     if int(logits.shape[1]) != int(num_classes):
-        raise RuntimeError(
-            'Evaluation integrity violation: logits width mismatch. '
-            f'expected={int(num_classes)}, observed={int(logits.shape[1])}'
-        )
+        raise RuntimeError('Evaluation integrity violation: logits width mismatch. '
+                           f'expected={int(num_classes)}, observed={int(logits.shape[1])}')
 
     non_finite_count = int(torch.sum(~torch.isfinite(logits)).item())
     if non_finite_count > 0:
-        raise RuntimeError(
-            'Evaluation integrity violation: logits contain non-finite values. '
-            f'non_finite_count={non_finite_count}'
-        )
+        raise RuntimeError('Evaluation integrity violation: logits contain non-finite values. '
+                           f'non_finite_count={non_finite_count}')
 
     if not torch.is_tensor(targets):
-        raise RuntimeError(
-            'Evaluation integrity violation: targets must be a tensor of class indices.'
-        )
+        raise RuntimeError('Evaluation integrity violation: targets must be a tensor of class indices.')
     target_vector = targets.reshape(-1) if targets.ndim > 0 else targets.view(1)
     if torch.is_floating_point(target_vector) or torch.is_complex(target_vector):
-        raise RuntimeError(
-            'Evaluation integrity violation: targets must use integer class indices. '
-            f'observed_dtype={targets.dtype}'
-        )
+        raise RuntimeError('Evaluation integrity violation: targets must use integer class indices. '
+                           f'observed_dtype={targets.dtype}')
     if int(target_vector.shape[0]) != int(logits.shape[0]):
-        raise RuntimeError(
-            'Evaluation integrity violation: target batch size must match logits batch size. '
-            f'logits_batch={int(logits.shape[0])}, target_batch={int(target_vector.shape[0])}'
-        )
+        raise RuntimeError('Evaluation integrity violation: target batch size must match logits batch size. '
+                           f'logits_batch={int(logits.shape[0])}, target_batch={int(target_vector.shape[0])}')
     if target_vector.numel() <= 0:
         return
 
@@ -94,11 +82,9 @@ def check_eval_batch(
     if invalid_count > 0:
         min_target = int(torch.min(target_vector).item())
         max_target = int(torch.max(target_vector).item())
-        raise RuntimeError(
-            'Evaluation integrity violation: target class indices are out of range. '
-            f'invalid_count={invalid_count}, target_min={min_target}, '
-            f'target_max={max_target}, num_classes={int(num_classes)}'
-        )
+        raise RuntimeError('Evaluation integrity violation: target class indices are out of range. '
+                           f'invalid_count={invalid_count}, target_min={min_target}, '
+                           f'target_max={max_target}, num_classes={int(num_classes)}')
 
 
 def _named_state_tensors(*, module: nn.Module) -> dict[str, torch.Tensor]:
@@ -152,10 +138,7 @@ def _build_exact_snapshot(*, module: nn.Module) -> dict[str, torch.Tensor]:
     Returns:
         dict[str, torch.Tensor]: Exact CPU clones.
     """
-    return {
-        name: tensor.detach().cpu().clone()
-        for name, tensor in _named_state_tensors(module=module).items()
-    }
+    return {name: tensor.detach().cpu().clone() for name, tensor in _named_state_tensors(module=module).items()}
 
 
 def _tensors_equal_for_snapshot(
@@ -179,15 +162,13 @@ def _tensors_equal_for_snapshot(
         return False
 
     if torch.is_floating_point(current_value) or torch.is_complex(current_value):
-        return bool(
-            torch.allclose(
-                current_value,
-                baseline_value,
-                rtol=0.0,
-                atol=0.0,
-                equal_nan=True,
-            )
-        )
+        return bool(torch.allclose(
+            current_value,
+            baseline_value,
+            rtol=0.0,
+            atol=0.0,
+            equal_nan=True,
+        ))
     return bool(torch.equal(current_value, baseline_value))
 
 
@@ -243,12 +224,10 @@ def frozen_model_state(
         tracked_modules['controller'] = controller_module
 
     fast_signatures = {
-        module_name: _build_fast_signature(module=module)
-        for module_name, module in tracked_modules.items()
+        module_name: _build_fast_signature(module=module) for module_name, module in tracked_modules.items()
     }
     exact_snapshots = {
-        module_name: _build_exact_snapshot(module=module)
-        for module_name, module in tracked_modules.items()
+        module_name: _build_exact_snapshot(module=module) for module_name, module in tracked_modules.items()
     }
 
     try:
@@ -263,10 +242,8 @@ def frozen_model_state(
             if baseline_keys != current_keys:
                 missing_keys = sorted(baseline_keys - current_keys)
                 new_keys = sorted(current_keys - baseline_keys)
-                raise RuntimeError(
-                    'Evaluation integrity violation: state tensor membership changed during evaluation. '
-                    f'module={module_name}, missing_keys={missing_keys}, new_keys={new_keys}'
-                )
+                raise RuntimeError('Evaluation integrity violation: state tensor membership changed during evaluation. '
+                                   f'module={module_name}, missing_keys={missing_keys}, new_keys={new_keys}')
 
             for tensor_name, current_signature in current_signatures.items():
                 baseline_signature = baseline_signatures[tensor_name]
@@ -287,10 +264,8 @@ def frozen_model_state(
                 if current_signature.version != baseline_signature.version:
                     changed_fields.append('version')
 
-                raise RuntimeError(
-                    'Evaluation integrity violation: state tensor signature changed during evaluation. '
-                    f'module={module_name}, tensor={tensor_name}, changed_fields={changed_fields}'
-                )
+                raise RuntimeError('Evaluation integrity violation: state tensor signature changed during evaluation. '
+                                   f'module={module_name}, tensor={tensor_name}, changed_fields={changed_fields}')
 
             current_snapshot = _build_exact_snapshot(module=module)
             baseline_snapshot = exact_snapshots[module_name]
@@ -299,8 +274,8 @@ def frozen_model_state(
                 if torch.equal(current_value, baseline_value):
                     continue
                 if _tensors_equal_for_snapshot(
-                    current_value=current_value,
-                    baseline_value=baseline_value,
+                        current_value=current_value,
+                        baseline_value=baseline_value,
                 ):
                     continue
 
@@ -308,7 +283,5 @@ def frozen_model_state(
                     current_value=current_value,
                     baseline_value=baseline_value,
                 )
-                raise RuntimeError(
-                    'Evaluation integrity violation: state tensor values changed during evaluation. '
-                    f'module={module_name}, tensor={tensor_name}, max_abs_delta={max_abs_delta}'
-                )
+                raise RuntimeError('Evaluation integrity violation: state tensor values changed during evaluation. '
+                                   f'module={module_name}, tensor={tensor_name}, max_abs_delta={max_abs_delta}')

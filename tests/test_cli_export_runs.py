@@ -119,23 +119,26 @@ def test_parser_rejects_export_dir_flag() -> None:
     parser = export_runs_cli._build_arg_parser()
 
     with pytest.raises(SystemExit):
-        parser.parse_args(
-            [
-                '--experiments',
-                'exp_1',
-                '--output-dir',
-                '/tmp/exports',
-                '--export-dir',
-                '/tmp/legacy',
-            ]
-        )
+        parser.parse_args([
+            '--experiments',
+            'exp_1',
+            '--output-dir',
+            '/tmp/exports',
+            '--export-dir',
+            '/tmp/legacy',
+        ])
 
 
 def test_export_runs_writes_git_commit_to_run_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+
     class _FakeMlflowClient:
+        """
+        Fake MLflow client stub.
+        """
+
         def get_experiment(self, experiment_id: str) -> SimpleNamespace:
             assert experiment_id == 'exp_1'
             return SimpleNamespace(experiment_id=experiment_id)
@@ -154,7 +157,7 @@ def test_export_runs_writes_git_commit_to_run_metadata(
         ),
     )
 
-    monkeypatch.setattr(export_helpers, 'MlflowClient', lambda: _FakeMlflowClient())
+    monkeypatch.setattr(export_helpers, 'MlflowClient', _FakeMlflowClient)
     monkeypatch.setattr(export_helpers, 'resolve_experiment_id', lambda **kwargs: 'exp_1')
     monkeypatch.setattr(export_helpers, 'search_runs_paginated', lambda **kwargs: [run])
     monkeypatch.setattr(export_helpers, 'set_tracking_uri', lambda **kwargs: 'file:///tmp/mlruns')

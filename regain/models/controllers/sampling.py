@@ -39,6 +39,7 @@ IndexItem = tuple[Dataset, int]
 
 class IndexDataset(Dataset):
     """ Dataset backed by a list of (dataset, index) pairs. """
+
     def __init__(self, items: list[IndexItem]):
         self._items = items
 
@@ -155,7 +156,11 @@ class RepairBufferFIFOPolicy:
     Oldest-first eviction policy based on insertion order.
     """
 
-    def on_ingest(self, *, buffer: 'RepairBuffer') -> None:
+    def on_ingest(
+            self,
+            *,
+            buffer: 'RepairBuffer',  # pylint: disable=unused-argument
+    ) -> None:
         """
         No-op.
 
@@ -197,7 +202,11 @@ class RepairBufferBalancedFIFOPolicy:
     FIFO-like behavior (preference for older samples).
     """
 
-    def on_ingest(self, *, buffer: 'RepairBuffer') -> None:
+    def on_ingest(
+            self,
+            *,
+            buffer: 'RepairBuffer',  # pylint: disable=unused-argument
+    ) -> None:
         """
         No-op.
 
@@ -404,10 +413,8 @@ class RepairBufferKeepNewBalancedPolicy:
                 break
 
         if len(to_remove) < num_remove:
-            raise RuntimeError(
-                f"KeepNewBalancedPolicy: asked to remove {num_remove} from class {class_id}, "
-                f"but only found {len(to_remove)} evictable items."
-            )
+            raise RuntimeError(f'KeepNewBalancedPolicy: asked to remove {num_remove} from class {class_id}, '
+                               f'but only found {len(to_remove)} evictable items.')
 
         for it in to_remove:
             buffer.remove(class_id=int(class_id), item=it)
@@ -479,7 +486,7 @@ class RepairBufferKeepNewBalancedPolicy:
         while len(buffer) > buffer.capacity:
             oldest = buffer.pop_oldest()
             if oldest is None:
-                raise RuntimeError("KeepNewBalancedPolicy eviction failed: empty buffer while over capacity")
+                raise RuntimeError('KeepNewBalancedPolicy eviction failed: empty buffer while over capacity')
 
         # Protection only applies to this ingest/eviction cycle.
         self._protected_item_ids.clear()
@@ -518,11 +525,11 @@ class RepairBufferView:
         return self.__class_ids_fn()
 
     def sample_balanced(
-            self,
-            *,
-            max_items: int,
-            rng: np.random.Generator,
-            classes: Iterable[int] | None = None,
+        self,
+        *,
+        max_items: int,
+        rng: np.random.Generator,
+        classes: Iterable[int] | None = None,
     ) -> list[IndexItem]:
         """
         Sample up to `max_items` items, approximately balanced across `classes`.
@@ -538,11 +545,11 @@ class RepairBufferView:
         return self.__sample_balanced_fn(max_items=max_items, rng=rng, classes=classes)
 
     def sample_per_class(
-            self,
-            *,
-            max_per_class: int,
-            rng: np.random.Generator,
-            classes: Iterable[int] | None = None,
+        self,
+        *,
+        max_per_class: int,
+        rng: np.random.Generator,
+        classes: Iterable[int] | None = None,
     ) -> list[IndexItem]:
         """
         Sample up to `max_per_class` items per class from the buffer.
@@ -661,10 +668,8 @@ class RepairBuffer:
             self.policy.evict(buffer=self)
 
         if len(self) > self.capacity:
-            raise RuntimeError(
-                'Repair buffer capacity exceeded after eviction. '
-                f'Ensure {type(self.policy).__name__} evicts enough items'
-            )
+            raise RuntimeError('Repair buffer capacity exceeded after eviction. '
+                               f'Ensure {type(self.policy).__name__} evicts enough items')
         return new_classes
 
     def remove(self, *, class_id: int, item: IndexItem) -> None:
@@ -810,11 +815,11 @@ class RepairBuffer:
         return group_lengths
 
     def _sample_balanced(
-            self,
-            *,
-            max_items: int,
-            rng: np.random.Generator,
-            classes: Iterable[int] | None = None,
+        self,
+        *,
+        max_items: int,
+        rng: np.random.Generator,
+        classes: Iterable[int] | None = None,
     ) -> list[IndexItem]:
         """
         Sample up to `max_items` items, approximately balanced across `classes`.
@@ -856,11 +861,11 @@ class RepairBuffer:
         return chosen
 
     def _sample_per_class(
-            self,
-            *,
-            max_per_class: int,
-            rng: np.random.Generator,
-            classes: Iterable[int] | None = None,
+        self,
+        *,
+        max_per_class: int,
+        rng: np.random.Generator,
+        classes: Iterable[int] | None = None,
     ) -> list[IndexItem]:
         """
         Sample up to `max_per_class` items per class from the buffer.

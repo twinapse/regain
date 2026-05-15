@@ -38,6 +38,10 @@ class _DummyImageFolderLikeDataset:
 
 
 class TestImageNetRHoldoutIndices:
+    """
+    Tests for ImageNet-R holdout index computation.
+    """
+
     def test_make_per_class_holdout_indices_is_disjoint_and_covering(self) -> None:
         targets = [0] * 10 + [1] * 10 + [2] * 10
 
@@ -62,6 +66,10 @@ class TestImageNetRHoldoutIndices:
 
 
 class TestImageNetROriginKeys:
+    """
+    Tests for ImageNet-R origin key derivation.
+    """
+
     def test_split_wrappers_have_distinct_origin_keys(self) -> None:
         base_dataset = _DummyImageFolderLikeDataset()
         train_dataset = _ImageNetRSubsetRawDataset(

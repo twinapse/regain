@@ -52,7 +52,6 @@ _DEBUG_PRED_UNIQUE_FRAC = 'pred_unique_frac'
 _DEBUG_HEALTH_UNIQUE_FRAC_POST = 'unique_frac_post'
 _DEBUG_HEALTH_UNIQUE_FRAC_PRE = 'unique_frac_pre'
 
-
 _DEFAULT_EPS = 1e-12
 
 
@@ -143,6 +142,7 @@ def _hist_entropy(counts: np.ndarray) -> float:
         return 0.0
     probs = counts.astype(np.float64) / total
     return float(-np.sum(probs * np.log(probs + _DEFAULT_EPS)))
+
 
 def compute_repair_diagnostics(
     *,
@@ -250,7 +250,7 @@ def compute_repair_diagnostics(
                         ce = F.cross_entropy(logits_v, y_v, reduction='sum')
                         preds = torch.argmax(logits_v, dim=1)
                         correct = torch.sum(preds == y_v).item()
-                        logit_l2 = torch.linalg.norm(logits_v, ord=2, dim=1).sum().item()
+                        logit_l2 = torch.linalg.norm(logits_v, ord=2, dim=1).sum().item()  # pylint: disable=not-callable
                         log_probs = F.log_softmax(logits_v, dim=1)
                         probs = torch.exp(log_probs)
                         entropy = -(probs * log_probs).sum(dim=1).sum().item()
@@ -284,9 +284,7 @@ def compute_repair_diagnostics(
     pred_unique = int(np.sum(hist_counts > 0)) if hist_counts.size > 0 else 0
     pred_max_frac = float(hist_counts.max() / total_valid) if hist_counts.size > 0 else 0.0
     pred_entropy = _hist_entropy(hist_counts) if hist_counts.size > 0 else 0.0
-    pred_unique_frac = (
-        float(pred_unique / num_classes) if num_classes is not None and num_classes > 0 else None
-    )
+    pred_unique_frac = (float(pred_unique / num_classes) if num_classes is not None and num_classes > 0 else None)
 
     return {
         _DEBUG_CE: float(mean_loss),
@@ -341,9 +339,7 @@ def compute_repair_health_score(
     pre_samples = pre_metrics.get(_DEBUG_N_SAMPLES)
     post_samples = post_metrics.get(_DEBUG_N_SAMPLES)
     if pre_num_classes != post_num_classes or pre_samples != post_samples:
-        raise ValueError(
-            'Repair health score requires matching num_classes and n_samples in pre/post diagnostics.'
-        )
+        raise ValueError('Repair health score requires matching num_classes and n_samples in pre/post diagnostics.')
 
     ce_pre = float(pre_metrics[_DEBUG_CE])
     ce_post = float(post_metrics[_DEBUG_CE])

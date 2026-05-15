@@ -86,7 +86,8 @@ To ensure code consistency, use the following tools:
 - Keep lines at 120 characters or fewer.
 - Use single quotes for string literals by default.
 - Use double quotes only when it avoids awkward escaping.
-- Prefer `f`-strings over `%` formatting or `.format(...)`.
+- Prefer `f`-strings over `%` formatting or `.format(...)`, except in logging calls.
+- Use lazy `%` formatting in logging calls (e.g. `logger.info('message %s', var)`) so the string is only formatted if the message is actually emitted.
 - Break dense function signatures and calls across multiple lines.
 
 Example:
@@ -310,11 +311,14 @@ Use focused test paths while iterating:
 pytest tests/test_cli_run_analysis.py
 ```
 
-The CI workflow in [.github/workflows/tests.yml](.github/workflows/tests.yml) runs:
+The CI workflow in [.github/workflows/run-tests.yml](.github/workflows/run-tests.yml) runs:
 
 ```bash
 python -m pytest -q tests -ra --maxfail=1
 ```
+
+The CI workflow in [.github/workflows/format-and-lint.yml](.github/workflows/format-and-lint.yml) runs isort,
+YAPF, Ruff, and Pylint against `regain` and `tests`.
 
 ## Git
 

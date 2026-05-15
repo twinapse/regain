@@ -1,0 +1,113 @@
+name: Code Formatting & Linting
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:  # Allows manual execution of the workflow
+
+jobs:
+  format-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install development dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+
+    - name: Show tool versions
+      run: |
+        python -m pip freeze | grep -E '^(isort|pylint|ruff|yapf)=='
+
+    - name: Sort imports with isort (Google style)
+      env:
+        MAX_LINE_LENGTH: 120
+      run: isort regain tests --profile google --line-length ${{ env.MAX_LINE_LENGTH }}
+
+    - name: Check code format with YAPF (Google style)
+      # YAPF gets config from the `.style.yapf` file
+      run: |
+        DIFF_OUTPUT=$(yapf --recursive --diff regain tests)
+        if [ -n "$DIFF_OUTPUT" ]; then
+          echo "Formatting issues found:"
+          echo "$DIFF_OUTPUT"
+          exit 1
+        fi
+
+    - name: Lint code with Ruff (fast analysis)
+      run: ruff check regain tests
+
+    - name: Lint `regain` with Pylint (exhaustive analysis)
+      env:
+        # `ACCEPTED_EXIT_CODES` is a space-separated list of accepted Pylint exit codes.
+        # Check Pylint exit codes at https://pylint.readthedocs.io/en/latest/user_guide/messages/index.html
+        ACCEPTED_EXIT_CODES: ""  # Adjust as necessary
+      # Run Pylint, capturing its exit code only if it fails. If Pylint succeeds, the next command won't execute.
+      run: |
+        pylint --verbose --rcfile=pylintrc regain || PYLINT_EXIT_CODE=$?
+
+        # If PYLINT_EXIT_CODE is unset, it means Pylint succeeded, so we manually set it to 0.
+        if [ -z "$PYLINT_EXIT_CODE" ]; then
+          PYLINT_EXIT_CODE=0
+        fi
+        echo "Pylint (regain) exited with code $PYLINT_EXIT_CODE."
+
+        # Convert the space-separated list of accepted exit codes from the environment variable into an array.
+        IFS=' ' read -r -a accepted_codes_array <<< "${{ env.ACCEPTED_EXIT_CODES }}"
+
+        # Calculate the bitwise OR sum of all accepted exit codes.
+        # This represents the combination of all tolerable issue types.
+        ACCEPTED_SUM=0
+        for code in "${accepted_codes_array[@]}"; do
+            # This aggregates the bits from each accepted code, creating a binary mask of acceptable issue types.
+            ACCEPTED_SUM=$((ACCEPTED_SUM | code))
+        done
+
+        # Perform a bitwise AND with the bitwise NOT of the ACCEPTED_SUM against the PYLINT_EXIT_CODE.
+        # This operation isolates bits in PYLINT_EXIT_CODE not covered by ACCEPTED_SUM (i.e., unacceptable issues).
+        # If the result is 0, it means all issues found by Pylint are within the accepted range.
+        if [ $((PYLINT_EXIT_CODE & ~ACCEPTED_SUM)) -eq 0 ]; then
+          echo "Pylint (regain) issues are within the tolerated range."
+        else
+          # If the result is not 0, there are issues outside of the tolerated types,
+          # so we exit with the Pylint exit code.
+          echo "Pylint (regain) reported unacceptable issues."
+          exit $PYLINT_EXIT_CODE
+        fi
+
+    - name: Lint `tests` with Pylint (exhaustive analysis)
+      env:
+        ACCEPTED_EXIT_CODES: ""  # Adjust as necessary
+      # We apply the same logic for tests, but disabling some warnings to avoid pytest-related false positives.
+      run: |
+        pylint --verbose --rcfile=pylintrc --disable=redefined-outer-name,unused-argument,protected-access tests || PYLINT_EXIT_CODE=$?
+
+        if [ -z "$PYLINT_EXIT_CODE" ]; then
+          PYLINT_EXIT_CODE=0
+        fi
+        echo "Pylint (tests) exited with code $PYLINT_EXIT_CODE."
+
+        IFS=' ' read -r -a accepted_codes_array <<< "${{ env.ACCEPTED_EXIT_CODES }}"
+
+        ACCEPTED_SUM=0
+        for code in "${accepted_codes_array[@]}"; do
+            ACCEPTED_SUM=$((ACCEPTED_SUM | code))
+        done
+
+        if [ $((PYLINT_EXIT_CODE & ~ACCEPTED_SUM)) -eq 0 ]; then
+          echo "Pylint (tests) issues are within the tolerated range."
+        else
+          echo "Pylint (tests) reported unacceptable issues."
+          exit $PYLINT_EXIT_CODE
+        fi

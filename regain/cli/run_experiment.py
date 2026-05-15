@@ -19,7 +19,7 @@ def _patch_avalanche_bic_multistep_lr() -> None:
     Avalanche `BiCPlugin` passes `verbose=...` to `MultiStepLR`, but newer PyTorch versions removed that argument.
     This function patches Avalanche to ignore `verbose`.
     """
-    import torch.optim.lr_scheduler as lr_scheduler
+    import torch.optim.lr_scheduler as lr_scheduler  # pylint: disable=import-outside-toplevel
 
     # If this PyTorch still supports `verbose`, nothing to do.
     if 'verbose' in inspect.signature(lr_scheduler.MultiStepLR).parameters:
@@ -27,8 +27,8 @@ def _patch_avalanche_bic_multistep_lr() -> None:
 
     # If `bic` is not available, nothing to do.
     try:
-        import avalanche.training.plugins.bic as bic
-    except Exception:
+        import avalanche.training.plugins.bic as bic  # pylint: disable=import-outside-toplevel
+    except Exception:  # pylint: disable=broad-exception-caught
         return
 
     # Idempotency guard
@@ -36,16 +36,18 @@ def _patch_avalanche_bic_multistep_lr() -> None:
         return
 
     # Save original `MultiStepLR`
-    OriginalMultiStepLR = bic.MultiStepLR
+    # `original_multistep_lr` stores the unpatched `MultiStepLR` constructor.
+    original_multistep_lr = bic.MultiStepLR
 
     # Define patched `MultiStepLR`
-    def _MultiStepLR(*args, **kwargs):
+    # `_patched_multistep_lr` wraps `MultiStepLR` to strip unsupported kwargs.
+    def _patched_multistep_lr(*args, **kwargs):
         kwargs.pop('verbose', None)
-        return OriginalMultiStepLR(*args, **kwargs)
+        return original_multistep_lr(*args, **kwargs)
 
     # Apply patch
-    bic.MultiStepLR = _MultiStepLR
-    bic._regain_multistep_lr_patched = True
+    bic.MultiStepLR = _patched_multistep_lr
+    bic._regain_multistep_lr_patched = True  # pylint: disable=protected-access
 
 
 def _patch_avalanche_il2m_initial_eval() -> None:
@@ -55,8 +57,8 @@ def _patch_avalanche_il2m_initial_eval() -> None:
     """
     # If `il2m` is not available, nothing to do.
     try:
-        import avalanche.training.plugins.il2m as il2m
-    except Exception:
+        import avalanche.training.plugins.il2m as il2m  # pylint: disable=import-outside-toplevel
+    except Exception:  # pylint: disable=broad-exception-caught
         return
 
     # Save original `IL2MPlugin.after_eval_forward`
@@ -74,7 +76,7 @@ def _patch_avalanche_il2m_initial_eval() -> None:
         return original_after_eval_forward(self, strategy, **kwargs)
 
     # Apply patch
-    _after_eval_forward._regain_patched = True
+    _after_eval_forward._regain_patched = True  # pylint: disable=protected-access
     il2m.IL2MPlugin.after_eval_forward = _after_eval_forward
 
 
@@ -146,11 +148,7 @@ def _select_run_names_for_policy(
         return set(candidate_run_names)
 
     if resume:
-        return {
-            run_name
-            for run_name in candidate_run_names
-            if run_name not in latest_active_runs_by_name
-        }
+        return {run_name for run_name in candidate_run_names if run_name not in latest_active_runs_by_name}
 
     if retry:
         selected_run_names: set[str] = set()
@@ -189,27 +187,25 @@ def _run_experiment(
         None
     """
     # Import `regain` modules after prerequisites are ensured
-    from regain.experiments.config import load_experiment_config
-    from regain.experiments.orchestrator import run_experiment
+    from regain.experiments.config import load_experiment_config  # pylint: disable=import-outside-toplevel
+    from regain.experiments.orchestrator import run_experiment  # pylint: disable=import-outside-toplevel
 
     # Load experiment config
     experiment_config = load_experiment_config(config_file)
     if _is_policy_enabled(
-        resume=resume,
-        retry=retry,
-        overwrite=overwrite,
+            resume=resume,
+            retry=retry,
+            overwrite=overwrite,
     ):
         # Import non-stdlib modules lazily to keep top-level imports minimal until prerequisites are ensured.
-        from regain.constants import RUN_NAME_BACKBONE
-        from regain.mlflow_utils import delete_mlflow_runs
-        from regain.mlflow_utils import resolve_active_runs_by_name
-        from regain.mlflow_utils import resolve_latest_active_runs_by_name
+        from regain.constants import RUN_NAME_BACKBONE  # pylint: disable=import-outside-toplevel
+        from regain.mlflow_utils import delete_mlflow_runs  # pylint: disable=import-outside-toplevel
+        from regain.mlflow_utils import resolve_active_runs_by_name  # pylint: disable=import-outside-toplevel
+        from regain.mlflow_utils import resolve_latest_active_runs_by_name  # pylint: disable=import-outside-toplevel
 
         run_configs = list(experiment_config.runs) if experiment_config.runs is not None else []
-        manages_local_backbone = (
-            experiment_config.backbone is not None
-            and experiment_config.backbone.source_experiment is None
-        )
+        manages_local_backbone = (experiment_config.backbone is not None and
+                                  experiment_config.backbone.source_experiment is None)
         candidate_run_names = [run_config.name for run_config in run_configs]
         if manages_local_backbone:
             candidate_run_names.append(RUN_NAME_BACKBONE)
@@ -218,9 +214,7 @@ def _run_experiment(
             experiment_name=experiment_config.experiment_name,
             tracking_uri=tracking_uri,
         )
-        latest_active_runs_by_name = resolve_latest_active_runs_by_name(
-            active_runs_by_name=active_runs_by_name
-        )
+        latest_active_runs_by_name = resolve_latest_active_runs_by_name(active_runs_by_name=active_runs_by_name)
         selected_run_names = _select_run_names_for_policy(
             candidate_run_names=candidate_run_names,
             latest_active_runs_by_name=latest_active_runs_by_name,
@@ -228,15 +222,8 @@ def _run_experiment(
             retry=retry,
             overwrite=overwrite,
         )
-        selected_run_configs = [
-            run_config
-            for run_config in run_configs
-            if run_config.name in selected_run_names
-        ]
-        selected_backbone = (
-            manages_local_backbone
-            and RUN_NAME_BACKBONE in selected_run_names
-        )
+        selected_run_configs = [run_config for run_config in run_configs if run_config.name in selected_run_names]
+        selected_backbone = (manages_local_backbone and RUN_NAME_BACKBONE in selected_run_names)
 
         runs_to_delete: list[object] = []
         if overwrite:
@@ -248,9 +235,7 @@ def _run_experiment(
                     if _resolve_run_status(run=existing_run) == 'FAILED':
                         runs_to_delete.append(existing_run)
             if selected_backbone:
-                runs_to_delete.extend(
-                    active_runs_by_name.get(RUN_NAME_BACKBONE, [])
-                )
+                runs_to_delete.extend(active_runs_by_name.get(RUN_NAME_BACKBONE, []))
         delete_mlflow_runs(
             runs=runs_to_delete,
             tracking_uri=tracking_uri,
@@ -343,12 +328,7 @@ def _find_config_files(*, config_dir: str) -> list[str]:
         raise ValueError(f'Config directory is not a directory: {config_dir}')
 
     config_paths = sorted(
-        [
-            path
-            for path in root_dir.rglob('*')
-            if path.is_file() and path.suffix.lower() in ['.yaml', '.yml']
-        ]
-    )
+        [path for path in root_dir.rglob('*') if path.is_file() and path.suffix.lower() in ['.yaml', '.yml']])
     return [str(path) for path in config_paths]
 
 
@@ -366,11 +346,7 @@ def main() -> None:
     # Get config files
     config_files: list[str] = []
     if args.config_files is not None:
-        config_files = [
-            config_file.strip()
-            for config_file in args.config_files.split(',')
-            if config_file.strip()
-        ]
+        config_files = [config_file.strip() for config_file in args.config_files.split(',') if config_file.strip()]
         if not config_files:
             parser.error('At least one config file must be provided via --config-files.')
     elif args.config_dir is not None:
@@ -393,7 +369,7 @@ def main() -> None:
                 retry=bool(args.retry),
                 overwrite=bool(args.overwrite),
             )
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             failed_config_files.append(config_file)
             print(f'Error while running config file `{config_file}`: {exc}')
             traceback.print_exc()

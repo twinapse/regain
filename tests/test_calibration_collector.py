@@ -10,6 +10,10 @@ from regain.evaluation import CalibrationCollector
 
 
 class TestCalibrationCollector:
+    """
+    Tests for CalibrationCollector.
+    """
+
     def test_latest_max_ece_updates_from_completed_pass(
         self,
         monkeypatch: pytest.MonkeyPatch,

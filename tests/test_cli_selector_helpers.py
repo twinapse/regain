@@ -32,12 +32,10 @@ def test_resolve_experiment_targets_from_experiments_dedupes_order() -> None:
 
     assert [target.experiment_name for target in targets] == ['exp_b', 'exp_a']
     assert all(target.tracking_uri is None for target in targets)
-    assert failures == []
+    assert not failures
 
 
-def test_resolve_experiment_targets_from_configs_dedupes_experiment_names(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_resolve_experiment_targets_from_configs_dedupes_experiment_names(monkeypatch: pytest.MonkeyPatch,) -> None:
     parser = _build_parser()
     failures: list[CliFailure] = []
     config_map = {
@@ -63,12 +61,10 @@ def test_resolve_experiment_targets_from_configs_dedupes_experiment_names(
     assert len(targets) == 1
     assert targets[0].experiment_name == 'exp_shared'
     assert targets[0].tracking_uri is None
-    assert failures == []
+    assert not failures
 
 
-def test_resolve_experiment_targets_tracking_uri_applies_to_configs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_resolve_experiment_targets_tracking_uri_applies_to_configs(monkeypatch: pytest.MonkeyPatch,) -> None:
     parser = _build_parser()
     failures: list[CliFailure] = []
     config_map = {
@@ -94,12 +90,10 @@ def test_resolve_experiment_targets_tracking_uri_applies_to_configs(
     assert len(targets) == 1
     assert targets[0].experiment_name == 'exp_shared'
     assert targets[0].tracking_uri == 'mlflow://override'
-    assert failures == []
+    assert not failures
 
 
-def test_resolve_experiment_targets_invalid_config_is_recorded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_resolve_experiment_targets_invalid_config_is_recorded(monkeypatch: pytest.MonkeyPatch,) -> None:
     parser = _build_parser()
     failures: list[CliFailure] = []
 

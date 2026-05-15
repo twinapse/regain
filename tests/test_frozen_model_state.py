@@ -10,12 +10,20 @@ from regain.evaluation import frozen_model_state
 
 
 class _ToyModel(nn.Module):
+    """
+    Toy model for testing.
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self.linear = nn.Linear(in_features=3, out_features=2)
 
 
 class TestFrozenModelState:
+    """
+    Tests for FrozenModelState.
+    """
+
     def test_allows_unchanged_state(self) -> None:
         model = _ToyModel()
 

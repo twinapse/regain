@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Mapping
 
 import numpy as np
-import torch
 
 __all__ = ['derive_masked_ref_accuracy', 'EvaluationPassResult']
 
@@ -56,17 +55,11 @@ def _mask_logits(
         np.ndarray: Masked logits array.
     """
     if logits.ndim != 2:
-        raise ValueError(
-            'Reference-accuracy derivation requires 2D logits. '
-            f'observed_shape={tuple(logits.shape)}'
-        )
+        raise ValueError('Reference-accuracy derivation requires 2D logits. '
+                         f'observed_shape={tuple(logits.shape)}')
 
     num_classes = int(logits.shape[1])
-    unseen_class_ids = [
-        class_id
-        for class_id in range(num_classes)
-        if class_id not in seen_class_ids
-    ]
+    unseen_class_ids = [class_id for class_id in range(num_classes) if class_id not in seen_class_ids]
     if not unseen_class_ids:
         return logits
 
@@ -116,10 +109,8 @@ def derive_masked_ref_accuracy(
     if targets_array.size <= 0:
         return None
     if logits.shape[0] != targets_array.shape[0]:
-        raise ValueError(
-            'Logits and targets must have the same batch dimension. '
-            f'logits_batch={int(logits.shape[0])}, targets_batch={int(targets_array.shape[0])}'
-        )
+        raise ValueError('Logits and targets must have the same batch dimension. '
+                         f'logits_batch={int(logits.shape[0])}, targets_batch={int(targets_array.shape[0])}')
 
     seen_set = {int(class_id) for class_id in seen_class_ids}
     masked_logits = _mask_logits(

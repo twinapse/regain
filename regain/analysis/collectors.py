@@ -740,7 +740,7 @@ def collect_experiment_tables(
 
             if max_runs is not None and len(runs_table) >= int(max_runs):
                 break
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             run_failures.append({
                 'run_id': str(info.run_id),
                 'run_name': run_name,

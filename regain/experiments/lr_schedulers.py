@@ -71,7 +71,4 @@ class WarmupCosineLR(torch.optim.lr_scheduler.LRScheduler):
             cosine_progress = float(cosine_epoch) / float(cosine_total - 1)
         cosine_progress = min(max(cosine_progress, 0.0), 1.0)
         cosine_scale = 0.5 * (1.0 + math.cos(math.pi * cosine_progress))
-        return [
-            self.min_lr + (float(base_lr) - self.min_lr) * cosine_scale
-            for base_lr in self.base_lrs
-        ]
+        return [self.min_lr + (float(base_lr) - self.min_lr) * cosine_scale for base_lr in self.base_lrs]

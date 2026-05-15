@@ -216,8 +216,8 @@ def main() -> None:
                     else:
                         collect_completed = True
                         analysis_output_names.add('tables')
-                        logger.info(f'Collected tables under: {tables_dir}')
-                except Exception as exc:
+                        logger.info('Collected tables under: %s', tables_dir)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
                     add_failure(
                         failures=failures,
                         scope=f'experiment={experiment_name} stage=collect',
@@ -240,8 +240,8 @@ def main() -> None:
                             out_dir=curves_dir,
                         )
                         analysis_output_names.add('curves')
-                        logger.info(f'Curves written: {curve_path}, {task_path}, {calib_path}, {latency_path}')
-                    except Exception as exc:
+                        logger.info('Curves written: %s, %s, %s, %s', curve_path, task_path, calib_path, latency_path)
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
                         add_failure(
                             failures=failures,
                             scope=f'experiment={experiment_name} stage=curves',
@@ -266,12 +266,12 @@ def main() -> None:
                         analysis_output_names.add('frontier')
                         frontier_completed = True
                         logger.info(
-                            'Frontier written: '
-                            f'{frontier_paths["candidates"]}, '
-                            f'{frontier_paths["pareto"]}, '
-                            f'{frontier_paths["selection"]}'
+                            'Frontier written: %s, %s, %s',
+                            frontier_paths['candidates'],
+                            frontier_paths['pareto'],
+                            frontier_paths['selection'],
                         )
-                    except Exception as exc:
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
                         add_failure(
                             failures=failures,
                             scope=f'experiment={experiment_name} stage=frontier',
@@ -293,12 +293,12 @@ def main() -> None:
                         )
                         analysis_output_names.add('router')
                         logger.info(
-                            'Repair router outputs written: '
-                            f'{router_paths["features"]}, '
-                            f'{router_paths["policy_summary"]}, '
-                            f'{router_paths["decision_gate"]}'
+                            'Repair router outputs written: %s, %s, %s',
+                            router_paths['features'],
+                            router_paths['policy_summary'],
+                            router_paths['decision_gate'],
                         )
-                    except Exception as exc:
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
                         add_failure(
                             failures=failures,
                             scope=f'experiment={experiment_name} stage=router',
@@ -320,8 +320,8 @@ def main() -> None:
                             out_dir=predictive_dir,
                         )
                         analysis_output_names.add('predictive')
-                        logger.info(f'Predictive correlations written: {predictive_path}')
-                    except Exception as exc:
+                        logger.info('Predictive correlations written: %s', predictive_path)
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
                         add_failure(
                             failures=failures,
                             scope=f'experiment={experiment_name} stage=predictive',
@@ -345,14 +345,11 @@ def main() -> None:
                         saved_plot_files = bool(plot_result.saved_paths)
                         has_plot_manifest_metadata = bool(plot_result.saved_filenames or plot_result.skipped)
                         destination_plots_dir = destination_analysis_dir / 'plots'
-                        plots_publishable = (
-                            not saved_plot_files
-                            or not destination_plots_dir.exists()
-                            or bool(args.overwrite)
-                        )
+                        plots_publishable = (not saved_plot_files or not destination_plots_dir.exists() or
+                                             bool(args.overwrite))
                         if saved_plot_files:
                             analysis_output_names.add('plots')
-                            logger.info(f'Plots written under: {staged_experiment_dir / "plots"}')
+                            logger.info('Plots written under: %s', staged_experiment_dir / 'plots')
                         if has_plot_manifest_metadata and plots_publishable:
                             write_plot_manifest_update(
                                 source_manifest_path=staged_experiment_dir / 'frontier' / 'manifest.json',
@@ -360,7 +357,7 @@ def main() -> None:
                                 saved_filenames=plot_result.saved_filenames,
                                 skipped=plot_result.skipped,
                             )
-                    except Exception as exc:
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
                         add_failure(
                             failures=failures,
                             scope=f'experiment={experiment_name} stage=plots',
@@ -376,8 +373,7 @@ def main() -> None:
                         scope=f'experiment={experiment_name} analysis-output={output_name}',
                         source=staged_item,
                         destination=destination_analysis_dir / output_name,
-                    )
-                )
+                    ))
 
         published_count = finalize_staged_outputs(
             outputs=staged_outputs,
@@ -398,8 +394,7 @@ def main() -> None:
             failures=failures,
             allow_partial=bool(args.allow_partial),
             published_count=published_count,
-        )
-    )
+        ))
 
 
 if __name__ == '__main__':

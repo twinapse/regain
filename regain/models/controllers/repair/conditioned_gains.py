@@ -126,8 +126,8 @@ class _GainGatingMLP(nn.Module):
         dtype = self.out.weight.dtype
 
         old_keys = list(self.unit_keys)
-        old_w = self.out.weight.detach()
-        old_b = self.out.bias.detach()
+        old_w = self.out.weight.detach()  # pylint: disable=not-callable
+        old_b = self.out.bias.detach()  # pylint: disable=not-callable
 
         # Allocate a new output head and copy overlapping parameters.
         new_out = nn.Linear(self.out.in_features, len(unit_keys)).to(device=device, dtype=dtype)
@@ -161,7 +161,7 @@ class _GainGatingMLP(nn.Module):
         # Predict bounded gains centered at 1.0.
         h = self.feature(feats)
         raw = self.out(h)
-        return bounded_positive_gain(raw=raw, log_gain_max=self._log_gain_max)
+        return bounded_positive_gain(raw=raw, log_gain_max_value=self._log_gain_max)
 
 
 class _InputConditionedUnitGainController(RepairController):
@@ -371,6 +371,7 @@ class _InputConditionedUnitGainController(RepairController):
         Returns:
             Any: Corrected logits when enabled and possible; otherwise the original `outputs`.
         """
+
         # Wrap the controller forward to match the correction helper signature.
         def _forward(x: torch.Tensor, device: torch.device) -> tuple[torch.Tensor, torch.Tensor | None]:
             return self._forward_with_input_conditioning(model=model, inputs=x, device=device)
@@ -427,7 +428,7 @@ class _InputConditionedUnitGainController(RepairController):
 
         # Cache the feature dimension and unit ordering for gating.
         feat_dim = int(feats.shape[1])
-        unit_keys = [k for k, _m in units]
+        unit_keys = [unit[0] for unit in units]
 
         # Decide whether to rebuild the gating network.
         needs_new = False
@@ -490,7 +491,9 @@ class _InputConditionedUnitGainController(RepairController):
         hooks: list[tuple[nn.Module, Callable[[nn.Module, tuple[Any, ...], Any], Any]]] = []
 
         def _make_hook(unit_index: int):
-            def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
+
+            def _hook(module: nn.Module, hook_inputs: tuple[Any, ...], out: Any) -> Any:
+                del module, hook_inputs
                 # Skip non-tensor outputs.
                 if not torch.is_tensor(out):
                     return out
@@ -509,9 +512,10 @@ class _InputConditionedUnitGainController(RepairController):
                 if out.ndim == 2:
                     return out * g.view(-1, 1)
                 return out
+
             return _hook
 
-        for i, (_key, module) in enumerate(self._units):
+        for i, (_, module) in enumerate(self._units):
             # Guard against shorter gain vectors than unit lists.
             if i >= int(gains.shape[1]):
                 break

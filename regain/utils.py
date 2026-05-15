@@ -1,3 +1,6 @@
+"""
+General-purpose utilities shared across the regain package.
+"""
 from contextlib import contextmanager
 import logging
 import random
@@ -42,9 +45,11 @@ class RegainDataset(Protocol[T_co]):
     Protocol for datasets that support `__len__` and `__getitem__`.
     """
 
-    def __len__(self) -> int: ...
+    def __len__(self) -> int:
+        ...
 
-    def __getitem__(self, idx: int) -> T_co: ...
+    def __getitem__(self, idx: int) -> T_co:
+        ...
 
 
 def extract_targets(dataset: RegainDataset | None) -> list[int]:
@@ -94,7 +99,7 @@ def get_targets(dataset: Dataset) -> np.ndarray:
     if hasattr(dataset, 'targets'):
         return np.asarray(dataset.targets)
     labels: list[int] = []
-    for _, y, *rest in dataset:
+    for _, y, *_ in dataset:
         labels.append(int(y))
     return np.asarray(labels)
 

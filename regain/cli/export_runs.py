@@ -92,7 +92,7 @@ def main() -> None:
                     metrics_path=metrics_path,
                     tracking_uri=tracking_uri,
                 )
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 add_failure(
                     failures=failures,
                     scope=experiment_scope,
@@ -105,8 +105,7 @@ def main() -> None:
                     scope=experiment_scope,
                     source=staged_experiment_root,
                     destination=destination_root / experiment_name,
-                )
-            )
+                ))
 
         published_count = finalize_staged_outputs(
             outputs=staged_outputs,
@@ -128,8 +127,7 @@ def main() -> None:
             failures=failures,
             allow_partial=bool(args.allow_partial),
             published_count=published_count,
-        )
-    )
+        ))
 
 
 if __name__ == '__main__':

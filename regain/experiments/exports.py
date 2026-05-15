@@ -87,12 +87,8 @@ def export_runs_to_csvs(
     ]
     reserved_keys = set(metadata_columns)
     param_columns = sorted(key for key in parent_param_keys if key not in reserved_keys)
-    metric_columns = sorted({
-        key
-        for row in rows
-        for key in row.keys()
-        if key not in reserved_keys and key not in parent_param_keys
-    })
+    metric_columns = sorted(
+        {key for row in rows for key in row.keys() if key not in reserved_keys and key not in parent_param_keys})
 
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     params_path.parent.mkdir(parents=True, exist_ok=True)
