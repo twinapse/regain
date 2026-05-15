@@ -233,7 +233,7 @@ class ScenarioBuilder(ABC):
         return_task_id: bool,
         repair_split_fraction: float,
         dataset_path: str | Path | None = None,
-        seed: int = 1,
+        seed: int,
         transform_random_resized_crop: bool | None = None,
         transform_horizontal_flip: bool | None = None,
         transform_image_size: int | None = None,
@@ -263,7 +263,7 @@ class ScenarioBuilder(ABC):
             repair_split_fraction (float): Fraction in `[0, 1)` of each training experience excluded from
                 backbone training and assigned to the repair stream.
             dataset_path (str | Path | None): Optional root directory for storing the dataset.
-            seed (int): Random seed controlling the split and dataloader shuffling.
+            seed (int): Experiment seed controlling the split and dataloader shuffling.
             transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
             transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
             transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
@@ -326,7 +326,7 @@ class ScenarioBuilder(ABC):
         num_experiences: int,
         return_task_id: bool,
         dataset_path: str | Path | None = None,
-        seed: int = 1,
+        seed: int,
         transform_random_resized_crop: bool | None = None,
         transform_horizontal_flip: bool | None = None,
         transform_image_size: int | None = None,
@@ -341,7 +341,7 @@ class ScenarioBuilder(ABC):
             num_experiences (int): Number of experiences to split the classes into.
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Optional root directory for storing the dataset.
-            seed (int): Random seed controlling the split and dataloader shuffling.
+            seed (int): Experiment seed controlling the split and dataloader shuffling.
             transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
             transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
             transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
@@ -444,7 +444,7 @@ class ScenarioBuilder(ABC):
         self,
         benchmark: NCScenario,
         repair_split_fraction: float,
-        seed: int = 1,
+        seed: int,
     ):
         """
         Add a persistent "repair" stream to an existing `NCScenario` (in-place).
@@ -483,7 +483,7 @@ class ScenarioBuilder(ABC):
             benchmark (NCScenario): The scenario to augment.
             repair_split_fraction (float): Fraction in `[0, 1)` used to allocate a total
                 repair set size in each experience.
-            seed (int): Random seed used to deterministically split per-class indices.
+            seed (int): Experiment seed used to deterministically split per-class indices.
 
         Raises:
             ValueError: If repair set inputs are invalid or guard constraints are violated.
@@ -1119,7 +1119,7 @@ class CIFAR100ScenarioBuilder(ScenarioBuilder):
         num_experiences: int,
         return_task_id: bool,
         dataset_path: str | Path | None = None,
-        seed: int = 1,
+        seed: int,
         transform_random_resized_crop: bool | None = None,
         transform_horizontal_flip: bool | None = None,
         transform_image_size: int | None = None,
@@ -1131,7 +1131,7 @@ class CIFAR100ScenarioBuilder(ScenarioBuilder):
             num_experiences (int): Number of experiences to split the 100 classes into.
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Optional root directory for storing the CIFAR-100 dataset.
-            seed (int): Random seed controlling the split and dataloader shuffling.
+            seed (int): Experiment seed controlling the split and dataloader shuffling.
             transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
             transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
             transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
@@ -1183,7 +1183,7 @@ class TinyImageNetScenarioBuilder(ScenarioBuilder):
         num_experiences: int,
         return_task_id: bool,
         dataset_path: str | Path | None = None,
-        seed: int = 1,
+        seed: int,
         transform_random_resized_crop: bool | None = None,
         transform_horizontal_flip: bool | None = None,
         transform_image_size: int | None = None,
@@ -1195,7 +1195,7 @@ class TinyImageNetScenarioBuilder(ScenarioBuilder):
             num_experiences (int): Number of experiences to split the 200 classes into.
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Optional root directory for storing the Tiny-ImageNet dataset.
-            seed (int): Random seed controlling the split and dataloader shuffling.
+            seed (int): Experiment seed controlling the split and dataloader shuffling.
             transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
             transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
             transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
@@ -1261,7 +1261,7 @@ class CUB200ScenarioBuilder(ScenarioBuilder):
         num_experiences: int,
         return_task_id: bool,
         dataset_path: str | Path | None = None,
-        seed: int = 1,
+        seed: int,
         transform_random_resized_crop: bool | None = None,
         transform_horizontal_flip: bool | None = None,
         transform_image_size: int | None = None,
@@ -1273,7 +1273,7 @@ class CUB200ScenarioBuilder(ScenarioBuilder):
             num_experiences (int): Number of experiences used to split classes.
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Optional dataset root or extracted `CUB_200_2011` directory.
-            seed (int): Random seed controlling class order.
+            seed (int): Experiment seed controlling class order.
             transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
             transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
             transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
@@ -1576,7 +1576,7 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         num_experiences: int,
         return_task_id: bool,
         dataset_path: str | Path | None = None,
-        seed: int = 1,
+        seed: int,
         transform_random_resized_crop: bool | None = None,
         transform_horizontal_flip: bool | None = None,
         transform_image_size: int | None = None,
@@ -1588,7 +1588,7 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
             num_experiences (int): Number of experiences used to split classes.
             return_task_id (bool): Whether Avalanche should emit task IDs with each sample.
             dataset_path (str | Path | None): Root path that contains ImageNet-R images.
-            seed (int): Random seed controlling class order and deterministic holdout splitting.
+            seed (int): Experiment seed controlling class order and deterministic holdout splitting.
             transform_random_resized_crop (bool | None): Optional `RandomResizedCrop` toggle for train transforms.
             transform_horizontal_flip (bool | None): Optional `RandomHorizontalFlip` toggle for train transforms.
             transform_image_size (int | None): Optional crop/image size used by transform-aware pipelines.
@@ -1629,7 +1629,7 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
 
         Args:
             dataset_path (str | Path | None): Root path of the dataset.
-            seed (int): Random seed used for deterministic holdout splitting when needed.
+            seed (int): Experiment seed used for deterministic holdout splitting when needed.
 
         Returns:
             tuple[object, object]: Train and test datasets compatible with Avalanche generators.
@@ -1863,7 +1863,7 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         Args:
             targets (list[int]): Dataset class targets ordered by sample index.
             test_fraction (float): Per-class fraction assigned to the test split.
-            seed (int): Random seed controlling per-class permutations.
+            seed (int): Experiment seed controlling per-class permutations.
 
         Returns:
             tuple[list[int], list[int]]: Sorted train indices and sorted test indices.
@@ -1958,7 +1958,7 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
             test_dataset (object): Test dataset.
             num_experiences (int): Number of class-incremental experiences.
             return_task_id (bool): Whether task labels should be emitted.
-            seed (int): Random seed controlling class order.
+            seed (int): Experiment seed controlling class order.
             train_transform (Compose): Training transform pipeline.
             eval_transform (Compose): Evaluation transform pipeline.
 

@@ -185,7 +185,6 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         seed: int,
         debug_epochs: int,
         debug_experiences: int,
-        debug_seed: int,
         debug_max_samples: int | None = 2048,
         log_pred_histograms: bool = True,
     ) -> None:
@@ -198,10 +197,9 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             repair_epochs (int): Number of epochs for repair fitting.
             repair_batch_size (int): Batch size for repair fitting.
             budget_fraction (float): Fraction of each fixed repair set used for controller fitting.
-            seed (int): Global seed used for deterministic subset selection.
+            seed (int): Global experiment seed used for deterministic subset selection.
             debug_epochs (int): Epochs per experience used only to compute debug metric step values.
             debug_experiences (int): Total experiences used only to compute debug metric step values.
-            debug_seed (int): Random seed for debug dataloading.
             debug_max_samples (int | None): Max number of samples for diagnostics.
             log_pred_histograms (bool): Whether to log prediction histograms.
         """
@@ -215,7 +213,6 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         )
         self._debug_epochs = int(debug_epochs)
         self._debug_experiences = int(debug_experiences)
-        self._debug_seed = int(debug_seed)
         self._debug_max_samples = debug_max_samples
         self._log_pred_histograms = bool(log_pred_histograms)
         self._health_scores: list[float] = []
@@ -353,7 +350,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             controller=self.controller,
             dataset=repair_dataset,
             batch_size=self.repair_batch_size,
-            seed=self._debug_seed,
+            debug_seed=self.seed,
             apply_controller=True,
             class_cap=None,
             max_samples=self._debug_max_samples,
@@ -386,7 +383,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             controller=self.controller,
             dataset=repair_dataset,
             batch_size=self.repair_batch_size,
-            seed=self._debug_seed,
+            debug_seed=self.seed,
             apply_controller=True,
             class_cap=None,
             max_samples=self._debug_max_samples,
@@ -412,7 +409,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             controller=self.controller,
             dataset=repair_dataset,
             batch_size=self.repair_batch_size,
-            seed=self._debug_seed,
+            debug_seed=self.seed,
             apply_controller=True,
             class_cap=shared_classes,
             max_samples=self._debug_max_samples,
@@ -433,7 +430,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             controller=pre_controller,
             dataset=repair_dataset,
             batch_size=self.repair_batch_size,
-            seed=self._debug_seed,
+            debug_seed=self.seed,
             apply_controller=True,
             class_cap=shared_classes,
             max_samples=self._debug_max_samples,
@@ -443,7 +440,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             controller=pre_controller,
             dataset=repair_dataset,
             batch_size=self.repair_batch_size,
-            seed=self._debug_seed,
+            debug_seed=self.seed,
             apply_controller=False,
             class_cap=shared_classes,
             max_samples=self._debug_max_samples,

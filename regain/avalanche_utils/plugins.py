@@ -4,6 +4,7 @@ Avalanche plugins.
 import hashlib
 import math
 from pathlib import Path
+import random
 import time
 from typing import Mapping, Sequence
 
@@ -42,6 +43,7 @@ from regain.models.controllers.repair.common import apply_repair_correction
 from regain.models.controllers.repair.common import extract_probe_inputs
 from regain.utils import extract_targets
 from regain.utils import module_device
+from regain.utils import preserve_rng_state
 from regain.utils import RegainDataset
 
 __all__ = [
@@ -464,7 +466,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         repair_epochs: int,
         repair_batch_size: int,
         budget_fraction: float = 1.0,
-        seed: int = 1,
+        seed: int,
     ) -> None:
         """
         Initialize the plugin with a repair controller.
@@ -475,7 +477,7 @@ class RepairControllerPlugin(SupervisedPlugin):
             repair_epochs (int): Number of epochs to use for repair fitting.
             repair_batch_size (int): Batch size to use for repair fitting.
             budget_fraction (float): Fraction of each fixed repair set used for repair fitting.
-            seed (int): Global seed used for deterministic subset selection.
+            seed (int): Global experiment seed used for deterministic subset selection.
 
         Raises:
             TypeError: If the controller is not a RepairController.
@@ -559,7 +561,7 @@ class RepairControllerPlugin(SupervisedPlugin):
         Compute a deterministic score for a candidate repair sample.
 
         Args:
-            seed (int): Global seed.
+            seed (int): Global experiment seed.
             exp_idx (int): Experience index.
             class_id (int): Class identifier.
             sample_id (int): Stable sample identifier (preferably original index).
@@ -570,6 +572,23 @@ class RepairControllerPlugin(SupervisedPlugin):
         payload = f'{int(seed)}:{int(exp_idx)}:{int(class_id)}:{int(sample_id)}'.encode('ascii')
         digest = hashlib.blake2b(payload, digest_size=8).digest()
         return int.from_bytes(digest, byteorder='big', signed=False)
+
+    @staticmethod
+    def _fit_seed(*, seed: int, exp_idx: int | None) -> int:
+        """
+        Derive a deterministic repair-fit seed from the experiment seed and fit boundary.
+
+        Args:
+            seed (int): Global experiment seed.
+            exp_idx (int | None): Experience index, or None for final-only fitting.
+
+        Returns:
+            int: Positive int32-compatible seed for Python, NumPy, and Torch RNGs.
+        """
+        tag = 'final' if exp_idx is None else f'{int(exp_idx)}'
+        payload = f'{int(seed)}:{tag}'.encode('ascii')
+        digest = hashlib.blake2b(payload, digest_size=8).digest()
+        return int.from_bytes(digest, byteorder='big', signed=False) & 0x7FFFFFFF
 
     @staticmethod
     def _extract_original_indices(dataset: Dataset) -> list[int]:
@@ -776,13 +795,20 @@ class RepairControllerPlugin(SupervisedPlugin):
         n_samples = int(len(repair_dataset))
         repair_steps = int(self.repair_epochs * math.ceil(float(n_samples) / float(self.repair_batch_size)))
         started_at = time.perf_counter()
-        self.controller.fit_on_repair_data(
-            model=model,
-            repair_dataset=repair_dataset,
-            new_classes=new_classes,
-            num_epochs=self.repair_epochs,
-            batch_size=self.repair_batch_size,
-        )
+        fit_seed = self._fit_seed(seed=self.seed, exp_idx=exp_idx)
+        with preserve_rng_state():
+            random.seed(fit_seed)
+            np.random.seed(fit_seed)
+            torch.manual_seed(fit_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(fit_seed)
+            self.controller.fit_on_repair_data(
+                model=model,
+                repair_dataset=repair_dataset,
+                new_classes=new_classes,
+                num_epochs=self.repair_epochs,
+                batch_size=self.repair_batch_size,
+            )
         elapsed_seconds = float(time.perf_counter() - started_at)
         self._repair_seconds_total += elapsed_seconds
         self._repair_steps_total += repair_steps

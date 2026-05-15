@@ -2,7 +2,6 @@
 Diagnostics and health score utilities for repair controller debugging.
 """
 
-from contextlib import contextmanager
 import math
 import random
 from typing import Any, Mapping
@@ -40,6 +39,7 @@ from regain.models.controllers import RepairController
 from regain.models.controllers.repair.common import build_repair_dataloader
 from regain.utils import module_device
 from regain.utils import preserve_model_mode_after_eval
+from regain.utils import preserve_rng_state
 
 __all__ = [
     'clamp01',
@@ -144,39 +144,13 @@ def _hist_entropy(counts: np.ndarray) -> float:
     probs = counts.astype(np.float64) / total
     return float(-np.sum(probs * np.log(probs + _DEFAULT_EPS)))
 
-
-@contextmanager
-def _preserve_rng_state() -> Any:
-    """
-    Preserve Python, NumPy, and Torch RNG states for debug diagnostics.
-
-    Yields:
-        None.
-    """
-    python_state = random.getstate()
-    numpy_state = np.random.get_state()
-    torch_state = torch.random.get_rng_state()
-    cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-    try:
-        yield
-    finally:
-        random.setstate(python_state)
-        np.random.set_state(numpy_state)
-        torch.random.set_rng_state(torch_state)
-        if cuda_states is not None:
-            try:
-                torch.cuda.set_rng_state_all(cuda_states)
-            except Exception:
-                pass
-
-
 def compute_repair_diagnostics(
     *,
     model: nn.Module,
     controller: RepairController,
     dataset: Dataset,
     batch_size: int,
-    seed: int,
+    debug_seed: int,
     apply_controller: bool,
     class_cap: int | None = None,
     max_samples: int | None = 2048,
@@ -192,7 +166,7 @@ def compute_repair_diagnostics(
         controller (RepairController): Repair controller used for correction.
         dataset (Dataset): Repair dataset to evaluate.
         batch_size (int): Batch size for evaluation.
-        seed (int): Seed for deterministic dataloader ordering.
+        debug_seed (int): Seed for deterministic debug evaluation.
         apply_controller (bool): Whether to apply controller corrections.
         class_cap (int | None): Optional shared label-space size ``K``. Diagnostics are computed on logits sliced to
             ``logits[:, :K]`` and only samples with labels in ``[0, K-1]`` are evaluated.
@@ -204,7 +178,6 @@ def compute_repair_diagnostics(
     dataloader = build_repair_dataloader(
         repair_dataset=dataset,
         batch_size=int(batch_size),
-        seed=int(seed),
         shuffle=False,
     )
     if dataloader is None:
@@ -222,7 +195,12 @@ def compute_repair_diagnostics(
     pred_hist: list[int] | None = None
     num_classes = None
 
-    with _preserve_rng_state():
+    with preserve_rng_state():
+        random.seed(int(debug_seed))
+        np.random.seed(int(debug_seed))
+        torch.manual_seed(int(debug_seed))
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(int(debug_seed))
         prev_training = bool(controller.training)
         controller.eval()
         try:

@@ -503,6 +503,7 @@ def build_controller(
         PARAM_NUM_CLASSES,
         'n_classes',
         _PARAM_CONTROLLER_CLASSES,
+        'seed',
     )
     found_forbidden_kwargs = [key for key in forbidden_kwargs if key in controller_kwargs]
     if found_forbidden_kwargs:
@@ -559,11 +560,10 @@ def build_controller_plugin(
     num_epochs: int | None = None,
     batch_size: int | None = None,
     budget_fraction: float = 1.0,
-    seed: int = 1,
+    seed: int,
     debug: bool = False,
     debug_epochs: int | None = None,
     debug_experiences: int | None = None,
-    debug_seed: int | None = None,
 ) -> ControllerPlugin:
     """
     Build a controller plugin.
@@ -574,11 +574,10 @@ def build_controller_plugin(
         num_epochs (int | None): Number of repair epochs.
         batch_size (int | None): Repair batch size.
         budget_fraction (float): Fraction of each fixed repair set used for controller fitting.
-        seed (int): Global seed used for deterministic repair subset selection.
+        seed (int): Global experiment seed used for deterministic repair subset selection.
         debug (bool): Whether to use the debug repair controller plugin.
         debug_epochs (int | None): Epochs per experience for debug metric steps.
         debug_experiences (int | None): Total experiences for debug metric steps.
-        debug_seed (int | None): Seed used for debug dataloader ordering.
 
     Returns:
         ControllerPlugin: Controller plugin instance.
@@ -596,11 +595,10 @@ def build_controller_plugin(
             if (
                 debug_epochs is None
                 or debug_experiences is None
-                or debug_seed is None
             ):
                 raise ValueError(
-                    'Debug controller plugin requires debug_epochs, '
-                    'debug_experiences, debug_seed.'
+                    'Debug controller plugin requires debug_epochs and '
+                    'debug_experiences.'
                 )
             return DebugRepairControllerPlugin(
                 controller=controller,
@@ -611,7 +609,6 @@ def build_controller_plugin(
                 seed=seed,
                 debug_epochs=debug_epochs,
                 debug_experiences=debug_experiences,
-                debug_seed=debug_seed,
             )
         return RepairControllerPlugin(
             controller=controller,

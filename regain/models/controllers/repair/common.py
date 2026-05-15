@@ -10,8 +10,6 @@ from abc import abstractmethod
 from contextlib import contextmanager
 import math
 from typing import Any, Callable, Iterator, Mapping
-
-import numpy as np
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
@@ -58,7 +56,6 @@ def build_repair_dataloader(
     *,
     repair_dataset: Dataset | None,
     batch_size: int,
-    seed: int,
     shuffle: bool = True,
 ) -> DataLoader | None:
     """
@@ -67,7 +64,6 @@ def build_repair_dataloader(
     Args:
         repair_dataset (Dataset | None): Repair dataset to load.
         batch_size (int): Batch size for the dataloader.
-        seed (int): Random seed for shuffling when enabled.
         shuffle (bool): Whether to shuffle the dataset.
 
     Returns:
@@ -78,13 +74,10 @@ def build_repair_dataloader(
     if len(repair_dataset) <= 0:
         return None
 
-    # Seed the dataloader shuffle for determinism.
-    generator = torch.Generator().manual_seed(int(seed))
     return DataLoader(
         repair_dataset,
         batch_size=int(batch_size),
         shuffle=bool(shuffle),
-        generator=generator,
     )
 
 
@@ -369,7 +362,6 @@ def prepare_repair_fit_context(
     controller: nn.Module,
     model: nn.Module,
     repair_dataset: Dataset | None,
-    seed: int,
     batch_size: int,
     device: str | torch.device,
     ensure_initialized_fn: Callable[[nn.Module, torch.device, torch.Tensor], None],
@@ -381,7 +373,6 @@ def prepare_repair_fit_context(
         controller (nn.Module): Controller (or module) to train.
         model (nn.Module): Model used for forward passes.
         repair_dataset (Dataset | None): Repair dataset for fitting.
-        seed (int): Random seed for shuffling.
         batch_size (int): Batch size for the repair dataloader.
         device (str | torch.device): Fallback device for the controller.
         ensure_initialized_fn (Callable[[nn.Module, torch.device, torch.Tensor], None]): Init hook.
@@ -393,7 +384,6 @@ def prepare_repair_fit_context(
     dataloader = build_repair_dataloader(
         repair_dataset=repair_dataset,
         batch_size=batch_size,
-        seed=seed,
     )
     if dataloader is None:
         return None
@@ -1039,7 +1029,6 @@ class BaseUnitGainController(RepairController, ABC):
         l2_reg (float): L2 penalty strength that keeps gains close to 1.0.
         max_units (int | None): Maximum number of units (blocks/stages) to include. None means all.
         device (str | None): Device used for controller parameters and fitting.
-        seed (int): Random seed for dataloader shuffling.
         lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
         lr_gamma (float): LR decay factor used when `lr_milestones` is provided.
 
@@ -1056,7 +1045,6 @@ class BaseUnitGainController(RepairController, ABC):
         l2_reg: float = 0.0,
         max_units: int | None,
         device: str | None = None,
-        seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
         lr_gamma: float = 0.1,
     ) -> None:
@@ -1069,7 +1057,6 @@ class BaseUnitGainController(RepairController, ABC):
         self.l2_reg = float(l2_reg)
         self.max_units = max_units
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
         self.lr_milestones = tuple(int(m) for m in lr_milestones) if lr_milestones is not None else None
         self.lr_gamma = float(lr_gamma)
 
@@ -1135,7 +1122,6 @@ class BaseUnitGainController(RepairController, ABC):
             controller=self,
             model=model,
             repair_dataset=repair_dataset,
-            seed=self.seed,
             batch_size=batch_size,
             device=self.device,
             ensure_initialized_fn=self._ensure_initialized,

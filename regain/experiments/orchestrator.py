@@ -251,7 +251,6 @@ def _train_and_evaluate_strategy(
                     debug=experiment_config.debug,
                     debug_epochs=backbone_training.num_epochs,
                     debug_experiences=experiment_config.num_experiences,
-                    debug_seed=experiment_config.seed,
                 )
             else:
                 controller_plugin: ControllerPlugin | None = None

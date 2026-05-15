@@ -38,7 +38,6 @@ class LinearProbeController(RepairController):
     Args:
         lr: Learning rate for fitting.
         device: Device for fitting.
-        seed: Random seed for dataloader shuffling.
         momentum: SGD momentum for probe fitting.
         weight_decay: Weight decay for probe fitting.
     """
@@ -47,7 +46,6 @@ class LinearProbeController(RepairController):
         self,
         lr: float,
         device: str | None = None,
-        seed: int = 1,
         momentum: float = 0.9,
         weight_decay: float = 0.0,
     ) -> None:
@@ -56,7 +54,6 @@ class LinearProbeController(RepairController):
         # Hyperparameters
         self.lr = float(lr)
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
         self.momentum = float(momentum)
         self.weight_decay = float(weight_decay)
 
@@ -100,7 +97,6 @@ class LinearProbeController(RepairController):
         dataloader = build_repair_dataloader(
             repair_dataset=repair_dataset,
             batch_size=batch_size,
-            seed=self.seed,
         )
         if dataloader is None:
             return
@@ -227,7 +223,6 @@ class PrototypeBlendController(RepairController):
         score_scale (float): Scalar applied to cosine prototype similarities before blending.
         normalize (bool): Whether to use cosine-style normalized features and prototypes.
         device (str | None): Device for feature extraction.
-        seed (int): Random seed for dataloader ordering.
     """
 
     def __init__(
@@ -237,14 +232,12 @@ class PrototypeBlendController(RepairController):
         score_scale: float = 10.0,
         normalize: bool = True,
         device: str | None = None,
-        seed: int = 1,
     ) -> None:
         super().__init__()
         self.blend = float(blend)
         self.score_scale = float(score_scale)
         self.normalize = bool(normalize)
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
         if not (0.0 <= self.blend <= 1.0):
             raise ValueError('`blend` must be in the range [0, 1].')
 
@@ -271,7 +264,6 @@ class PrototypeBlendController(RepairController):
         dataloader = build_repair_dataloader(
             repair_dataset=repair_dataset,
             batch_size=batch_size,
-            seed=self.seed,
             shuffle=False,
         )
         if dataloader is None:

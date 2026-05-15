@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 import logging
-from typing import Protocol, runtime_checkable, TypeVar
+import random
+from typing import Iterator, Protocol, runtime_checkable, TypeVar
 
 import numpy as np
 import torch
@@ -16,6 +17,7 @@ __all__ = [
     'get_targets',
     'module_device',
     'preserve_model_mode_after_eval',
+    'preserve_rng_state',
 ]
 
 logging.basicConfig(
@@ -129,7 +131,7 @@ def cast_tensor(*, tensor: torch.Tensor, ref_tensor: torch.Tensor) -> torch.Tens
 
 
 @contextmanager
-def preserve_model_mode_after_eval(model: nn.Module):
+def preserve_model_mode_after_eval(model: nn.Module) -> Iterator[None]:
     """
     Context manager to preserve the training/evaluation mode of a model after temporarily setting it to evaluation mode.
 
@@ -145,3 +147,28 @@ def preserve_model_mode_after_eval(model: nn.Module):
         yield
     finally:
         model.train(was_training)
+
+
+@contextmanager
+def preserve_rng_state() -> Iterator[None]:
+    """
+    Preserve Python, NumPy, and Torch RNG states within a temporary seeded block.
+
+    Yields:
+        None.
+    """
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.random.get_rng_state()
+    cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+    try:
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.random.set_rng_state(torch_state)
+        if cuda_states is not None:
+            try:
+                torch.cuda.set_rng_state_all(cuda_states)
+            except RuntimeError:
+                pass
