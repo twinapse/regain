@@ -329,7 +329,6 @@ class ChannelStageGainController(_GroupedChannelUnitGainController):
         gain_max (float): Maximum gain value; gains are in [1 / gain_max, gain_max].
         max_stages (int | None): Maximum number of stages to include. None means all stages.
         device (str | None): Device used for controller parameters and fitting.
-        seed (int): Random seed for dataloader shuffling.
         lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
         lr_gamma (float): LR decay factor used when `lr_milestones` is provided.
 
@@ -352,7 +351,6 @@ class ChannelStageGainController(_GroupedChannelUnitGainController):
         gain_max: float = 2.0,
         max_stages: int | None = None,
         device: str | None = None,
-        seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
         lr_gamma: float = 0.1,
     ) -> None:
@@ -366,7 +364,6 @@ class ChannelStageGainController(_GroupedChannelUnitGainController):
             max_units=max_stages,
             unit_resolver=resolve_stage_units,
             device=device,
-            seed=seed,
             lr_milestones=lr_milestones,
             lr_gamma=lr_gamma,
         )
@@ -385,7 +382,6 @@ class ChannelBlockGainController(_GroupedChannelUnitGainController):
         gain_max (float): Maximum gain value; gains are in [1 / gain_max, gain_max].
         max_blocks (int | None): Maximum number of blocks to include. None means all blocks.
         device (str | None): Device used for controller parameters and fitting.
-        seed (int): Random seed for dataloader shuffling.
         lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
         lr_gamma (float): LR decay factor used when `lr_milestones` is provided.
 
@@ -408,7 +404,6 @@ class ChannelBlockGainController(_GroupedChannelUnitGainController):
         gain_max: float = 2.0,
         max_blocks: int | None = None,
         device: str | None = None,
-        seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
         lr_gamma: float = 0.1,
     ) -> None:
@@ -422,7 +417,6 @@ class ChannelBlockGainController(_GroupedChannelUnitGainController):
             max_units=max_blocks,
             unit_resolver=resolve_block_units,
             device=device,
-            seed=seed,
             lr_milestones=lr_milestones,
             lr_gamma=lr_gamma,
         )

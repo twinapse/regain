@@ -185,7 +185,6 @@ class _InputConditionedUnitGainController(RepairController):
         num_hidden_layers: int = 1,
         gain_max: float = 2.0,
         device: str | None = None,
-        seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
         lr_gamma: float = 0.1,
     ) -> None:
@@ -204,7 +203,6 @@ class _InputConditionedUnitGainController(RepairController):
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
             gain_max (float): Maximum gain value (gains in [1 / gain_max, gain_max]).
             device (str | None): Device used for controller parameters and fitting.
-            seed (int): Random seed.
             lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
             lr_gamma (float): LR decay factor used when `lr_milestones` is provided.
 
@@ -241,7 +239,6 @@ class _InputConditionedUnitGainController(RepairController):
         self.num_hidden_layers = int(num_hidden_layers)
         self.gain_max = float(gain_max)
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
         self.lr_milestones = tuple(int(m) for m in lr_milestones) if lr_milestones is not None else None
         self.lr_gamma = float(lr_gamma)
 
@@ -308,7 +305,6 @@ class _InputConditionedUnitGainController(RepairController):
             controller=self,
             model=model,
             repair_dataset=repair_dataset,
-            seed=self.seed,
             batch_size=batch_size,
             device=self.device,
             ensure_initialized_fn=self._ensure_initialized,
@@ -552,7 +548,6 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
         num_hidden_layers: int = 1,
         gain_max: float = 2.0,
         device: str | None = None,
-        seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
         lr_gamma: float = 0.1,
     ) -> None:
@@ -569,7 +564,6 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
             gain_max (float): Maximum gain value (gains in [1 / gain_max, gain_max]).
             device (str | None): Device used for controller parameters and fitting.
-            seed (int): Random seed.
             lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
             lr_gamma (float): LR decay factor used when `lr_milestones` is provided.
 
@@ -588,7 +582,6 @@ class InputConditionedStageGainController(_InputConditionedUnitGainController):
             num_hidden_layers=num_hidden_layers,
             gain_max=gain_max,
             device=device,
-            seed=seed,
             lr_milestones=lr_milestones,
             lr_gamma=lr_gamma,
         )
@@ -615,7 +608,6 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
         num_hidden_layers: int = 1,
         gain_max: float = 2.0,
         device: str | None = None,
-        seed: int = 1,
         lr_milestones: tuple[int, ...] | None = None,
         lr_gamma: float = 0.1,
     ) -> None:
@@ -632,7 +624,6 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
             num_hidden_layers (int): Number of hidden layers of the gating MLP.
             gain_max (float): Maximum gain value (gains in [1 / gain_max, gain_max]).
             device (str | None): Device used for controller parameters and fitting.
-            seed (int): Random seed.
             lr_milestones (tuple[int, ...] | None): Optional LR schedule milestones.
             lr_gamma (float): LR decay factor used when `lr_milestones` is provided.
 
@@ -651,7 +642,6 @@ class InputConditionedBlockGainController(_InputConditionedUnitGainController):
             num_hidden_layers=num_hidden_layers,
             gain_max=gain_max,
             device=device,
-            seed=seed,
             lr_milestones=lr_milestones,
             lr_gamma=lr_gamma,
         )

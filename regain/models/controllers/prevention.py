@@ -281,7 +281,6 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
         replay_mse_weight: float = 1.0,
         bank_batch_size: int = 256,
         bank_max_samples: int | None = None,
-        seed: int = 1,
         dist_eps: float = 1e-8,
         self_exclude_eps: float = 1e-12,
     ) -> None:
@@ -301,7 +300,6 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
             replay_mse_weight (float): Weight for MSE distillation on old-class logits for buffer samples.
             bank_batch_size (int): Batch size for building the KNN feature bank.
             bank_max_samples (int | None): Maximum number of samples to use for the KNN bank (None = all).
-            seed (int): Random seed for KNN bank sampling.
             dist_eps (float): Small constant for numerical stability in distance computations.
             self_exclude_eps (float): Distance threshold to exclude self-matches in KNN.
         """
@@ -320,7 +318,6 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
         self.replay_mse_weight = float(replay_mse_weight)
         self.bank_batch_size = int(bank_batch_size)
         self.bank_max_samples = int(bank_max_samples) if bank_max_samples is not None else None
-        self.seed = int(seed)
         self.dist_eps = float(dist_eps)
         self.self_exclude_eps = float(self_exclude_eps)
 
@@ -533,14 +530,11 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
         indices = list(range(n))
 
         if self.bank_max_samples is not None and n > self.bank_max_samples:
-            rng = np.random.default_rng(self.seed)
-            indices = rng.choice(np.asarray(indices), size=self.bank_max_samples, replace=False).tolist()
+            indices = np.random.choice(np.asarray(indices), size=self.bank_max_samples, replace=False).tolist()
             indices.sort()
 
         subset = Subset(self._dataset, indices)
-        generator = torch.Generator(device='cpu')
-        generator.manual_seed(self.seed)
-        loader = DataLoader(subset, batch_size=self.bank_batch_size, shuffle=False, generator=generator)
+        loader = DataLoader(subset, batch_size=self.bank_batch_size, shuffle=False)
 
         inputs_list: list[torch.Tensor] = []
         feats_list: list[torch.Tensor] = []

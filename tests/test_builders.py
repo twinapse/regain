@@ -2,12 +2,21 @@
 Tests for experiment builders.
 """
 
+import inspect
+from typing import Any
+
 import pytest
 import torch
 
+from regain.avalanche_utils.scenarios import CIFAR100ScenarioBuilder
+from regain.avalanche_utils.scenarios import CUB200ScenarioBuilder
+from regain.avalanche_utils.scenarios import ImageNetRScenarioBuilder
+from regain.avalanche_utils.scenarios import ScenarioBuilder
+from regain.avalanche_utils.scenarios import TinyImageNetScenarioBuilder
 from regain.experiments.builders import build_backbone
 from regain.experiments.builders import build_benchmark
 from regain.experiments.builders import build_controller
+from regain.experiments.builders import build_controller_plugin
 from regain.experiments.builders import build_lr_scheduler_plugin
 from regain.experiments.builders import build_optimizer
 import regain.experiments.builders as builders_module
@@ -18,7 +27,34 @@ from regain.experiments.config import ExperimentConfig
 from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import RepairConfig
 from regain.experiments.config import TransformsConfig
+from regain.debug.avalanche_utils import DebugRepairControllerPlugin
 from regain.models.controllers import PreventionController
+from regain.models.controllers import RepairController
+
+
+class _NoOpRepairController(RepairController):
+    """Repair controller test double for builder-plugin coverage."""
+
+    def fit_on_repair_data(
+        self,
+        *,
+        model: torch.nn.Module,
+        repair_dataset: object | None,
+        new_classes: list[int],
+        num_epochs: int,
+        batch_size: int,
+    ) -> None:
+        del model, repair_dataset, new_classes, num_epochs, batch_size
+
+    def correct_outputs(
+        self,
+        *,
+        outputs: Any,
+        model: torch.nn.Module | None = None,
+        inputs: Any | None = None,
+    ) -> Any:
+        del model, inputs
+        return outputs
 
 ###############################
 # Controller replay contracts #
@@ -26,6 +62,8 @@ from regain.models.controllers import PreventionController
 
 
 class TestBuildControllerReplayRequirements:
+    """Tests for controller construction contracts."""
+
     def test_raises_clear_error_when_replay_required_controller_has_no_replay_batch_size(self) -> None:
         controller_config = ControllerConfig(name='tbbn', kwargs={})
 
@@ -49,8 +87,27 @@ class TestBuildControllerReplayRequirements:
 
         assert isinstance(controller, PreventionController)
 
+    def test_rejects_controller_seed_kwarg(self) -> None:
+        controller_config = ControllerConfig(
+            name='logit_bias',
+            kwargs={
+                'lr': 0.1,
+                'seed': 7,
+            },
+        )
+
+        with pytest.raises(ValueError, match='should not receive the following keyword arguments: seed'):
+            build_controller(
+                controller_config=controller_config,
+                train_batch_size=32,
+                replay_batch_size=None,
+                replay_memory_size=None,
+            )
+
 
 class TestBuildBenchmark:
+    """Tests for scenario-builder forwarding behavior."""
+
     def test_forwards_none_transform_overrides_and_backbone_image_size(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -139,7 +196,83 @@ class TestBuildBenchmark:
         assert captured_kwargs['transform_image_size'] is None
 
 
+class TestBuildControllerPlugin:
+    """Tests for repair controller plugin builder behavior."""
+
+    def test_builds_debug_plugin_without_debug_seed(self) -> None:
+        plugin = build_controller_plugin(
+            controller=_NoOpRepairController(),
+            fit_after_experience=False,
+            num_epochs=2,
+            batch_size=4,
+            seed=11,
+            debug=True,
+            debug_epochs=5,
+            debug_experiences=3,
+        )
+
+        assert isinstance(plugin, DebugRepairControllerPlugin)
+        assert plugin.seed == 11
+
+    def test_requires_explicit_seed_for_repair_plugins(self) -> None:
+        with pytest.raises(TypeError, match="missing 1 required keyword-only argument: 'seed'"):
+            build_controller_plugin(
+                controller=_NoOpRepairController(),
+                fit_after_experience=False,
+                num_epochs=2,
+                batch_size=4,
+            )
+
+    @pytest.mark.parametrize(
+        ('debug_epochs', 'debug_experiences'),
+        [
+            (None, 3),
+            (5, None),
+        ],
+    )
+    def test_debug_plugin_still_requires_debug_step_metadata(
+        self,
+        debug_epochs: int | None,
+        debug_experiences: int | None,
+    ) -> None:
+        with pytest.raises(ValueError, match='requires debug_epochs and debug_experiences'):
+            build_controller_plugin(
+                controller=_NoOpRepairController(),
+                fit_after_experience=False,
+                num_epochs=2,
+                batch_size=4,
+                seed=11,
+                debug=True,
+                debug_epochs=debug_epochs,
+                debug_experiences=debug_experiences,
+            )
+
+
+class TestExplicitSeedContracts:
+    """Static contract checks for explicit internal seed propagation."""
+
+    @pytest.mark.parametrize(
+        'callable_obj',
+        [
+            build_controller_plugin,
+            ScenarioBuilder.__call__,
+            ScenarioBuilder._build_scenario,
+            CIFAR100ScenarioBuilder._build_scenario,
+            TinyImageNetScenarioBuilder._build_scenario,
+            CUB200ScenarioBuilder._build_scenario,
+            ImageNetRScenarioBuilder._build_scenario,
+            ScenarioBuilder._add_repair_stream,
+        ],
+    )
+    def test_seed_boundary_signatures_do_not_default_seed(self, callable_obj: object) -> None:
+        signature = inspect.signature(callable_obj)
+
+        assert signature.parameters['seed'].default is inspect._empty
+
+
 class TestBuildBackbone:
+    """Tests for backbone instantiation."""
+
     def test_builds_vit_backbone_with_constructor_kwargs(self) -> None:
         backbone = build_backbone(
             name='vit_small',
@@ -159,6 +292,8 @@ class TestBuildBackbone:
 
 
 class TestBuildOptimizer:
+    """Tests for optimizer construction and validation."""
+
     def test_builds_adamw_optimizer_with_beta_sequence(self) -> None:
         model = torch.nn.Linear(4, 2)
 
@@ -196,6 +331,8 @@ class TestBuildOptimizer:
 
 
 class TestBuildLRSchedulerPlugin:
+    """Tests for LR scheduler plugin validation."""
+
     def test_rejects_missing_total_epochs_for_warmup_cosine(self) -> None:
         with pytest.raises(ValueError, match='total_epochs'):
             build_lr_scheduler_plugin(

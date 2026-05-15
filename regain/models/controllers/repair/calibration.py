@@ -47,21 +47,18 @@ class LogitBiasController(RepairController):
     Args:
         lr: Learning rate for fitting.
         device: Device for controller parameters and fitting data.
-        seed: Random seed for dataloader shuffling.
     """
 
     def __init__(
         self,
         lr: float,
         device: str | None = None,
-        seed: int = 1,
     ) -> None:
         super().__init__()
 
         # Hyperparameters
         self.lr = float(lr)
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
 
         # State
         self.bias = nn.Parameter(torch.zeros(0))  # Lazily expanded as new classes appear
@@ -152,7 +149,6 @@ class LogitBiasController(RepairController):
             controller=self,
             model=model,
             repair_dataset=repair_dataset,
-            seed=self.seed,
             batch_size=batch_size,
             device=self.device,
             ensure_initialized_fn=_ensure_initialized,
@@ -321,7 +317,6 @@ class TemperatureScalingController(RepairController):
         min_temperature (float): Lower clamp for the fitted temperature.
         max_temperature (float): Upper clamp for the fitted temperature.
         device (str | None): Device for collecting frozen repair logits.
-        seed (int): Random seed for dataloader ordering.
     """
 
     def __init__(
@@ -330,13 +325,11 @@ class TemperatureScalingController(RepairController):
         min_temperature: float = 0.05,
         max_temperature: float = 10.0,
         device: str | None = None,
-        seed: int = 1,
     ) -> None:
         super().__init__()
         self.min_temperature = float(min_temperature)
         self.max_temperature = float(max_temperature)
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
         if self.min_temperature <= 0.0:
             raise ValueError('`min_temperature` must be positive.')
         if self.max_temperature < self.min_temperature:
@@ -386,7 +379,6 @@ class TemperatureScalingController(RepairController):
         dataloader = build_repair_dataloader(
             repair_dataset=repair_dataset,
             batch_size=batch_size,
-            seed=self.seed,
             shuffle=False,
         )
         if dataloader is None:
@@ -445,7 +437,6 @@ class TCILLiteController(TemperatureScalingController):
         min_temperature (float): Lower clamp for the fitted temperature.
         max_temperature (float): Upper clamp for the fitted temperature.
         device (str | None): Device for collecting frozen repair logits.
-        seed (int): Random seed for dataloader ordering.
     """
 
     def __init__(
@@ -454,13 +445,11 @@ class TCILLiteController(TemperatureScalingController):
         min_temperature: float = 0.05,
         max_temperature: float = 10.0,
         device: str | None = None,
-        seed: int = 1,
     ) -> None:
         super().__init__(
             min_temperature=min_temperature,
             max_temperature=max_temperature,
             device=device,
-            seed=seed,
         )
         self._class_groups: list[list[int]] = []
         self._group_temperatures: list[float] = []
@@ -577,7 +566,6 @@ class BiCController(RepairController):
         lr_gamma: Learning rate decay factor for bias layer fitting.
         l2_beta: L2 regularization factor for beta parameter.
         device: Device for fitting.
-        seed: Random seed for dataloader shuffling.
     """
 
     def __init__(
@@ -588,7 +576,6 @@ class BiCController(RepairController):
         lr_gamma: float = 0.1,
         l2_beta: float = 0.1,  # Avalanche uses 0.1 * beta^2 / 2
         device: str | None = None,
-        seed: int = 1,
     ) -> None:
         super().__init__()
 
@@ -598,12 +585,10 @@ class BiCController(RepairController):
         self.lr_gamma = float(lr_gamma)
         self.l2_beta = float(l2_beta)
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
 
         # State
         self.bias_layer: BiasLayer | None = None  # Single bias layer (overwritten after each experience)
         self._exp_idx: int = 0
-        self._rng = np.random.default_rng(self.seed)
 
     def initialize_parameters(self, *, model: nn.Module, sample_inputs: Any | None = None) -> None:
         """
@@ -653,7 +638,6 @@ class BiCController(RepairController):
         val_loader = build_repair_dataloader(
             repair_dataset=repair_dataset,
             batch_size=batch_size,
-            seed=self.seed + self._exp_idx,
         )
         if val_loader is None:
             self._exp_idx += 1
@@ -732,20 +716,17 @@ class IL2MController(RepairController):
 
     Args:
         device: Device for fitting.
-        seed: Random seed for dataloader shuffling.
     """
 
     def __init__(
         self,
         *,
         device: str | None = None,
-        seed: int = 1,
     ) -> None:
         super().__init__()
 
         # Hyperparameters
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.seed = int(seed)
 
         # State
         self.n_classes = 0
@@ -813,7 +794,6 @@ class IL2MController(RepairController):
         stat_loader = build_repair_dataloader(
             repair_dataset=repair_dataset,
             batch_size=batch_size,
-            seed=self.seed,
             shuffle=False,
         )
         if stat_loader is None:
