@@ -80,7 +80,8 @@ class _ScalarUnitGainController(BaseUnitGainController):
         self._units = units
         self._unit_module_ids = unit_ids
 
-        for key, _module in units:
+        for key, module in units:
+            del module
             # Initialize gains for newly discovered units.
             if key not in self._raw_gains:
                 # Initialize missing scalar raw gains to zeros (gain == 1.0).
@@ -107,13 +108,16 @@ class _ScalarUnitGainController(BaseUnitGainController):
         )
 
         def _make_hook(gain: torch.Tensor):
-            def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
+
+            def _hook(module: nn.Module, hook_inputs: tuple[Any, ...], out: Any) -> Any:
+                del module, hook_inputs
                 # Skip non-tensor outputs.
                 if not torch.is_tensor(out):
                     return out
                 # Apply the scalar gain to any tensor output.
                 gain_cast = cast_tensor(tensor=gain, ref_tensor=out)
                 return out * gain_cast
+
             return _hook
 
         # Build hook list for each unit gain parameter.

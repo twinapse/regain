@@ -57,17 +57,11 @@ class ClassMask:
                 is returned unchanged.
         """
         if logits.ndim != 2:
-            raise ValueError(
-                'Class masking requires a 2D logits tensor. '
-                f'observed_shape={tuple(logits.shape)}'
-            )
+            raise ValueError('Class masking requires a 2D logits tensor. '
+                             f'observed_shape={tuple(logits.shape)}')
 
         num_classes = int(logits.shape[1])
-        unseen_class_ids = [
-            class_id
-            for class_id in range(num_classes)
-            if class_id not in self.seen_class_ids
-        ]
+        unseen_class_ids = [class_id for class_id in range(num_classes) if class_id not in self.seen_class_ids]
         if not unseen_class_ids:
             return logits
 

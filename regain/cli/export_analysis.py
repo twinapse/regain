@@ -89,18 +89,12 @@ def _load_analysis_tables(*, experiment_dir: Path) -> tuple[list[dict[str, Any]]
     runs_table_path = tables_dir / 'run_metrics.jsonl'
     experiences_table_path = tables_dir / 'experience_metrics.jsonl'
 
-    missing_paths = [
-        path
-        for path in [runs_table_path, experiences_table_path]
-        if not path.exists()
-    ]
+    missing_paths = [path for path in [runs_table_path, experiences_table_path] if not path.exists()]
     if missing_paths:
         missing_str = ', '.join(str(path) for path in missing_paths)
-        raise FileNotFoundError(
-            f'Missing required analysis tables: {missing_str}. '
-            'Run `python -m regain.cli.run_analysis --experiments <experiment> '
-            '--output-dir <analysis_dir> collect` first.'
-        )
+        raise FileNotFoundError(f'Missing required analysis tables: {missing_str}. '
+                                'Run `python -m regain.cli.run_analysis --experiments <experiment> '
+                                '--output-dir <analysis_dir> collect` first.')
 
     runs_table = _read_jsonl_table(path=runs_table_path)
     experiences_table = _read_jsonl_table(path=experiences_table_path)
@@ -218,9 +212,8 @@ def main() -> None:
                         scope=scope,
                         source=staged_export_path,
                         destination=destination_path,
-                    )
-                )
-            except Exception as exc:
+                    ))
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 add_failure(
                     failures=failures,
                     scope=scope,
@@ -246,8 +239,7 @@ def main() -> None:
             failures=failures,
             allow_partial=bool(args.allow_partial),
             published_count=published_count,
-        )
-    )
+        ))
 
 
 if __name__ == '__main__':

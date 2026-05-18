@@ -18,16 +18,25 @@ import regain.mlflow_utils as mlflow_utils
 
 @dataclass
 class _DummyBackboneConfig:
+    """
+    Dummy backbone config for testing.
+    """
     source_experiment: str | None = None
 
 
 @dataclass
 class _DummyRunConfig:
+    """
+    Dummy run config for testing.
+    """
     name: str
 
 
 @dataclass
 class _DummyExperimentConfig:
+    """
+    Dummy experiment config for testing.
+    """
     experiment_name: str
     backbone: _DummyBackboneConfig | None
     runs: list[_DummyRunConfig] | None
@@ -39,13 +48,11 @@ def _make_active_run(
     status: str,
     start_time: int,
 ) -> object:
-    return SimpleNamespace(
-        info=SimpleNamespace(
-            run_id=run_id,
-            status=status,
-            start_time=start_time,
-        )
-    )
+    return SimpleNamespace(info=SimpleNamespace(
+        run_id=run_id,
+        status=status,
+        start_time=start_time,
+    ))
 
 
 def _patch_loader_and_orchestrator(
@@ -54,6 +61,7 @@ def _patch_loader_and_orchestrator(
     experiment_config: _DummyExperimentConfig,
     run_calls: list[tuple[_DummyExperimentConfig, str | None, str | None]],
 ) -> None:
+
     def _fake_load_experiment_config(config_file: str) -> _DummyExperimentConfig:
         del config_file
         return experiment_config
@@ -80,70 +88,64 @@ def _patch_loader_and_orchestrator(
 
 
 class TestRunExperimentParser:
+    """
+    Tests for run experiment argument parser.
+    """
+
     def test_rejects_config_files_and_config_dir_together(self) -> None:
         parser = _build_arg_parser()
 
         with pytest.raises(SystemExit):
-            parser.parse_args(
-                [
-                    '--config-files',
-                    'a.yaml,b.yaml',
-                    '--config-dir',
-                    'configs',
-                ]
-            )
+            parser.parse_args([
+                '--config-files',
+                'a.yaml,b.yaml',
+                '--config-dir',
+                'configs',
+            ])
 
     def test_rejects_export_dir_flag(self) -> None:
         parser = _build_arg_parser()
 
         with pytest.raises(SystemExit):
-            parser.parse_args(
-                [
-                    '--config-files',
-                    'a.yaml',
-                    '--export-dir',
-                    '/tmp/exports',
-                ]
-            )
+            parser.parse_args([
+                '--config-files',
+                'a.yaml',
+                '--export-dir',
+                '/tmp/exports',
+            ])
 
     def test_rejects_resume_and_retry_together(self) -> None:
         parser = _build_arg_parser()
 
         with pytest.raises(SystemExit):
-            parser.parse_args(
-                [
-                    '--config-files',
-                    'a.yaml',
-                    '--resume',
-                    '--retry',
-                ]
-            )
+            parser.parse_args([
+                '--config-files',
+                'a.yaml',
+                '--resume',
+                '--retry',
+            ])
 
     def test_rejects_resume_and_overwrite_together(self) -> None:
         parser = _build_arg_parser()
 
         with pytest.raises(SystemExit):
-            parser.parse_args(
-                [
-                    '--config-files',
-                    'a.yaml',
-                    '--resume',
-                    '--overwrite',
-                ]
-            )
+            parser.parse_args([
+                '--config-files',
+                'a.yaml',
+                '--resume',
+                '--overwrite',
+            ])
 
     def test_rejects_retry_and_overwrite_together(self) -> None:
         parser = _build_arg_parser()
 
         with pytest.raises(SystemExit):
-            parser.parse_args(
-                [
-                    '--config-files',
-                    'a.yaml',
-                    '--retry',
-                    '--overwrite',
-                ]
-            )
+            parser.parse_args([
+                '--config-files',
+                'a.yaml',
+                '--retry',
+                '--overwrite',
+            ])
 
 
 #######################
@@ -152,6 +154,10 @@ class TestRunExperimentParser:
 
 
 class TestFindConfigFiles:
+    """
+    Tests for config file discovery.
+    """
+
     def test_finds_yaml_files_recursively(self, tmp_path: Path) -> None:
         configs_dir = tmp_path / 'configs'
         nested_dir = configs_dir / 'nested'
@@ -189,6 +195,10 @@ class TestFindConfigFiles:
 
 
 class TestRunExecution:
+    """
+    Tests for experiment run execution.
+    """
+
     def test_runs_all_config_files(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -424,6 +434,10 @@ class TestRunExecution:
 
 
 class TestRunExperimentPolicies:
+    """
+    Tests for run experiment policies.
+    """
+
     def test_resume_runs_only_missing_configs_and_reuses_backbone(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -454,9 +468,7 @@ class TestRunExperimentPolicies:
         monkeypatch.setattr(
             mlflow_utils,
             'delete_mlflow_runs',
-            lambda **kwargs: deleted_runs.append(
-                [str(run.info.run_id) for run in kwargs['runs']]
-            ),
+            lambda **kwargs: deleted_runs.append([str(run.info.run_id) for run in kwargs['runs']]),
         )
 
         run_experiment_cli._run_experiment(
@@ -500,18 +512,14 @@ class TestRunExperimentPolicies:
                     _make_active_run(run_id='a_failed', status='FAILED', start_time=200),
                     _make_active_run(run_id='a_finished', status='FINISHED', start_time=50),
                 ],
-                'run_b': [
-                    _make_active_run(run_id='b_run', status='FINISHED', start_time=210),
-                ],
+                'run_b': [_make_active_run(run_id='b_run', status='FINISHED', start_time=210),],
             },
         )
         deleted_runs: list[list[str]] = []
         monkeypatch.setattr(
             mlflow_utils,
             'delete_mlflow_runs',
-            lambda **kwargs: deleted_runs.append(
-                [str(run.info.run_id) for run in kwargs['runs']]
-            ),
+            lambda **kwargs: deleted_runs.append([str(run.info.run_id) for run in kwargs['runs']]),
         )
 
         run_experiment_cli._run_experiment(
@@ -556,9 +564,7 @@ class TestRunExperimentPolicies:
         monkeypatch.setattr(
             mlflow_utils,
             'delete_mlflow_runs',
-            lambda **kwargs: deleted_runs.append(
-                sorted([str(run.info.run_id) for run in kwargs['runs']])
-            ),
+            lambda **kwargs: deleted_runs.append(sorted([str(run.info.run_id) for run in kwargs['runs']])),
         )
 
         run_experiment_cli._run_experiment(
@@ -599,9 +605,7 @@ class TestRunExperimentPolicies:
         monkeypatch.setattr(
             mlflow_utils,
             'delete_mlflow_runs',
-            lambda **kwargs: deleted_runs.append(
-                [str(run.info.run_id) for run in kwargs['runs']]
-            ),
+            lambda **kwargs: deleted_runs.append([str(run.info.run_id) for run in kwargs['runs']]),
         )
 
         run_experiment_cli._run_experiment(
@@ -610,7 +614,7 @@ class TestRunExperimentPolicies:
         )
 
         assert deleted_runs == [[]]
-        assert run_calls == []
+        assert not run_calls
 
     def test_overwrite_with_source_backbone_does_not_select_backbone(
         self,
@@ -639,9 +643,7 @@ class TestRunExperimentPolicies:
         monkeypatch.setattr(
             mlflow_utils,
             'delete_mlflow_runs',
-            lambda **kwargs: deleted_runs.append(
-                sorted([str(run.info.run_id) for run in kwargs['runs']])
-            ),
+            lambda **kwargs: deleted_runs.append(sorted([str(run.info.run_id) for run in kwargs['runs']])),
         )
 
         run_experiment_cli._run_experiment(

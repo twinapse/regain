@@ -13,6 +13,7 @@ from regain.avalanche_utils.scenarios import CUB200ScenarioBuilder
 from regain.avalanche_utils.scenarios import ImageNetRScenarioBuilder
 from regain.avalanche_utils.scenarios import ScenarioBuilder
 from regain.avalanche_utils.scenarios import TinyImageNetScenarioBuilder
+from regain.debug.avalanche_utils import DebugRepairControllerPlugin
 from regain.experiments.builders import build_backbone
 from regain.experiments.builders import build_benchmark
 from regain.experiments.builders import build_controller
@@ -27,7 +28,6 @@ from regain.experiments.config import ExperimentConfig
 from regain.experiments.config import OptimizerConfig
 from regain.experiments.config import RepairConfig
 from regain.experiments.config import TransformsConfig
-from regain.debug.avalanche_utils import DebugRepairControllerPlugin
 from regain.models.controllers import PreventionController
 from regain.models.controllers import RepairController
 
@@ -55,6 +55,7 @@ class _NoOpRepairController(RepairController):
     ) -> Any:
         del model, inputs
         return outputs
+
 
 ###############################
 # Controller replay contracts #
@@ -215,13 +216,17 @@ class TestBuildControllerPlugin:
         assert plugin.seed == 11
 
     def test_requires_explicit_seed_for_repair_plugins(self) -> None:
+
+        def _build_plugin_with_kwargs(kwargs: dict[str, Any]) -> Any:
+            return build_controller_plugin(**kwargs)
+
         with pytest.raises(TypeError, match="missing 1 required keyword-only argument: 'seed'"):
-            build_controller_plugin(
-                controller=_NoOpRepairController(),
-                fit_after_experience=False,
-                num_epochs=2,
-                batch_size=4,
-            )
+            _build_plugin_with_kwargs({
+                'controller': _NoOpRepairController(),
+                'fit_after_experience': False,
+                'num_epochs': 2,
+                'batch_size': 4,
+            })
 
     @pytest.mark.parametrize(
         ('debug_epochs', 'debug_experiences'),

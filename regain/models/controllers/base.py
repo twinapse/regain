@@ -46,8 +46,8 @@ class PreventionController(nn.Module, ABC):
         - `on_eval_experience_end(...)`: Called after evaluating a single experience.
 
     Optional capabilities:
-      - Backbone correction: Controllers that modify model parameters or structure should implement a backbone-correction
-        interface (e.g., `correct_backbone(model)`), typically invoked at safe boundaries (e.g., before training begins).
+      - Backbone correction: Controllers that modify model parameters or structure should implement a
+        backbone-correction interface (e.g., `correct_backbone(model)`), invoked at safe boundaries.
       - Training objective correction: Controllers that alter the optimization objective should implement a
         training-objective interface (e.g., `correct_training_objective(...)`), invoked before backpropagation.
 
@@ -55,12 +55,12 @@ class PreventionController(nn.Module, ABC):
     """
 
     def __init__(
-        self,
-        *,
-        train_batch_size: int | None = None,
-        replay_batch_size: int | None = None,
-        replay_memory_size: int | None = None,
-        **kwargs,
+            self,
+            *,
+            train_batch_size: int | None = None,  # pylint: disable=unused-argument
+            replay_batch_size: int | None = None,  # pylint: disable=unused-argument
+            replay_memory_size: int | None = None,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
     ) -> None:
         """
         Initialize the prevention controller.
@@ -75,7 +75,10 @@ class PreventionController(nn.Module, ABC):
         """
         super().__init__()
 
-    def on_train_begin(self, model: nn.Module) -> None:
+    def on_train_begin(
+            self,
+            model: nn.Module,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered before training begins (once).
 
@@ -87,7 +90,10 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_train_end(self, model: nn.Module) -> None:
+    def on_train_end(
+            self,
+            model: nn.Module,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after training completes (once).
 
@@ -99,7 +105,10 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_train_experience_begin(self, dataset: Dataset | None) -> None:
+    def on_train_experience_begin(
+            self,
+            dataset: Dataset | None,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered before a training experience begins.
 
@@ -111,7 +120,10 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_train_experience_end(self, model: nn.Module) -> None:
+    def on_train_experience_end(
+            self,
+            model: nn.Module,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after a training experience finishes.
 
@@ -123,7 +135,10 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_train_epoch_begin(self, model: nn.Module) -> None:
+    def on_train_epoch_begin(
+            self,
+            model: nn.Module,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered before each training epoch.
 
@@ -135,7 +150,10 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_train_epoch_end(self, model: nn.Module) -> None:
+    def on_train_epoch_end(
+            self,
+            model: nn.Module,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after each training epoch.
 
@@ -147,7 +165,11 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_eval_begin(self, *args, **kwargs) -> None:
+    def on_eval_begin(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered before evaluation begins.
 
@@ -156,7 +178,11 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_eval_end(self, *args, **kwargs) -> None:
+    def on_eval_end(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after evaluation ends.
 
@@ -165,7 +191,11 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_eval_experience_begin(self, *args, **kwargs) -> None:
+    def on_eval_experience_begin(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered before an experience evaluation begins.
 
@@ -174,7 +204,11 @@ class PreventionController(nn.Module, ABC):
         """
         return
 
-    def on_eval_experience_end(self, *args, **kwargs) -> None:
+    def on_eval_experience_end(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after an experience evaluation ends.
 
@@ -246,7 +280,10 @@ class RepairController(nn.Module, ABC):
         """
         return False
 
-    def on_train_end(self, model: nn.Module) -> None:
+    def on_train_end(
+            self,
+            model: nn.Module,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after training completes (once).
 
@@ -258,7 +295,10 @@ class RepairController(nn.Module, ABC):
         """
         return
 
-    def on_train_experience_end(self, model: nn.Module) -> None:
+    def on_train_experience_end(
+            self,
+            model: nn.Module,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after a training experience finishes.
 
@@ -270,7 +310,11 @@ class RepairController(nn.Module, ABC):
         """
         return
 
-    def on_eval_begin(self, *args, **kwargs) -> None:
+    def on_eval_begin(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered before evaluation begins.
 
@@ -279,7 +323,11 @@ class RepairController(nn.Module, ABC):
         """
         return
 
-    def on_eval_end(self, *args, **kwargs) -> None:
+    def on_eval_end(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after evaluation ends.
 
@@ -288,7 +336,11 @@ class RepairController(nn.Module, ABC):
         """
         return
 
-    def on_eval_experience_begin(self, *args, **kwargs) -> None:
+    def on_eval_experience_begin(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered before an experience evaluation begins.
 
@@ -297,7 +349,11 @@ class RepairController(nn.Module, ABC):
         """
         return
 
-    def on_eval_experience_end(self, *args, **kwargs) -> None:
+    def on_eval_experience_end(
+            self,
+            *args,  # pylint: disable=unused-argument
+            **kwargs,  # pylint: disable=unused-argument
+    ) -> None:
         """
         Hook triggered after an experience evaluation ends.
 
@@ -332,11 +388,11 @@ class RepairController(nn.Module, ABC):
 
     @abstractmethod
     def correct_outputs(
-            self,
-            *,
-            outputs: Any,
-            model: nn.Module | None = None,
-            inputs: Any | None = None,
+        self,
+        *,
+        outputs: Any,
+        model: nn.Module | None = None,
+        inputs: Any | None = None,
     ) -> Any:
         """
         Correct model outputs.

@@ -68,7 +68,7 @@ def to_float(
     if use_item and hasattr(value, 'item'):
         try:
             value = value.item()
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
     try:
         v = float(value)

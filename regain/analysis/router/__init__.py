@@ -176,9 +176,15 @@ def write_repair_router_outputs(
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2, default=str), encoding='utf-8')
 
-    logger.info('Repair router outputs written: '
-                f'{features_path}, {labels_path}, {predictions_path}, {summary_path}, '
-                f'{decision_gate_path}, {manifest_path}')
+    logger.info(
+        'Repair router outputs written: %s, %s, %s, %s, %s, %s',
+        features_path,
+        labels_path,
+        predictions_path,
+        summary_path,
+        decision_gate_path,
+        manifest_path,
+    )
     return {
         'features': features_path,
         'labels': labels_path,

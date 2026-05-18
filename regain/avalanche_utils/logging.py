@@ -1,3 +1,6 @@
+"""
+MLflow-backed Avalanche training logger.
+"""
 from typing import Any
 
 from avalanche.logging import BaseLogger
@@ -13,7 +16,6 @@ from regain.mlflow_utils import to_scalar_metric_value
 __all__ = [
     'MLflowTrainingLogger',
 ]
-
 
 _IGNORED_METRIC_TOKENS = {
     'eval_phase',
@@ -108,7 +110,7 @@ class MLflowTrainingLogger(BaseLogger):
             return int(self.context.log_step)
         return int(self.context.train_step)
 
-    def log_single_metric(self, name: str, value: Any, x_plot: int, **kwargs) -> None:
+    def log_single_metric(self, name: str, value: Any, x_plot: int) -> None:
         if mlflow.active_run() is None:
             return
         if not self.context.log_enabled:
@@ -129,10 +131,10 @@ class MLflowTrainingLogger(BaseLogger):
 
         try:
             step = self._compute_step()
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             try:
                 step = int(x_plot)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 step = 0
 
         mlflow.log_metric(metric_key, scalar, step=step)

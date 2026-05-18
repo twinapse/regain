@@ -10,6 +10,7 @@ from abc import abstractmethod
 from contextlib import contextmanager
 import math
 from typing import Any, Callable, Iterator, Mapping
+
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
@@ -47,7 +48,6 @@ __all__ = [
     'resolve_stage_units',
     'run_model_with_hooks',
 ]
-
 
 _DEFAULT_VIT_STAGE_UNITS = 5
 
@@ -187,8 +187,8 @@ def _temporary_forward_hooks(
         for h in handles:
             try:
                 h.remove()
-            except Exception:
-                get_logger().warning(f'Failed to remove temporary forward hook: {h}', exc_info=True)
+            except Exception:  # pylint: disable=broad-exception-caught
+                get_logger().warning('Failed to remove temporary forward hook: %s', h, exc_info=True)
 
 
 def run_model_with_hooks(
@@ -258,18 +258,18 @@ def build_unit_gain_hooks(
     return hooks
 
 
-def bounded_positive_gain(*, raw: torch.Tensor, log_gain_max: float) -> torch.Tensor:
+def bounded_positive_gain(*, raw: torch.Tensor, log_gain_max_value: float) -> torch.Tensor:
     """
     Map unconstrained raw gains to a positive bounded range around 1.0.
 
     Args:
         raw (torch.Tensor): Unconstrained raw parameters.
-        log_gain_max (float): Natural log of the maximum gain (> 0).
+        log_gain_max_value (float): Natural log of the maximum gain (> 0).
 
     Returns:
         torch.Tensor: Gains in [1 / gain_max, gain_max].
     """
-    return torch.exp(float(log_gain_max) * torch.tanh(raw))
+    return torch.exp(float(log_gain_max_value) * torch.tanh(raw))
 
 
 def log_gain_max(*, gain_max: float) -> float:
@@ -306,10 +306,7 @@ def effective_gains_from_raw(
     Returns:
         dict[str, torch.Tensor]: Mapping from unit keys to effective gains.
     """
-    return {
-        k: bounded_positive_gain(raw=v, log_gain_max=log_gain_max_value)
-        for k, v in raw_gains.items()
-    }
+    return {k: bounded_positive_gain(raw=v, log_gain_max_value=log_gain_max_value) for k, v in raw_gains.items()}
 
 
 def mean_l2_distance_to_one(*, gains: Mapping[str, torch.Tensor], device: torch.device) -> torch.Tensor:
@@ -622,11 +619,9 @@ def apply_repair_correction(
 
     # Normalize device/dtype and validate batch compatibility.
     if int(corrected_outputs.shape[0]) != int(backbone_outputs.shape[0]):
-        raise RuntimeError(
-            'Repair controller output batch dimension mismatch. '
-            f'backbone_batch={int(backbone_outputs.shape[0])}, '
-            f'controller_batch={int(corrected_outputs.shape[0])}'
-        )
+        raise RuntimeError('Repair controller output batch dimension mismatch. '
+                           f'backbone_batch={int(backbone_outputs.shape[0])}, '
+                           f'controller_batch={int(corrected_outputs.shape[0])}')
     if corrected_outputs.device != backbone_outputs.device:
         corrected_outputs = corrected_outputs.to(device=backbone_outputs.device)
     if corrected_outputs.dtype != backbone_outputs.dtype:
@@ -636,30 +631,22 @@ def apply_repair_correction(
     backbone_width = int(backbone_outputs.shape[1])
     corrected_width = int(corrected_outputs.shape[1])
     if corrected_width > backbone_width:
-        raise RuntimeError(
-            'Repair controller output width exceeds backbone output width. '
-            f'backbone_width={backbone_width}, controller_width={corrected_width}'
-        )
+        raise RuntimeError('Repair controller output width exceeds backbone output width. '
+                           f'backbone_width={backbone_width}, controller_width={corrected_width}')
 
     if train_seen_classes:
         max_seen_class = int(max(train_seen_classes))
         if max_seen_class >= backbone_width:
-            raise RuntimeError(
-                'Seen class ID exceeds backbone output width. '
-                f'max_seen_class={max_seen_class}, backbone_width={backbone_width}'
-            )
+            raise RuntimeError('Seen class ID exceeds backbone output width. '
+                               f'max_seen_class={max_seen_class}, backbone_width={backbone_width}')
         if max_seen_class >= corrected_width:
-            raise RuntimeError(
-                'Repair controller output does not cover all seen classes. '
-                f'max_seen_class={max_seen_class}, controller_width={corrected_width}'
-            )
+            raise RuntimeError('Repair controller output does not cover all seen classes. '
+                               f'max_seen_class={max_seen_class}, controller_width={corrected_width}')
 
     # Merge only seen-class columns so unseen classes remain backbone-owned.
     merged_outputs = backbone_outputs.clone()
     seen_class_ids = sorted(
-        cls for cls in train_seen_classes
-        if 0 <= int(cls) < backbone_width and int(cls) < corrected_width
-    )
+        cls for cls in train_seen_classes if 0 <= int(cls) < backbone_width and int(cls) < corrected_width)
     if seen_class_ids:
         merged_outputs[:, seen_class_ids] = corrected_outputs[:, seen_class_ids]
     return merged_outputs
@@ -742,10 +729,7 @@ def _resolve_vit_model_root(*, backbone: nn.Module) -> nn.Module | None:
             return candidate
         patch_embed = getattr(candidate, 'patch_embed', None)
         blocks = getattr(candidate, 'blocks', None)
-        if (
-            isinstance(patch_embed, nn.Module)
-            and isinstance(blocks, (nn.Sequential, nn.ModuleList))
-        ):
+        if (isinstance(patch_embed, nn.Module) and isinstance(blocks, (nn.Sequential, nn.ModuleList))):
             return candidate
     return None
 
@@ -851,9 +835,8 @@ def _resolve_vit_stage_units(
         return units[:1]
 
     num_encoder_groups = min(len(block_layers), max(target_total_units - 1, 1))
-    for group_index, (_start, end) in enumerate(
-        _split_contiguous_ranges(num_items=len(block_layers), num_groups=num_encoder_groups),
-    ):
+    for group_index, (_, end) in enumerate(
+            _split_contiguous_ranges(num_items=len(block_layers), num_groups=num_encoder_groups),):
         # Hook the last block in each contiguous group, which is the group boundary seen by downstream blocks.
         group_last_block = block_layers[end - 1]
         units.append((f'encoder_group_{group_index}', group_last_block))
@@ -879,10 +862,7 @@ def _resolve_vit_block_units(*, backbone: nn.Module) -> list[tuple[str, nn.Modul
     if not block_layers:
         return []
 
-    return [
-        (f'encoder_layer_{layer_index}', layer)
-        for layer_index, layer in enumerate(block_layers)
-    ]
+    return [(f'encoder_layer_{layer_index}', layer) for layer_index, layer in enumerate(block_layers)]
 
 
 def resolve_stage_units(*, backbone: nn.Module, max_units: int | None) -> list[tuple[str, nn.Module]]:
@@ -1150,7 +1130,8 @@ class BaseUnitGainController(RepairController, ABC):
             return self._forward_with_gains(model=model, inputs=x, device=model_device)
 
         # Build a regularization term when requested.
-        def _reg_term(_aux: Any) -> torch.Tensor | None:
+        def _reg_term(aux: Any) -> torch.Tensor | None:
+            del aux
             # Skip regularization when disabled.
             if self.l2_reg <= 0.0:
                 return None
@@ -1182,6 +1163,7 @@ class BaseUnitGainController(RepairController, ABC):
         Returns:
             Any: Corrected logits when enabled and possible; otherwise the original `outputs`.
         """
+
         # Wrap the controller forward to match the correction helper signature.
         def _forward(x: torch.Tensor, device: torch.device) -> torch.Tensor:
             return self._forward_with_gains(model=model, inputs=x, device=device)
@@ -1227,7 +1209,7 @@ class BaseUnitGainController(RepairController, ABC):
         # Require a resolver to translate backbone structure into hookable units.
         if self._unit_resolver is None:
             raise ValueError(f'{type(self).__name__} requires a unit resolver.')
-        return self._unit_resolver(backbone=backbone, max_units=max_units)
+        return self._unit_resolver(backbone=backbone, max_units=max_units)  # pylint: disable=not-callable
 
     @abstractmethod
     def _ensure_initialized(self, *, model: nn.Module, device: torch.device, sample_inputs: torch.Tensor) -> None:

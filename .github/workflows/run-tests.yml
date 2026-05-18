@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  pull_request:
+  workflow_dispatch:  # Allows manual execution of the workflow
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+      id: python_setup  # Added an ID for referencing the output
+
+    - name: Cache Python virtualenv
+      # Check limits at https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#usage-limits-and-eviction-policy
+      id: python_cache
+      uses: actions/cache@v4
+      with:
+        path: venv
+        key: venv-${{ runner.os }}-python-${{ steps.python_setup.outputs.python-version }}-${{ hashFiles('**/requirements.txt', '**/requirements-ci-tests.txt') }}
+        restore-keys: venv-${{ runner.os }}-python-${{ steps.python_setup.outputs.python-version }}-
+
+    - name: Install dependencies
+      if: steps.python_cache.outputs.cache-hit != 'true'
+      run: |
+        # Create a virtual environment
+        python -m venv venv
+
+        # Activate the virtual environment
+        source venv/bin/activate
+
+        # Upgrade pip
+        python -m pip install --upgrade pip
+
+        # Install production dependencies
+        pip install -r requirements.txt
+
+        # Install CI test dependencies
+        pip install -r requirements-ci-tests.txt
+
+    - name: Run tests
+      run: |
+        source venv/bin/activate  # Ensure the virtual environment is activated
+        python -m pytest -q tests -ra --maxfail=1

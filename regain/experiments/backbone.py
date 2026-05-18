@@ -76,22 +76,16 @@ def load_backbone_from_source_experiment(
             allow_missing_experiment=False,
         )
     except ValueError as exc:
-        raise RuntimeError(
-            f'Source experiment `{source_experiment}` was not found. '
-            'If repair controllers are configured, a `backbone` run must always '
-            'exist.'
-        ) from exc
+        raise RuntimeError(f'Source experiment `{source_experiment}` was not found. '
+                           'If repair controllers are configured, a `backbone` run must always '
+                           'exist.') from exc
     if not backbone_runs:
-        raise RuntimeError(
-            'If repair controllers are configured, a `backbone` run must always '
-            f'exist. No `backbone` run was found in source experiment '
-            f'`{source_experiment}`.'
-        )
+        raise RuntimeError('If repair controllers are configured, a `backbone` run must always '
+                           f'exist. No `backbone` run was found in source experiment '
+                           f'`{source_experiment}`.')
     if len(backbone_runs) > 1:
-        raise RuntimeError(
-            f'Source experiment `{source_experiment}` has multiple `backbone` '
-            'runs. An experiment cannot have multiple `backbone` runs.'
-        )
+        raise RuntimeError(f'Source experiment `{source_experiment}` has multiple `backbone` '
+                           'runs. An experiment cannot have multiple `backbone` runs.')
 
     backbone_run = backbone_runs[0]
     backbone_run_id = str(backbone_run.info.run_id)
@@ -106,10 +100,7 @@ def load_backbone_from_source_experiment(
         run=backbone_run,
         expected_num_experiences=expected_num_experiences,
     )
-    eval_results = {
-        str(key): float(value)
-        for key, value in dict(backbone_run.data.metrics or {}).items()
-    }
+    eval_results = {str(key): float(value) for key, value in dict(backbone_run.data.metrics or {}).items()}
     return checkpoint_paths, eval_results, analysis_baseline, backbone_run
 
 
@@ -159,14 +150,10 @@ def _extract_required_run_param_str(
     """
     raw_value = params.get(key)
     if raw_value is None:
-        raise RuntimeError(
-            f'Backbone run `{run_id}` is missing required param `{key}`.'
-        )
+        raise RuntimeError(f'Backbone run `{run_id}` is missing required param `{key}`.')
     value = str(raw_value).strip()
     if not value:
-        raise RuntimeError(
-            f'Backbone run `{run_id}` has invalid param `{key}`.'
-        )
+        raise RuntimeError(f'Backbone run `{run_id}` has invalid param `{key}`.')
     return value
 
 
@@ -216,15 +203,11 @@ def _extract_required_run_param_int(
     value = _extract_required_run_param_str(params=params, run_id=run_id, key=key)
     parsed_value = _deserialize_mlflow_param_value(raw_value=value)
     if isinstance(parsed_value, bool):
-        raise RuntimeError(
-            f'Backbone run `{run_id}` has non-integer param `{key}`: {parsed_value}'
-        )
+        raise RuntimeError(f'Backbone run `{run_id}` has non-integer param `{key}`: {parsed_value}')
     try:
         return int(parsed_value)
     except (TypeError, ValueError) as exc:
-        raise RuntimeError(
-            f'Backbone run `{run_id}` has non-integer param `{key}`: {parsed_value}'
-        ) from exc
+        raise RuntimeError(f'Backbone run `{run_id}` has non-integer param `{key}`: {parsed_value}') from exc
 
 
 def _extract_optional_run_param_int(
@@ -382,9 +365,7 @@ def extract_backbone_training_config_from_run(*, run: Run) -> TrainingConfig:
     grad_clip_max_norm: float | None = None
     grad_clip_key = f'{training_prefix}{NS_SEP}grad_clip_max_norm'
     if grad_clip_key in params_payload:
-        grad_clip_max_norm = float(
-            _deserialize_mlflow_param_value(raw_value=str(params_payload[grad_clip_key]))
-        )
+        grad_clip_max_norm = float(_deserialize_mlflow_param_value(raw_value=str(params_payload[grad_clip_key])))
     lr_scheduler_name = _extract_optional_run_param_str(
         params=params_payload,
         key=f'{lr_scheduler_prefix}{NS_SEP}name',
@@ -435,27 +416,19 @@ def extract_required_float_vector(
     """
     raw_values = payload.get(key)
     if not isinstance(raw_values, list):
-        raise RuntimeError(
-            f'Missing or invalid `{key}` vector in backbone analysis artifacts.'
-        )
+        raise RuntimeError(f'Missing or invalid `{key}` vector in backbone analysis artifacts.')
     values: list[float] = []
     for idx, value in enumerate(raw_values):
         try:
             value_float = float(value)
         except (TypeError, ValueError) as exc:
-            raise RuntimeError(
-                f'Backbone `{key}` contains invalid value at index {idx}: {value!r}'
-            ) from exc
+            raise RuntimeError(f'Backbone `{key}` contains invalid value at index {idx}: {value!r}') from exc
         if not math.isfinite(value_float):
-            raise RuntimeError(
-                f'Backbone `{key}` contains non-finite value at index {idx}: {value!r}'
-            )
+            raise RuntimeError(f'Backbone `{key}` contains non-finite value at index {idx}: {value!r}')
         values.append(value_float)
     if len(values) != int(expected_len):
-        raise RuntimeError(
-            f'Backbone `{key}` length mismatch. '
-            f'expected={int(expected_len)}, observed={len(values)}'
-        )
+        raise RuntimeError(f'Backbone `{key}` length mismatch. '
+                           f'expected={int(expected_len)}, observed={len(values)}')
     return values
 
 
@@ -478,9 +451,7 @@ def extract_required_nullable_float_vector(
     """
     raw_values = payload.get(key)
     if not isinstance(raw_values, list):
-        raise RuntimeError(
-            f'Missing or invalid `{key}` vector in backbone analysis artifacts.'
-        )
+        raise RuntimeError(f'Missing or invalid `{key}` vector in backbone analysis artifacts.')
     values: list[float | None] = []
     for idx, value in enumerate(raw_values):
         if value is None:
@@ -489,19 +460,13 @@ def extract_required_nullable_float_vector(
         try:
             value_float = float(value)
         except (TypeError, ValueError) as exc:
-            raise RuntimeError(
-                f'Backbone `{key}` contains invalid value at index {idx}: {value!r}'
-            ) from exc
+            raise RuntimeError(f'Backbone `{key}` contains invalid value at index {idx}: {value!r}') from exc
         if not math.isfinite(value_float):
-            raise RuntimeError(
-                f'Backbone `{key}` contains non-finite value at index {idx}: {value!r}'
-            )
+            raise RuntimeError(f'Backbone `{key}` contains non-finite value at index {idx}: {value!r}')
         values.append(value_float)
     if len(values) != int(expected_len):
-        raise RuntimeError(
-            f'Backbone `{key}` length mismatch. '
-            f'expected={int(expected_len)}, observed={len(values)}'
-        )
+        raise RuntimeError(f'Backbone `{key}` length mismatch. '
+                           f'expected={int(expected_len)}, observed={len(values)}')
     return values
 
 
@@ -522,11 +487,7 @@ def extract_backbone_analysis_baseline(
     """
     plugins = getattr(strategy, 'plugins', [])
     evaluation_plugin = next(
-        (
-            plugin
-            for plugin in plugins
-            if isinstance(plugin, RegainEvaluationPlugin)
-        ),
+        (plugin for plugin in plugins if isinstance(plugin, RegainEvaluationPlugin)),
         None,
     )
     if evaluation_plugin is None:
@@ -536,16 +497,18 @@ def extract_backbone_analysis_baseline(
 
     artifacts = evaluation_plugin.artifacts
     baseline: dict[str, list[float | None]] = {
-        ARTIFACT_ACC_EXP_BASE: extract_required_float_vector(
-            payload=artifacts,
-            key=ARTIFACT_ACC_EXP_BASE,
-            expected_len=expected_num_experiences,
-        ),
-        ARTIFACT_ACC_FINAL_BASE: extract_required_float_vector(
-            payload=artifacts,
-            key=ARTIFACT_ACC_FINAL_BASE,
-            expected_len=expected_num_experiences,
-        ),
+        ARTIFACT_ACC_EXP_BASE:
+            extract_required_float_vector(
+                payload=artifacts,
+                key=ARTIFACT_ACC_EXP_BASE,
+                expected_len=expected_num_experiences,
+            ),
+        ARTIFACT_ACC_FINAL_BASE:
+            extract_required_float_vector(
+                payload=artifacts,
+                key=ARTIFACT_ACC_FINAL_BASE,
+                expected_len=expected_num_experiences,
+            ),
     }
     for diag_key in DIAG_VECTOR_KEYS:
         vector = extract_required_nullable_float_vector(
@@ -586,11 +549,7 @@ def find_backbone_runs(
         experiment_ids=[experiment_id],
         filter_string='',
     )
-    return [
-        run
-        for run in runs
-        if resolve_mlflow_run_name(run=run) == RUN_NAME_BACKBONE
-    ]
+    return [run for run in runs if resolve_mlflow_run_name(run=run) == RUN_NAME_BACKBONE]
 
 
 def resolve_local_backbone_run(
@@ -616,10 +575,8 @@ def resolve_local_backbone_run(
     if not local_backbone_runs:
         return None
     if len(local_backbone_runs) > 1:
-        raise RuntimeError(
-            f'Experiment `{experiment_name}` has multiple `backbone` runs. '
-            'An experiment cannot have multiple `backbone` runs.'
-        )
+        raise RuntimeError(f'Experiment `{experiment_name}` has multiple `backbone` runs. '
+                           'An experiment cannot have multiple `backbone` runs.')
     return local_backbone_runs[0]
 
 
@@ -645,10 +602,7 @@ def load_backbone_from_existing_run(
         tuple[list[Path] | None, dict[str, float], dict[str, list[float | None]] | None]:
             (checkpoint paths, scalar evaluation metrics, backbone analysis baseline vectors).
     """
-    eval_results = {
-        str(key): float(value)
-        for key, value in dict(backbone_run.data.metrics or {}).items()
-    }
+    eval_results = {str(key): float(value) for key, value in dict(backbone_run.data.metrics or {}).items()}
     if not include_checkpoints_and_baseline:
         return None, eval_results, None
 
@@ -692,23 +646,17 @@ def collect_backbone_checkpoint_paths(
             continue
         exp_idx = int(idx_token)
         if exp_idx in indexed_paths:
-            raise RuntimeError(
-                f'Duplicate backbone checkpoint index {exp_idx}: {checkpoint_path}'
-            )
+            raise RuntimeError(f'Duplicate backbone checkpoint index {exp_idx}: {checkpoint_path}')
         indexed_paths[exp_idx] = checkpoint_path
 
     if not indexed_paths:
-        raise RuntimeError(
-            f'No backbone checkpoints were found under: {checkpoint_dir}'
-        )
+        raise RuntimeError(f'No backbone checkpoints were found under: {checkpoint_dir}')
 
     observed_indices = sorted(indexed_paths)
     expected_indices = list(range(int(expected_count)))
     if observed_indices != expected_indices:
-        raise RuntimeError(
-            'Backbone checkpoints are incomplete or out of order. '
-            f'expected={expected_indices}, observed={observed_indices}'
-        )
+        raise RuntimeError('Backbone checkpoints are incomplete or out of order. '
+                           f'expected={expected_indices}, observed={observed_indices}')
     return [indexed_paths[idx] for idx in observed_indices]
 
 
@@ -738,18 +686,14 @@ def download_backbone_checkpoints_from_run(
             str(checkpoint_dir),
         )
     except Exception as exc:
-        raise RuntimeError(
-            f'Backbone run `{run_id}` is missing checkpoint artifacts. '
-            'Provide `backbone.source_experiment` pointing to an experiment with '
-            'saved backbone checkpoints.'
-        ) from exc
+        raise RuntimeError(f'Backbone run `{run_id}` is missing checkpoint artifacts. '
+                           'Provide `backbone.source_experiment` pointing to an experiment with '
+                           'saved backbone checkpoints.') from exc
 
     artifacts_dir = Path(downloaded_path)
     if not artifacts_dir.exists() or not artifacts_dir.is_dir():
-        raise RuntimeError(
-            f'Backbone checkpoints artifact is invalid for run `{run_id}`: '
-            f'{artifacts_dir}'
-        )
+        raise RuntimeError(f'Backbone checkpoints artifact is invalid for run `{run_id}`: '
+                           f'{artifacts_dir}')
 
     return collect_backbone_checkpoint_paths(
         checkpoint_dir=artifacts_dir,
@@ -780,11 +724,9 @@ def extract_backbone_analysis_baseline_from_metrics(
     for key, metric_prefix in key_to_prefix.items():
         values: list[float] = []
         for exp_idx in range(int(expected_num_experiences)):
-            metric_key = (
-                f'{metric_prefix}'
-                f'{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}'
-                f'{NS_SEP}base'
-            )
+            metric_key = (f'{metric_prefix}'
+                          f'{NS_SEP}{EXPERIENCE_KEY_PREFIX}{exp_idx:03d}'
+                          f'{NS_SEP}base')
             raw_value = metrics.get(metric_key)
             if raw_value is None:
                 return None
@@ -817,21 +759,21 @@ def load_backbone_analysis_baseline_from_run(
         artifact_path=MLFLOW_ARTIFACT_ANALYSIS_FILE,
     )
     if not isinstance(artifacts_payload, Mapping):
-        raise RuntimeError(
-            f'Backbone run `{run_id}` is missing required `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.'
-        )
+        raise RuntimeError(f'Backbone run `{run_id}` is missing required `{MLFLOW_ARTIFACT_ANALYSIS_FILE}`.')
 
     baseline: dict[str, list[float | None]] = {
-        ARTIFACT_ACC_EXP_BASE: extract_required_float_vector(
-            payload=artifacts_payload,
-            key=ARTIFACT_ACC_EXP_BASE,
-            expected_len=expected_num_experiences,
-        ),
-        ARTIFACT_ACC_FINAL_BASE: extract_required_float_vector(
-            payload=artifacts_payload,
-            key=ARTIFACT_ACC_FINAL_BASE,
-            expected_len=expected_num_experiences,
-        ),
+        ARTIFACT_ACC_EXP_BASE:
+            extract_required_float_vector(
+                payload=artifacts_payload,
+                key=ARTIFACT_ACC_EXP_BASE,
+                expected_len=expected_num_experiences,
+            ),
+        ARTIFACT_ACC_FINAL_BASE:
+            extract_required_float_vector(
+                payload=artifacts_payload,
+                key=ARTIFACT_ACC_FINAL_BASE,
+                expected_len=expected_num_experiences,
+            ),
     }
     for diag_key in DIAG_VECTOR_KEYS:
         vector = extract_required_nullable_float_vector(

@@ -25,6 +25,9 @@ import regain.experiments.orchestrator as orchestrator_module
 
 
 class _FakeStrategy:
+    """
+    Fake training strategy stub.
+    """
 
     def __init__(self) -> None:
         self.train_kwargs: dict[str, object] | None = None
@@ -35,6 +38,9 @@ class _FakeStrategy:
 
 
 class _FakeRegainEvaluationPlugin:
+    """
+    Fake RegainEvaluationPlugin stub.
+    """
 
     def __init__(self, **kwargs) -> None:
         del kwargs
@@ -44,16 +50,25 @@ class _FakeRegainEvaluationPlugin:
 
 
 class _FakeRegainEvaluator:
+    """
+    Fake RegainEvaluator stub.
+    """
 
     def __init__(self, **kwargs) -> None:
         del kwargs
 
 
 class _FakeRepairController:
+    """
+    Fake repair controller stub.
+    """
     pass
 
 
 class _FakeRepairControllerPlugin:
+    """
+    Fake RepairControllerPlugin stub.
+    """
 
     def __init__(self, controller: _FakeRepairController) -> None:
         self.controller = controller
@@ -63,12 +78,18 @@ class _FakeRepairControllerPlugin:
 
 
 class _FakeSeenClassesObserver:
+    """
+    Fake SeenClassesObserver stub.
+    """
 
     def __init__(self) -> None:
         self.seen_classes: set[int] = set()
 
 
 class _FakePredictionRecorder:
+    """
+    Fake PredictionRecorder stub.
+    """
 
     def __init__(self, *, artifact_root: Path, num_classes: int) -> None:
         del num_classes
@@ -79,6 +100,9 @@ class _FakePredictionRecorder:
 
 
 class _FakeMlflowClient:
+    """
+    Fake MLflow client stub.
+    """
 
     def __init__(self, experiment_name: str | None = None) -> None:
         self._experiment_name = experiment_name
@@ -91,6 +115,9 @@ class _FakeMlflowClient:
 
 
 class _DummyContextManager:
+    """
+    Dummy context manager for testing.
+    """
 
     def __enter__(self):
         return None
@@ -101,6 +128,9 @@ class _DummyContextManager:
 
 
 class TestTrainInvocation:
+    """
+    Tests for training invocation behavior.
+    """
 
     def test_train_call_omits_eval_streams(
         self,
@@ -228,7 +258,7 @@ def _make_backbone_run_params(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]
         runs=[],
     )
 
-    monkeypatch.setattr(logging_module.mlflow, 'log_params', lambda params: captured.update(params))
+    monkeypatch.setattr(logging_module.mlflow, 'log_params', captured.update)
 
     log_run_params(
         experiment_config=experiment_config,
@@ -359,7 +389,7 @@ class TestBackboneReuseManifestArtifact:
             monkeypatch,
             captured_manifests=captured_manifests,
         )
-        monkeypatch.setattr(orchestrator_module, 'MlflowClient', lambda: _FakeMlflowClient())
+        monkeypatch.setattr(orchestrator_module, 'MlflowClient', _FakeMlflowClient)
         monkeypatch.setattr(
             orchestrator_module,
             'resolve_local_backbone_run',

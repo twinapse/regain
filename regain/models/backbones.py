@@ -41,16 +41,8 @@ def _resolve_vit_input_shape(
     Returns:
         tuple[int, int]: Resolved `(image_size, patch_size)`.
     """
-    default_image_size = (
-        _DEFAULT_VIT_PRETRAINED_IMAGE_SIZE
-        if pretrained
-        else _DEFAULT_VIT_SCRATCH_IMAGE_SIZE
-    )
-    default_patch_size = (
-        _DEFAULT_VIT_PRETRAINED_PATCH_SIZE
-        if pretrained
-        else _DEFAULT_VIT_SCRATCH_PATCH_SIZE
-    )
+    default_image_size = (_DEFAULT_VIT_PRETRAINED_IMAGE_SIZE if pretrained else _DEFAULT_VIT_SCRATCH_IMAGE_SIZE)
+    default_patch_size = (_DEFAULT_VIT_PRETRAINED_PATCH_SIZE if pretrained else _DEFAULT_VIT_SCRATCH_PATCH_SIZE)
     return (
         int(default_image_size if image_size is None else image_size),
         int(default_patch_size if patch_size is None else patch_size),
@@ -79,9 +71,7 @@ def _build_pretrained_timm_vit(
     try:
         timm = importlib.import_module('timm')
     except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            'Pretrained ViT backbones require the optional `timm` dependency.'
-        ) from exc
+        raise ModuleNotFoundError('Pretrained ViT backbones require the optional `timm` dependency.') from exc
 
     model = timm.create_model(
         model_name,
@@ -90,9 +80,7 @@ def _build_pretrained_timm_vit(
         num_classes=0,
     )
     if not isinstance(model, nn.Module):
-        raise TypeError(
-            f'timm.create_model returned {type(model).__name__}, expected torch.nn.Module.'
-        )
+        raise TypeError(f'timm.create_model returned {type(model).__name__}, expected torch.nn.Module.')
     return model
 
 
@@ -207,13 +195,9 @@ class _VisionTransformerBackbone(nn.Module):
         self._uses_pretrained_model = bool(pretrained)
         if self._uses_pretrained_model:
             if pretrained_model_name is None or str(pretrained_model_name).strip() == '':
-                raise ValueError(
-                    'pretrained_model_name is required when `pretrained=True`.'
-                )
+                raise ValueError('pretrained_model_name is required when `pretrained=True`.')
             if int(patch_size) != _DEFAULT_VIT_PRETRAINED_PATCH_SIZE:
-                raise ValueError(
-                    'Pretrained ViT backbones currently require patch_size=16.'
-                )
+                raise ValueError('Pretrained ViT backbones currently require patch_size=16.')
             self.model = _build_pretrained_timm_vit(
                 model_name=str(pretrained_model_name),
                 image_size=int(image_size),
@@ -246,10 +230,7 @@ class _VisionTransformerBackbone(nn.Module):
             expected_image_size = _resolve_pretrained_vit_image_size(model=self.model)
             if expected_image_size is not None:
                 expected_height, expected_width = expected_image_size
-                if (
-                    int(x.shape[-2]) != expected_height
-                    or int(x.shape[-1]) != expected_width
-                ):
+                if (int(x.shape[-2]) != expected_height or int(x.shape[-1]) != expected_width):
                     x = F.interpolate(
                         x,
                         size=(expected_height, expected_width),
@@ -263,10 +244,8 @@ class _VisionTransformerBackbone(nn.Module):
                 return features
             if features.ndim == 3:
                 return features[:, 0]
-            raise ValueError(
-                'Pretrained ViT backbone returned unsupported feature shape '
-                f'{tuple(features.shape)}.'
-            )
+            raise ValueError('Pretrained ViT backbone returned unsupported feature shape '
+                             f'{tuple(features.shape)}.')
 
         n = int(x.shape[0])
         x = self.model.conv_proj(x)

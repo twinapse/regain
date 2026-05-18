@@ -4,10 +4,10 @@ Repairability frontier analysis outputs.
 
 import json
 import math
-import re
-import uuid
 from pathlib import Path
+import re
 from typing import Any
+import uuid
 
 from regain.analysis.artifacts import ARTIFACT_ACC_EXP_BASE
 from regain.analysis.artifacts import ARTIFACT_ACC_FINAL_BASE
@@ -391,12 +391,8 @@ def _build_no_op_setting_payload(*, row: dict[str, Any]) -> dict[str, Any]:
         'strategy_name': _normalize_no_op_token(value=row.get(_COLUMN_STRATEGY_NAME), fallback='unknown'),
         'seed': _normalize_no_op_identity_number(value=row.get(COLUMN_SEED)),
         'b': _normalize_no_op_identity_number(value=row.get(COLUMN_B)),
-        'repair_budget_fraction': _normalize_no_op_identity_number(
-            value=row.get(COLUMN_REPAIR_BUDGET_FRACTION)
-        ),
-        'repair_budget_total': _normalize_no_op_identity_number(
-            value=row.get(COLUMN_REPAIR_BUDGET_TOTAL)
-        ),
+        'repair_budget_fraction': _normalize_no_op_identity_number(value=row.get(COLUMN_REPAIR_BUDGET_FRACTION)),
+        'repair_budget_total': _normalize_no_op_identity_number(value=row.get(COLUMN_REPAIR_BUDGET_TOTAL)),
     }
 
 
@@ -574,10 +570,8 @@ def _build_controller_id_map(
             _append_warning(
                 manifest=manifest,
                 code='controller_id_collision',
-                message=(
-                    f'Normalized controller id collision for `{base_slug}`. '
-                    'Deterministic numeric suffixes were assigned.'
-                ),
+                message=(f'Normalized controller id collision for `{base_slug}`. '
+                         'Deterministic numeric suffixes were assigned.'),
                 context={
                     'normalized_base': base_slug,
                     'controller_names': sorted(names),
@@ -724,11 +718,7 @@ def _build_repair_outcome_candidates(
     Returns:
         list[dict[str, Any]]: Repair-outcome rows without controller ids applied.
     """
-    runs_by_id = {
-        str(row.get(COLUMN_RUN_ID)): row
-        for row in runs_table
-        if row.get(COLUMN_RUN_ID) is not None
-    }
+    runs_by_id = {str(row.get(COLUMN_RUN_ID)): row for row in runs_table if row.get(COLUMN_RUN_ID) is not None}
     excluded_rows = manifest.setdefault('excluded_rows', {
         'missing_run': 0,
         'invalid_controller_outcome': 0,
@@ -775,9 +765,9 @@ def _build_repair_outcome_candidates(
         controller_name = experience_row.get(COLUMN_CONTROLLER_NAME)
         controller_type = experience_row.get(COLUMN_CONTROLLER_TYPE)
         if not _is_valid_controller_on_outcome(
-            controller_name=controller_name,
-            controller_type=controller_type,
-            a_ctrl=a_ctrl,
+                controller_name=controller_name,
+                controller_type=controller_type,
+                a_ctrl=a_ctrl,
         ):
             excluded_rows['invalid_controller_outcome'] += 1
             continue
@@ -826,13 +816,11 @@ def _build_repair_outcome_candidates(
             _COLUMN_REPLAY_MEM_SIZE: run_row.get(_COLUMN_REPLAY_MEM_SIZE),
             _COLUMN_REPLAY_BATCH_SIZE_MEM: run_row.get(_COLUMN_REPLAY_BATCH_SIZE_MEM),
         }
-        candidate.update(
-            _derive_outcome_metrics(
-                a_ref=a_ref,
-                a_post=a_post,
-                a_ctrl=a_ctrl,
-            )
-        )
+        candidate.update(_derive_outcome_metrics(
+            a_ref=a_ref,
+            a_post=a_post,
+            a_ctrl=a_ctrl,
+        ))
         candidates.append(candidate)
 
     normalization = manifest.setdefault('normalization', {})
@@ -907,10 +895,8 @@ def _append_no_op_candidates(
             _append_warning(
                 manifest=manifest,
                 code='no_op_baseline_mismatch',
-                message=(
-                    'No-op baseline inputs disagreed across repair controllers. '
-                    'The first repair row was used as the source of truth.'
-                ),
+                message=('No-op baseline inputs disagreed across repair controllers. '
+                         'The first repair row was used as the source of truth.'),
                 context={
                     COLUMN_EXPERIMENT_ID: key[0],
                     _COLUMN_SCENARIO: key[1],
@@ -949,8 +935,7 @@ def _append_no_op_candidates(
                 a_ref=to_float(exemplar.get(_COLUMN_A_REF)),
                 a_post=to_float(exemplar.get(_COLUMN_A_POST)),
                 a_ctrl=to_float(exemplar.get(_COLUMN_A_POST)),
-            )
-        )
+            ))
         no_op_rows.append(no_op_row)
 
     return [*candidates, *no_op_rows]
@@ -1109,83 +1094,100 @@ def _aggregate_frontier_rows(*, repair_outcomes: list[dict[str, Any]]) -> list[d
         ) = key
         mean_repair_budget_total = mean([to_float(item.get(COLUMN_REPAIR_BUDGET_TOTAL)) for item in rows])
         row = {
-            COLUMN_EXPERIMENT_ID: experiment_id,
-            _COLUMN_SCENARIO: scenario,
-            _COLUMN_BACKBONE_NAME: backbone_name,
-            _COLUMN_STRATEGY_NAME: strategy_name,
-            COLUMN_SEED: seed,
-            COLUMN_CONTROLLER_NAME: controller_name,
-            _COLUMN_CONTROLLER_ID: controller_id,
-            COLUMN_B: b_value,
-            COLUMN_REPAIR_BUDGET_FRACTION: repair_budget_fraction,
-            COLUMN_REPAIR_BUDGET_TOTAL: (
-                mean_repair_budget_total
-                if mean_repair_budget_total is not None
-                else to_float(repair_budget_total)
-            ),
-            _COLUMN_ACTION_REPAIR_BUDGET_FRACTION: mean(
-                [
-                    to_float(item.get(_COLUMN_ACTION_REPAIR_BUDGET_FRACTION))
-                    for item in rows
-                ]
-            ),
-            _COLUMN_ACTION_REPAIR_BUDGET_TOTAL: mean(
-                [
-                    to_float(item.get(_COLUMN_ACTION_REPAIR_BUDGET_TOTAL))
-                    for item in rows
-                ]
-            ),
-            COLUMN_REPAIR_SET_TOTAL: mean([to_float(item.get(COLUMN_REPAIR_SET_TOTAL)) for item in rows]),
-            COLUMN_REPAIR_SPLIT_FRACTION: mean(
-                [to_float(item.get(COLUMN_REPAIR_SPLIT_FRACTION)) for item in rows]
-            ),
-            COLUMN_NUM_CLASSES: mean([to_float(item.get(COLUMN_NUM_CLASSES)) for item in rows]),
-            COLUMN_CONTROLLER_MODEL_PARAM_COUNT: mean(
-                [to_float(item.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT)) for item in rows]
-            ),
-            _COLUMN_IS_NO_OP_ACTION: _first_non_null(rows, key=_COLUMN_IS_NO_OP_ACTION),
-            _COLUMN_NUM_ROWS: len(rows),
-            _COLUMN_NUM_RUNS: len({row.get(COLUMN_RUN_ID) for row in rows}),
-            _COLUMN_MEAN_ACC_REF: mean([to_float(item.get(_COLUMN_A_REF)) for item in rows]),
-            _COLUMN_MEAN_ACC_POST: mean([to_float(item.get(_COLUMN_A_POST)) for item in rows]),
-            _COLUMN_MEAN_ACC_CTRL: mean([to_float(item.get(_COLUMN_A_CTRL)) for item in rows]),
-            _COLUMN_MEAN_FORGETTING: mean([to_float(item.get(_COLUMN_FORGETTING)) for item in rows]),
-            _COLUMN_MEAN_ABSOLUTE_RECOVERY: mean(
-                [to_float(item.get(_COLUMN_ABSOLUTE_RECOVERY)) for item in rows]
-            ),
-            _COLUMN_MEAN_RESIDUAL_FORGETTING: mean(
-                [to_float(item.get(_COLUMN_RESIDUAL_FORGETTING)) for item in rows]
-            ),
-            _COLUMN_MEAN_RHO: mean([to_float(item.get(_COLUMN_RHO)) for item in rows]),
-            _COLUMN_RHO_VALID_FRACTION: _mean_bool(rows, key=_COLUMN_RHO_VALID),
-            _COLUMN_MEAN_TASK_DELTA: mean([to_float(item.get(_COLUMN_TASK_DELTA)) for item in rows]),
-            _COLUMN_MEAN_HELPED_TASK_FRACTION: _mean_bool(rows, key=_COLUMN_HELPED),
-            _COLUMN_MEAN_HARMED_TASK_FRACTION: _mean_bool(rows, key=_COLUMN_HARMED),
-            _COLUMN_MEAN_HARM_MAGNITUDE: mean([to_float(item.get(_COLUMN_HARM_MAGNITUDE)) for item in rows]),
-            _COLUMN_WORST_TASK_HARM: _max_value(rows, key=_COLUMN_HARM_MAGNITUDE),
-            f'mean_{RUN_CALIB_ECE}': mean([to_float(item.get(RUN_CALIB_ECE)) for item in rows]),
-            f'mean_{RUN_CALIB_AECE}': mean([to_float(item.get(RUN_CALIB_AECE)) for item in rows]),
-            f'mean_{RUN_CALIB_NLL}': mean([to_float(item.get(RUN_CALIB_NLL)) for item in rows]),
-            f'mean_{RUN_DIAG_OUT_OF_TASK_RATE}': mean(
-                [to_float(item.get(RUN_DIAG_OUT_OF_TASK_RATE)) for item in rows]
-            ),
-            f'mean_{RUN_DIAG_AVG_CONF}': mean([to_float(item.get(RUN_DIAG_AVG_CONF)) for item in rows]),
-            f'mean_{RUN_DIAG_AVG_ENTROPY}': mean([to_float(item.get(RUN_DIAG_AVG_ENTROPY)) for item in rows]),
-            f'mean_{RUN_DIAG_LOGIT_AVG_DRIFT}': mean(
-                [to_float(item.get(RUN_DIAG_LOGIT_AVG_DRIFT)) for item in rows]
-            ),
-            RUN_CALIB_MAX_ECE: mean([to_float(item.get(RUN_CALIB_MAX_ECE)) for item in rows]),
-            RUN_LATENCY_MS_PER_SAMPLE_BASE: mean(
-                [to_float(item.get(RUN_LATENCY_MS_PER_SAMPLE_BASE)) for item in rows]
-            ),
-            RUN_LATENCY_MS_PER_SAMPLE_CTRL: mean(
-                [to_float(item.get(RUN_LATENCY_MS_PER_SAMPLE_CTRL)) for item in rows]
-            ),
-            RUN_LATENCY_MS_RATIO: mean([to_float(item.get(RUN_LATENCY_MS_RATIO)) for item in rows]),
-            RUN_REPAIR_SECONDS: mean([to_float(item.get(RUN_REPAIR_SECONDS)) for item in rows]),
-            RUN_REPAIR_STEPS: mean([to_float(item.get(RUN_REPAIR_STEPS)) for item in rows]),
-            _COLUMN_REPLAY_MEM_SIZE: _first_non_null(rows, key=_COLUMN_REPLAY_MEM_SIZE),
-            _COLUMN_REPLAY_BATCH_SIZE_MEM: _first_non_null(rows, key=_COLUMN_REPLAY_BATCH_SIZE_MEM),
+            COLUMN_EXPERIMENT_ID:
+                experiment_id,
+            _COLUMN_SCENARIO:
+                scenario,
+            _COLUMN_BACKBONE_NAME:
+                backbone_name,
+            _COLUMN_STRATEGY_NAME:
+                strategy_name,
+            COLUMN_SEED:
+                seed,
+            COLUMN_CONTROLLER_NAME:
+                controller_name,
+            _COLUMN_CONTROLLER_ID:
+                controller_id,
+            COLUMN_B:
+                b_value,
+            COLUMN_REPAIR_BUDGET_FRACTION:
+                repair_budget_fraction,
+            COLUMN_REPAIR_BUDGET_TOTAL:
+                (mean_repair_budget_total if mean_repair_budget_total is not None else to_float(repair_budget_total)),
+            _COLUMN_ACTION_REPAIR_BUDGET_FRACTION:
+                mean([to_float(item.get(_COLUMN_ACTION_REPAIR_BUDGET_FRACTION)) for item in rows]),
+            _COLUMN_ACTION_REPAIR_BUDGET_TOTAL:
+                mean([to_float(item.get(_COLUMN_ACTION_REPAIR_BUDGET_TOTAL)) for item in rows]),
+            COLUMN_REPAIR_SET_TOTAL:
+                mean([to_float(item.get(COLUMN_REPAIR_SET_TOTAL)) for item in rows]),
+            COLUMN_REPAIR_SPLIT_FRACTION:
+                mean([to_float(item.get(COLUMN_REPAIR_SPLIT_FRACTION)) for item in rows]),
+            COLUMN_NUM_CLASSES:
+                mean([to_float(item.get(COLUMN_NUM_CLASSES)) for item in rows]),
+            COLUMN_CONTROLLER_MODEL_PARAM_COUNT:
+                mean([to_float(item.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT)) for item in rows]),
+            _COLUMN_IS_NO_OP_ACTION:
+                _first_non_null(rows, key=_COLUMN_IS_NO_OP_ACTION),
+            _COLUMN_NUM_ROWS:
+                len(rows),
+            _COLUMN_NUM_RUNS:
+                len({row.get(COLUMN_RUN_ID) for row in rows}),
+            _COLUMN_MEAN_ACC_REF:
+                mean([to_float(item.get(_COLUMN_A_REF)) for item in rows]),
+            _COLUMN_MEAN_ACC_POST:
+                mean([to_float(item.get(_COLUMN_A_POST)) for item in rows]),
+            _COLUMN_MEAN_ACC_CTRL:
+                mean([to_float(item.get(_COLUMN_A_CTRL)) for item in rows]),
+            _COLUMN_MEAN_FORGETTING:
+                mean([to_float(item.get(_COLUMN_FORGETTING)) for item in rows]),
+            _COLUMN_MEAN_ABSOLUTE_RECOVERY:
+                mean([to_float(item.get(_COLUMN_ABSOLUTE_RECOVERY)) for item in rows]),
+            _COLUMN_MEAN_RESIDUAL_FORGETTING:
+                mean([to_float(item.get(_COLUMN_RESIDUAL_FORGETTING)) for item in rows]),
+            _COLUMN_MEAN_RHO:
+                mean([to_float(item.get(_COLUMN_RHO)) for item in rows]),
+            _COLUMN_RHO_VALID_FRACTION:
+                _mean_bool(rows, key=_COLUMN_RHO_VALID),
+            _COLUMN_MEAN_TASK_DELTA:
+                mean([to_float(item.get(_COLUMN_TASK_DELTA)) for item in rows]),
+            _COLUMN_MEAN_HELPED_TASK_FRACTION:
+                _mean_bool(rows, key=_COLUMN_HELPED),
+            _COLUMN_MEAN_HARMED_TASK_FRACTION:
+                _mean_bool(rows, key=_COLUMN_HARMED),
+            _COLUMN_MEAN_HARM_MAGNITUDE:
+                mean([to_float(item.get(_COLUMN_HARM_MAGNITUDE)) for item in rows]),
+            _COLUMN_WORST_TASK_HARM:
+                _max_value(rows, key=_COLUMN_HARM_MAGNITUDE),
+            f'mean_{RUN_CALIB_ECE}':
+                mean([to_float(item.get(RUN_CALIB_ECE)) for item in rows]),
+            f'mean_{RUN_CALIB_AECE}':
+                mean([to_float(item.get(RUN_CALIB_AECE)) for item in rows]),
+            f'mean_{RUN_CALIB_NLL}':
+                mean([to_float(item.get(RUN_CALIB_NLL)) for item in rows]),
+            f'mean_{RUN_DIAG_OUT_OF_TASK_RATE}':
+                mean([to_float(item.get(RUN_DIAG_OUT_OF_TASK_RATE)) for item in rows]),
+            f'mean_{RUN_DIAG_AVG_CONF}':
+                mean([to_float(item.get(RUN_DIAG_AVG_CONF)) for item in rows]),
+            f'mean_{RUN_DIAG_AVG_ENTROPY}':
+                mean([to_float(item.get(RUN_DIAG_AVG_ENTROPY)) for item in rows]),
+            f'mean_{RUN_DIAG_LOGIT_AVG_DRIFT}':
+                mean([to_float(item.get(RUN_DIAG_LOGIT_AVG_DRIFT)) for item in rows]),
+            RUN_CALIB_MAX_ECE:
+                mean([to_float(item.get(RUN_CALIB_MAX_ECE)) for item in rows]),
+            RUN_LATENCY_MS_PER_SAMPLE_BASE:
+                mean([to_float(item.get(RUN_LATENCY_MS_PER_SAMPLE_BASE)) for item in rows]),
+            RUN_LATENCY_MS_PER_SAMPLE_CTRL:
+                mean([to_float(item.get(RUN_LATENCY_MS_PER_SAMPLE_CTRL)) for item in rows]),
+            RUN_LATENCY_MS_RATIO:
+                mean([to_float(item.get(RUN_LATENCY_MS_RATIO)) for item in rows]),
+            RUN_REPAIR_SECONDS:
+                mean([to_float(item.get(RUN_REPAIR_SECONDS)) for item in rows]),
+            RUN_REPAIR_STEPS:
+                mean([to_float(item.get(RUN_REPAIR_STEPS)) for item in rows]),
+            _COLUMN_REPLAY_MEM_SIZE:
+                _first_non_null(rows, key=_COLUMN_REPLAY_MEM_SIZE),
+            _COLUMN_REPLAY_BATCH_SIZE_MEM:
+                _first_non_null(rows, key=_COLUMN_REPLAY_BATCH_SIZE_MEM),
         }
         row.update(_compute_task_age_summaries(rows=rows))
         row[_COLUMN_UTILITY_PRIMARY] = _compute_utility_primary(row=row)
@@ -1246,11 +1248,8 @@ def _compute_utility_cost_aware(*, row: dict[str, Any]) -> float | None:
     repair_seconds = to_float(row.get(RUN_REPAIR_SECONDS))
     if utility_conservative is None or latency_ms_ratio is None or repair_seconds is None:
         return None
-    return float(
-        utility_conservative
-        - 0.001 * max(0.0, latency_ms_ratio - 1.0)
-        - 0.0001 * math.log1p(max(0.0, repair_seconds))
-    )
+    return float(utility_conservative - 0.001 * max(0.0, latency_ms_ratio - 1.0) -
+                 0.0001 * math.log1p(max(0.0, repair_seconds)))
 
 
 def _dominates(*, left: dict[str, Any], right: dict[str, Any], dimensions: dict[str, tuple[str, ...]]) -> bool:
@@ -1311,14 +1310,10 @@ def _annotate_pareto_membership(*, frontier_rows: list[dict[str, Any]], manifest
 
     pareto_summary: list[dict[str, Any]] = []
     for key, rows in sorted(grouped_rows.items(), key=lambda item: tuple(_sort_key(value) for value in item[0])):
-        retained_maximize = tuple(
-            column for column in _FRONTIER_MAXIMIZE_COLUMNS
-            if any(to_float(row.get(column)) is not None for row in rows)
-        )
-        retained_minimize = tuple(
-            column for column in _FRONTIER_MINIMIZE_COLUMNS
-            if any(to_float(row.get(column)) is not None for row in rows)
-        )
+        retained_maximize = tuple(column for column in _FRONTIER_MAXIMIZE_COLUMNS if any(
+            to_float(row.get(column)) is not None for row in rows))
+        retained_minimize = tuple(column for column in _FRONTIER_MINIMIZE_COLUMNS if any(
+            to_float(row.get(column)) is not None for row in rows))
         dimensions = {
             'maximize': retained_maximize,
             'minimize': retained_minimize,
@@ -1358,8 +1353,7 @@ def _annotate_pareto_membership(*, frontier_rows: list[dict[str, Any]], manifest
                     manifest=manifest,
                     code='pareto_missing_dimension',
                     message=(
-                        'A frontier row was excluded from Pareto checks because it was missing a retained dimension.'
-                    ),
+                        'A frontier row was excluded from Pareto checks because it was missing a retained dimension.'),
                     context={
                         COLUMN_EXPERIMENT_ID: row.get(COLUMN_EXPERIMENT_ID),
                         _COLUMN_SCENARIO: row.get(_COLUMN_SCENARIO),
@@ -1378,8 +1372,7 @@ def _annotate_pareto_membership(*, frontier_rows: list[dict[str, Any]], manifest
             dominated = any(
                 _dominates(left=other, right=row, dimensions=dimensions)
                 for other in evaluable_rows
-                if other is not row
-            )
+                if other is not row)
             row[_COLUMN_IS_PARETO] = not dominated
 
         pareto_summary.append({
@@ -1421,39 +1414,42 @@ def _aggregate_repair_pareto_rows(*, frontier_rows: list[dict[str, Any]]) -> lis
         num_pareto = sum(1 for row in rows if row.get(_COLUMN_IS_PARETO) is True)
         num_settings = len(rows)
         result_rows.append({
-            COLUMN_CONTROLLER_NAME: controller_name,
-            _COLUMN_CONTROLLER_ID: controller_id,
-            COLUMN_B: b_value,
-            COLUMN_REPAIR_BUDGET_FRACTION: repair_budget_fraction,
-            _COLUMN_ACTION_REPAIR_BUDGET_FRACTION: mean(
-                [to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_FRACTION)) for row in rows]
-            ),
-            _COLUMN_ACTION_REPAIR_BUDGET_TOTAL: mean(
-                [
-                    to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_TOTAL))
-                    for row in rows
-                ]
-            ),
-            _COLUMN_IS_NO_OP_ACTION: _first_non_null(rows, key=_COLUMN_IS_NO_OP_ACTION),
-            _COLUMN_NUM_SETTINGS: num_settings,
-            _COLUMN_NUM_PARETO: num_pareto,
-            _COLUMN_PARETO_RATE: float(num_pareto / num_settings) if num_settings > 0 else None,
-            f'mean_{_COLUMN_UTILITY_PRIMARY}': mean([to_float(row.get(_COLUMN_UTILITY_PRIMARY)) for row in rows]),
-            f'mean_{_COLUMN_UTILITY_CONSERVATIVE}': mean(
-                [to_float(row.get(_COLUMN_UTILITY_CONSERVATIVE)) for row in rows]
-            ),
-            _COLUMN_MEAN_ABSOLUTE_RECOVERY: mean(
-                [to_float(row.get(_COLUMN_MEAN_ABSOLUTE_RECOVERY)) for row in rows]
-            ),
-            _COLUMN_MEAN_HARMED_TASK_FRACTION: mean(
-                [to_float(row.get(_COLUMN_MEAN_HARMED_TASK_FRACTION)) for row in rows]
-            ),
-            f'mean_{_COLUMN_WORST_TASK_HARM}': mean([to_float(row.get(_COLUMN_WORST_TASK_HARM)) for row in rows]),
-            _COLUMN_MEAN_LATENCY_MS_RATIO: mean([to_float(row.get(RUN_LATENCY_MS_RATIO)) for row in rows]),
-            _COLUMN_MEAN_REPAIR_SECONDS: mean([to_float(row.get(RUN_REPAIR_SECONDS)) for row in rows]),
-            _COLUMN_MEAN_CONTROLLER_MODEL_PARAM_COUNT: mean(
-                [to_float(row.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT)) for row in rows]
-            ),
+            COLUMN_CONTROLLER_NAME:
+                controller_name,
+            _COLUMN_CONTROLLER_ID:
+                controller_id,
+            COLUMN_B:
+                b_value,
+            COLUMN_REPAIR_BUDGET_FRACTION:
+                repair_budget_fraction,
+            _COLUMN_ACTION_REPAIR_BUDGET_FRACTION:
+                mean([to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_FRACTION)) for row in rows]),
+            _COLUMN_ACTION_REPAIR_BUDGET_TOTAL:
+                mean([to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_TOTAL)) for row in rows]),
+            _COLUMN_IS_NO_OP_ACTION:
+                _first_non_null(rows, key=_COLUMN_IS_NO_OP_ACTION),
+            _COLUMN_NUM_SETTINGS:
+                num_settings,
+            _COLUMN_NUM_PARETO:
+                num_pareto,
+            _COLUMN_PARETO_RATE:
+                float(num_pareto / num_settings) if num_settings > 0 else None,
+            f'mean_{_COLUMN_UTILITY_PRIMARY}':
+                mean([to_float(row.get(_COLUMN_UTILITY_PRIMARY)) for row in rows]),
+            f'mean_{_COLUMN_UTILITY_CONSERVATIVE}':
+                mean([to_float(row.get(_COLUMN_UTILITY_CONSERVATIVE)) for row in rows]),
+            _COLUMN_MEAN_ABSOLUTE_RECOVERY:
+                mean([to_float(row.get(_COLUMN_MEAN_ABSOLUTE_RECOVERY)) for row in rows]),
+            _COLUMN_MEAN_HARMED_TASK_FRACTION:
+                mean([to_float(row.get(_COLUMN_MEAN_HARMED_TASK_FRACTION)) for row in rows]),
+            f'mean_{_COLUMN_WORST_TASK_HARM}':
+                mean([to_float(row.get(_COLUMN_WORST_TASK_HARM)) for row in rows]),
+            _COLUMN_MEAN_LATENCY_MS_RATIO:
+                mean([to_float(row.get(RUN_LATENCY_MS_RATIO)) for row in rows]),
+            _COLUMN_MEAN_REPAIR_SECONDS:
+                mean([to_float(row.get(RUN_REPAIR_SECONDS)) for row in rows]),
+            _COLUMN_MEAN_CONTROLLER_MODEL_PARAM_COUNT:
+                mean([to_float(row.get(COLUMN_CONTROLLER_MODEL_PARAM_COUNT)) for row in rows]),
         })
 
     return result_rows
@@ -1503,37 +1499,54 @@ def _aggregate_repair_impact_rows(*, frontier_rows: list[dict[str, Any]]) -> lis
         utility_primary_values = [to_float(row.get(_COLUMN_UTILITY_PRIMARY)) for row in rows]
         utility_conservative_values = [to_float(row.get(_COLUMN_UTILITY_CONSERVATIVE)) for row in rows]
         result_rows.append({
-            _COLUMN_SCENARIO: scenario,
-            _COLUMN_BACKBONE_NAME: backbone_name,
-            _COLUMN_STRATEGY_NAME: strategy_name,
-            COLUMN_CONTROLLER_NAME: controller_name,
-            _COLUMN_CONTROLLER_ID: controller_id,
-            COLUMN_B: b_value,
-            COLUMN_REPAIR_BUDGET_FRACTION: repair_budget_fraction,
-            COLUMN_REPAIR_BUDGET_TOTAL: repair_budget_total,
-            _COLUMN_ACTION_REPAIR_BUDGET_FRACTION: mean(
-                [to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_FRACTION)) for row in rows]
-            ),
-            _COLUMN_ACTION_REPAIR_BUDGET_TOTAL: mean(
-                [
-                    to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_TOTAL))
-                    for row in rows
-                ]
-            ),
-            _COLUMN_IS_NO_OP_ACTION: _first_non_null(rows, key=_COLUMN_IS_NO_OP_ACTION),
-            _COLUMN_NUM_SEEDS: len({row.get(COLUMN_SEED) for row in rows}),
-            _COLUMN_MEAN_ABSOLUTE_RECOVERY: mean(mean_absolute_recovery_values),
-            _COLUMN_SEM_ABSOLUTE_RECOVERY: _sem(mean_absolute_recovery_values),
-            _COLUMN_MEAN_RHO: mean(mean_rho_values),
-            _COLUMN_SEM_RHO: _sem(mean_rho_values),
-            _COLUMN_MEAN_HELPED_TASK_FRACTION: mean(helped_task_fraction_values),
-            _COLUMN_MEAN_HARMED_TASK_FRACTION: mean(harmed_task_fraction_values),
-            f'mean_{_COLUMN_WORST_TASK_HARM}': mean(worst_task_harm_values),
-            _COLUMN_SEM_WORST_TASK_HARM: _sem(worst_task_harm_values),
-            f'mean_{_COLUMN_UTILITY_PRIMARY}': mean(utility_primary_values),
-            _COLUMN_SEM_UTILITY_PRIMARY: _sem(utility_primary_values),
-            f'mean_{_COLUMN_UTILITY_CONSERVATIVE}': mean(utility_conservative_values),
-            _COLUMN_SEM_UTILITY_CONSERVATIVE: _sem(utility_conservative_values),
+            _COLUMN_SCENARIO:
+                scenario,
+            _COLUMN_BACKBONE_NAME:
+                backbone_name,
+            _COLUMN_STRATEGY_NAME:
+                strategy_name,
+            COLUMN_CONTROLLER_NAME:
+                controller_name,
+            _COLUMN_CONTROLLER_ID:
+                controller_id,
+            COLUMN_B:
+                b_value,
+            COLUMN_REPAIR_BUDGET_FRACTION:
+                repair_budget_fraction,
+            COLUMN_REPAIR_BUDGET_TOTAL:
+                repair_budget_total,
+            _COLUMN_ACTION_REPAIR_BUDGET_FRACTION:
+                mean([to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_FRACTION)) for row in rows]),
+            _COLUMN_ACTION_REPAIR_BUDGET_TOTAL:
+                mean([to_float(row.get(_COLUMN_ACTION_REPAIR_BUDGET_TOTAL)) for row in rows]),
+            _COLUMN_IS_NO_OP_ACTION:
+                _first_non_null(rows, key=_COLUMN_IS_NO_OP_ACTION),
+            _COLUMN_NUM_SEEDS:
+                len({row.get(COLUMN_SEED) for row in rows}),
+            _COLUMN_MEAN_ABSOLUTE_RECOVERY:
+                mean(mean_absolute_recovery_values),
+            _COLUMN_SEM_ABSOLUTE_RECOVERY:
+                _sem(mean_absolute_recovery_values),
+            _COLUMN_MEAN_RHO:
+                mean(mean_rho_values),
+            _COLUMN_SEM_RHO:
+                _sem(mean_rho_values),
+            _COLUMN_MEAN_HELPED_TASK_FRACTION:
+                mean(helped_task_fraction_values),
+            _COLUMN_MEAN_HARMED_TASK_FRACTION:
+                mean(harmed_task_fraction_values),
+            f'mean_{_COLUMN_WORST_TASK_HARM}':
+                mean(worst_task_harm_values),
+            _COLUMN_SEM_WORST_TASK_HARM:
+                _sem(worst_task_harm_values),
+            f'mean_{_COLUMN_UTILITY_PRIMARY}':
+                mean(utility_primary_values),
+            _COLUMN_SEM_UTILITY_PRIMARY:
+                _sem(utility_primary_values),
+            f'mean_{_COLUMN_UTILITY_CONSERVATIVE}':
+                mean(utility_conservative_values),
+            _COLUMN_SEM_UTILITY_CONSERVATIVE:
+                _sem(utility_conservative_values),
         })
 
     return result_rows
@@ -1584,9 +1597,8 @@ def _build_best_static_controller_lookup(
     for row in frontier_rows:
         slice_key = _static_selection_slice_key(row)
         controller_id = str(row.get(_COLUMN_CONTROLLER_ID))
-        slice_groups.setdefault(slice_key, {}).setdefault(controller_id, []).append(
-            to_float(row.get(_COLUMN_UTILITY_CONSERVATIVE))
-        )
+        slice_groups.setdefault(slice_key, {}).setdefault(controller_id,
+                                                          []).append(to_float(row.get(_COLUMN_UTILITY_CONSERVATIVE)))
 
     best_static_lookup: dict[tuple[Any, ...], str] = {}
     for slice_key, controller_values in slice_groups.items():
@@ -1767,12 +1779,12 @@ def write_repairability_frontier_outputs(
     write_csv(selection_path, repair_selection_rows)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 
-    logger.warning(f'Wrote {repair_outcomes_path}')
-    logger.warning(f'Wrote {candidates_path}')
-    logger.warning(f'Wrote {pareto_path}')
-    logger.warning(f'Wrote {impact_path}')
-    logger.warning(f'Wrote {selection_path}')
-    logger.warning(f'Wrote {manifest_path}')
+    logger.warning('Wrote %s', repair_outcomes_path)
+    logger.warning('Wrote %s', candidates_path)
+    logger.warning('Wrote %s', pareto_path)
+    logger.warning('Wrote %s', impact_path)
+    logger.warning('Wrote %s', selection_path)
+    logger.warning('Wrote %s', manifest_path)
 
     return {
         'repair_outcomes': repair_outcomes_path,

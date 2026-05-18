@@ -23,11 +23,19 @@ from regain.models.controllers import RepairController
 
 
 class _IdentityModel(nn.Module):
+    """
+    Identity model for testing.
+    """
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x
 
 
 class _LogitDataset(Dataset):
+    """
+    Dataset returning fixed logits for testing.
+    """
+
     def __init__(self, logits: torch.Tensor, targets: torch.Tensor) -> None:
         self._logits = logits
         self._targets = targets
@@ -41,6 +49,9 @@ class _LogitDataset(Dataset):
 
 @dataclass
 class _Experience:
+    """
+    Fake experience stub for testing.
+    """
     current_experience: int
     dataset: Dataset
     classes_in_this_experience: list[int]
@@ -48,12 +59,19 @@ class _Experience:
 
 @dataclass
 class _Benchmark:
+    """
+    Fake benchmark stub for testing.
+    """
     train_stream: list[object]
     test_stream: list[object]
     n_classes: int
 
 
 class _StubRepairController(RepairController):
+    """
+    Stub repair controller for testing.
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[str] = []
@@ -131,8 +149,7 @@ def _make_avalanche_benchmark() -> CLScenario:
                 targets,
                 targets=targets.tolist(),
                 task_labels=0,
-            )
-        )
+            ))
     benchmark = nc_benchmark(
         train_dataset=datasets,
         test_dataset=datasets,
@@ -180,14 +197,16 @@ def _make_evaluator(
             'run.calibration.aece': [0.0, 0.0],
             'run.calibration.nll': [0.0, 0.0],
             'run.diagnostics.logit_avg_drift': [0.0, 0.0],
-        }
-        if controller is not None
-        else None,
+        } if controller is not None else None,
         eps=1e-4,
     )
 
 
 class TestRegainEvaluator:
+    """
+    Tests for RegainEvaluator.
+    """
+
     def test_eval_pass_collects_accuracy_loss_and_logits(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -334,7 +353,7 @@ class TestRegainEvaluator:
         evaluator.run_after_training_exp(strategy=strategy, seen_classes={0, 1})
         strategy.experience.current_experience = 1
         evaluator.run_after_training_exp(strategy=strategy, seen_classes={0, 1})
-        evaluator.run_after_training(strategy=strategy, seen_classes={0, 1})
+        evaluator.run_after_training(seen_classes={0, 1})
 
         assert evaluator.last_posthoc_scalar_results == {
             'run.eval.acc.final.exp000.base': pytest.approx(1.0),
@@ -349,13 +368,11 @@ class TestRegainEvaluator:
     ) -> None:
         logged_metrics: list[tuple[str, float, int]] = []
 
-        monkeypatch.setattr(mlflow, 'active_run', lambda: object())
+        monkeypatch.setattr(mlflow, 'active_run', object)
         monkeypatch.setattr(
             mlflow,
             'log_metric',
-            lambda key, value, step: logged_metrics.append(
-                (str(key), float(value), int(step))
-            ),
+            lambda key, value, step: logged_metrics.append((str(key), float(value), int(step))),
         )
 
         evaluator = _make_evaluator(controller=_StubRepairController(), tmp_path=tmp_path)
@@ -365,7 +382,7 @@ class TestRegainEvaluator:
         evaluator.run_after_training_exp(strategy=strategy, seen_classes={0, 1})
 
         logged_steps: dict[str, list[int]] = {}
-        for key, _value, step in logged_metrics:
+        for key, _, step in logged_metrics:
             logged_steps.setdefault(key, []).append(step)
 
         assert logged_steps['run.calibration.ece.exp000'] == [0]
@@ -375,14 +392,6 @@ class TestRegainEvaluator:
         assert logged_steps['run.train.loss.exp000.test'] == [0]
         assert logged_steps['run.eval.acc.ref.exp000.base'] == [5]
         assert not any(key.startswith('run.eval.loss.') for key in logged_steps)
+        assert not any(key.startswith('run.train.') and '.stream' in key for key in logged_steps)
         assert not any(
-            key.startswith('run.train.') and f'.stream' in key
-            for key in logged_steps
-        )
-        assert not any(
-            key.startswith('run.eval.') and (
-                '.train.' in f'.{key}.'
-                or '.test.' in f'.{key}.'
-            )
-            for key in logged_steps
-        )
+            key.startswith('run.eval.') and ('.train.' in f'.{key}.' or '.test.' in f'.{key}.') for key in logged_steps)

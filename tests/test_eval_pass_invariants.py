@@ -9,6 +9,10 @@ from regain.evaluation import check_eval_batch
 
 
 class TestCheckEvalBatch:
+    """
+    Tests for evaluation batch invariant checking.
+    """
+
     def test_raises_when_logits_are_not_2d(self) -> None:
         with pytest.raises(RuntimeError, match='must be 2D'):
             check_eval_batch(

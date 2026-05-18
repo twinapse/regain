@@ -103,10 +103,7 @@ class ForwardTransferTracker:
         Returns:
             float: Stream forward transfer value for the bootstrap pass.
         """
-        self._initial = {
-            int(exp_idx): float(accuracy)
-            for exp_idx, accuracy in per_exp_acc.items()
-        }
+        self._initial = {int(exp_idx): float(accuracy) for exp_idx, accuracy in per_exp_acc.items()}
         self._previous = {}
         return 0.0
 
@@ -140,10 +137,6 @@ class ForwardTransferTracker:
             return emitted, 0.0
 
         stream_value = float(
-            sum(
-                float(previous) - float(self._initial[exp_idx])
-                for exp_idx, previous in self._previous.items()
-            )
-            / float(len(self._previous))
-        )
+            sum(float(previous) - float(self._initial[exp_idx]) for exp_idx, previous in self._previous.items()) /
+            float(len(self._previous)))
         return emitted, stream_value

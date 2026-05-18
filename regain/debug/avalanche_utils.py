@@ -75,7 +75,6 @@ _DEBUG_REPAIR_HEALTH_SKIPPED = 'repair.health.skipped'
 _DEBUG_REPAIR_N_SAMPLES_TEMPLATE = 'repair.n_samples.{stage}'
 _DEBUG_REPAIR_TEMPLATE = 'repair.{metric}.{stage}'
 
-
 _REPAIR_DIAG_METRIC_KEYS = (
     _DEBUG_CE,
     _DEBUG_TOP1,
@@ -286,9 +285,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             post_value = post_metrics.get(metric)
             if pre_value is None or post_value is None:
                 continue
-            deltas[_DEBUG_REPAIR_DELTA_TEMPLATE.format(metric=metric)] = (
-                float(post_value) - float(pre_value)
-            )
+            deltas[_DEBUG_REPAIR_DELTA_TEMPLATE.format(metric=metric)] = (float(post_value) - float(pre_value))
         log_debug_metrics(metrics=deltas, step=step, exp_idx=exp_idx, mode=mode)
 
     def _record_health_score(self, *, health_payload: Mapping[str, float], exp_idx: int | None, step: int) -> None:
@@ -367,7 +364,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
         # pre-fit state lacks _probe.* keys.
         try:
             pre_controller = copy.deepcopy(self.controller)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             pre_controller = None
         with torch.enable_grad():
             self._fit_controller_on_repair_dataset(
@@ -464,10 +461,8 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
             )
 
         self._log_metrics_block(metrics=ctrl_post, mode='ctrl', stage='post', exp_idx=exp_idx, step=step)
-        if (
-            ctrl_pre.get(_DEBUG_NUM_CLASSES) == ctrl_post.get(_DEBUG_NUM_CLASSES)
-            and ctrl_pre.get(_DEBUG_N_SAMPLES) == ctrl_post.get(_DEBUG_N_SAMPLES)
-        ):
+        if (ctrl_pre.get(_DEBUG_NUM_CLASSES) == ctrl_post.get(_DEBUG_NUM_CLASSES) and
+                ctrl_pre.get(_DEBUG_N_SAMPLES) == ctrl_post.get(_DEBUG_N_SAMPLES)):
             self._log_deltas(pre_metrics=ctrl_pre, post_metrics=ctrl_post, mode='ctrl', exp_idx=exp_idx, step=step)
 
         if ctrl_post.get(_DEBUG_PRED_HIST):
@@ -480,7 +475,7 @@ class DebugRepairControllerPlugin(RepairControllerPlugin):
 
         try:
             health_payload = compute_repair_health_score(pre_metrics=ctrl_pre, post_metrics=ctrl_post)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             get_logger().warning('Failed to compute repair health score', exc_info=True)
             log_debug_metric(name=_DEBUG_REPAIR_HEALTH_SKIPPED, value=1.0, step=step, exp_idx=exp_idx)
             return

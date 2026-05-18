@@ -15,6 +15,10 @@ from regain.registry import list_scenarios
 
 
 class TestScenarioRegistry:
+    """
+    Tests for scenario registry.
+    """
+
     def test_list_scenarios_contains_supported_names(self) -> None:
         scenarios = list_scenarios()
         assert scenarios == tuple(sorted(scenarios))
@@ -37,6 +41,10 @@ class TestScenarioRegistry:
 
 
 class TestLRSchedulerRegistry:
+    """
+    Tests for LR scheduler registry.
+    """
+
     def test_list_lr_schedulers_contains_supported_names(self) -> None:
         schedulers = list_lr_schedulers()
         assert schedulers == tuple(sorted(schedulers))

@@ -1,3 +1,6 @@
+"""
+Avalanche scenario builders for class-incremental continual learning benchmarks.
+"""
 from abc import ABC
 from abc import abstractmethod
 import dataclasses
@@ -135,12 +138,10 @@ def _build_square_dataset_train_eval_transforms(
     elif int(image_size) != int(default_image_size):
         train_ops.append(Resize(int(image_size)))
     elif include_default_random_crop:
-        train_ops.append(
-            RandomCrop(
-                size=int(image_size),
-                padding=int(default_random_crop_padding),
-            )
-        )
+        train_ops.append(RandomCrop(
+            size=int(image_size),
+            padding=int(default_random_crop_padding),
+        ))
     if horizontal_flip:
         train_ops.append(RandomHorizontalFlip())
     train_ops.append(ToTensor())
@@ -279,7 +280,7 @@ class ScenarioBuilder(ABC):
         # Validate arguments
         if not isinstance(num_experiences, int) or num_experiences <= 0:
             raise ValueError('`num_experiences` must be a positive integer.')
-        if not (0.0 <= float(repair_split_fraction) < 1.0):
+        if not 0.0 <= float(repair_split_fraction) < 1.0:
             raise ValueError('`repair_split_fraction` must be in the range [0, 1).')
         if transform_random_resized_crop is not None and not isinstance(transform_random_resized_crop, bool):
             raise ValueError('`transform_random_resized_crop` must be a boolean when provided.')
@@ -378,9 +379,7 @@ class ScenarioBuilder(ABC):
 
             # Access stream definition if available
             stream_def = None
-            if hasattr(benchmark, 'stream_definitions') and isinstance(
-                    benchmark.stream_definitions, dict
-            ):
+            if hasattr(benchmark, 'stream_definitions') and isinstance(benchmark.stream_definitions, dict):
                 stream_key = stream_name.replace('_stream', '')
                 stream_def = benchmark.stream_definitions.get(stream_key)
 
@@ -406,19 +405,14 @@ class ScenarioBuilder(ABC):
                 # Extract global indices from the dataset's internal structure
                 # Avalanche tracks indices in the targets FlatData when subsetting
                 global_indices = None
-                if (
-                        hasattr(dataset, 'targets')
-                        and hasattr(dataset.targets, 'data')
-                        and hasattr(dataset.targets.data, '_indices')
-                ):
+                if (hasattr(dataset, 'targets') and hasattr(dataset.targets, 'data') and
+                        hasattr(dataset.targets.data, '_indices')):
                     # FlatData._indices contains the global indices from the original dataset
-                    global_indices = list(dataset.targets.data._indices)
+                    global_indices = list(dataset.targets.data._indices)  # pylint: disable=protected-access
 
                 if global_indices is None:
-                    raise RuntimeError(
-                        'Cannot extract global indices from dataset. '
-                        'Expected `dataset.targets.data._indices` to be available.'
-                    )
+                    raise RuntimeError('Cannot extract global indices from dataset. '
+                                       'Expected `dataset.targets.data._indices` to be available.')
 
                 # Create original_indices attribute with global indices
                 original_indices = DataAttribute(
@@ -426,19 +420,15 @@ class ScenarioBuilder(ABC):
                     name='original_indices',
                     use_in_getitem=False,
                 )
-                dataset_with_indices = dataset.update_data_attribute(
-                    'original_indices', original_indices
-                )
+                dataset_with_indices = dataset.update_data_attribute('original_indices', original_indices)
                 updated_datasets.append(dataset_with_indices)
 
             # Update the stream definition with datasets that have original_indices
             if updated_datasets:
-                benchmark.stream_definitions[stream_key] = (
-                    ScenarioBuilder._streamdef_replace(
-                        stream_def,
-                        exps_data=ScenarioBuilder._make_eager_lds(updated_datasets),
-                    )
-                )
+                benchmark.stream_definitions[stream_key] = (ScenarioBuilder._streamdef_replace(
+                    stream_def,
+                    exps_data=ScenarioBuilder._make_eager_lds(updated_datasets),
+                ))
 
     def _add_repair_stream(
         self,
@@ -488,7 +478,7 @@ class ScenarioBuilder(ABC):
         Raises:
             ValueError: If repair set inputs are invalid or guard constraints are violated.
         """
-        if not (0.0 <= float(repair_split_fraction) < 1.0):
+        if not 0.0 <= float(repair_split_fraction) < 1.0:
             raise ValueError('`repair_split_fraction` must be in the range [0, 1).')
 
         split_fraction = float(repair_split_fraction)
@@ -504,13 +494,11 @@ class ScenarioBuilder(ABC):
             if hasattr(exp, 'dataset'):
                 dataset = exp.dataset
             elif hasattr(exp, '_dataset'):
-                dataset = exp._dataset
+                dataset = exp._dataset  # pylint: disable=protected-access
             else:
                 dataset = None
             if dataset is None:
-                raise RuntimeError(
-                    f'Missing training dataset while building repair stream (exp_idx={exp_idx}).'
-                )
+                raise RuntimeError(f'Missing training dataset while building repair stream (exp_idx={exp_idx}).')
 
             # Extract targets
             targets = dataset.targets if hasattr(dataset, 'targets') else None
@@ -555,32 +543,23 @@ class ScenarioBuilder(ABC):
                 selected_count_total += class_selected_count
 
             if repair_set_size > max_repair_total:
-                raise ValueError(
-                    'Repair set guard failed: split fraction too large '
-                    'while preserving at least one sample per class. '
-                    f'exp_idx={exp_idx}, set_size={repair_set_size}, available_extra={max_repair_total}.'
-                )
+                raise ValueError('Repair set guard failed: split fraction too large '
+                                 'while preserving at least one sample per class. '
+                                 f'exp_idx={exp_idx}, set_size={repair_set_size}, available_extra={max_repair_total}.')
 
             # Deterministically assign remaining samples by largest fractional deficit.
             remaining_slots = int(repair_set_size - selected_count_total)
             while remaining_slots > 0:
                 candidate_class_ids = [
-                    class_id
-                    for class_id in class_ids
-                    if repair_count_by_class[class_id] < class_max_repair[class_id]
+                    class_id for class_id in class_ids if repair_count_by_class[class_id] < class_max_repair[class_id]
                 ]
                 if not candidate_class_ids:
-                    raise ValueError(
-                        'Repair set guard failed: could not place remaining stratified repair slots. '
-                        f'exp_idx={exp_idx}, remaining_slots={remaining_slots}.'
-                    )
+                    raise ValueError('Repair set guard failed: could not place remaining stratified repair slots. '
+                                     f'exp_idx={exp_idx}, remaining_slots={remaining_slots}.')
                 selected_class_id = min(
                     candidate_class_ids,
-                    key=lambda class_id: (
-                        -(
-                            class_target_counts[class_id]
-                            - float(repair_count_by_class[class_id])
-                        ),
+                    key=lambda class_id, ctc=class_target_counts, rcbc=repair_count_by_class: (
+                        -(ctc[class_id] - float(rcbc[class_id])),
                         class_id,
                     ),
                 )
@@ -626,14 +605,14 @@ class ScenarioBuilder(ABC):
         # Expose a convenient stream handle
         benchmark.repair_stream = ClassificationStream(STREAM_REPAIR, benchmark)
         if hasattr(benchmark, '_make_stream_fields'):
-            benchmark._make_stream_fields()
+            benchmark._make_stream_fields()  # pylint: disable=protected-access
 
         if hasattr(benchmark, 'streams') and isinstance(benchmark.streams, dict):
             benchmark.streams[STREAM_REPAIR] = benchmark.repair_stream
 
         # (some versions also keep a private dict)
-        if hasattr(benchmark, '_streams') and isinstance(benchmark._streams, dict):
-            benchmark._streams[STREAM_REPAIR] = benchmark.repair_stream
+        if hasattr(benchmark, '_streams') and isinstance(benchmark._streams, dict):  # pylint: disable=protected-access
+            benchmark._streams[STREAM_REPAIR] = benchmark.repair_stream  # pylint: disable=protected-access
 
     def _validate_scenario(self, benchmark: NCScenario) -> None:
         """
@@ -676,16 +655,12 @@ class ScenarioBuilder(ABC):
         if seen != expected:
             missing = sorted(expected - seen)
             extra = sorted(seen - expected)
-            raise ValueError(
-                'Class IDs in the benchmark are not contiguous starting from zero: '
-                f'missing={missing[:20]}{"..." if len(missing) > 20 else ""} '
-                f'extra={extra[:20]}{"..." if len(extra) > 20 else ""}'
-            )
+            raise ValueError('Class IDs in the benchmark are not contiguous starting from zero: '
+                             f'missing={missing[:20]}{"..." if len(missing) > 20 else ""} '
+                             f'extra={extra[:20]}{"..." if len(extra) > 20 else ""}')
 
         if len(seen) != int(benchmark.n_classes):
-            raise ValueError(
-                f'Expected {benchmark.n_classes} unique class IDs, got {len(seen)}.'
-            )
+            raise ValueError(f'Expected {benchmark.n_classes} unique class IDs, got {len(seen)}.')
 
     @staticmethod
     def _get_stream_names(benchmark: NCScenario) -> list[str]:
@@ -748,9 +723,9 @@ class ScenarioBuilder(ABC):
 
     @staticmethod
     def _verify_stream_experience_disjointness(
-            *,
-            benchmark: NCScenario,
-            stream_name: str,
+        *,
+        benchmark: NCScenario,
+        stream_name: str,
     ) -> tuple[set[int], tuple[str, int | None, int | None]]:
         """
         Verify that experiences within a given stream are disjoint by `original_indices`,
@@ -770,35 +745,27 @@ class ScenarioBuilder(ABC):
             exp_idx = int(getattr(experience, 'current_experience', 0))
             dataset = getattr(experience, 'dataset', None)
             if dataset is None:
-                raise RuntimeError(
-                    'Benchmark split verification failed: missing dataset on experience: '
-                    f'stream={stream_name} exp={exp_idx}.'
-                )
+                raise RuntimeError('Benchmark split verification failed: missing dataset on experience: '
+                                   f'stream={stream_name} exp={exp_idx}.')
 
             this_origin_key = ScenarioBuilder._origin_key_for_dataset(dataset)
             if origin_key is None:
                 origin_key = this_origin_key
             else:
                 # Enforce same origin identity when available
-                if (
-                        origin_key[1] is not None
-                        and this_origin_key[1] is not None
-                        and origin_key[1] != this_origin_key[1]
-                ):
+                if (origin_key[1] is not None and this_origin_key[1] is not None and
+                        origin_key[1] != this_origin_key[1]):
                     raise RuntimeError(
                         'Benchmark split verification failed: stream experiences do not share the same origin dataset: '
-                        f'stream={stream_name} exp={exp_idx} origin_key={this_origin_key} expected_origin_key={origin_key}.'
-                    )
+                        f'stream={stream_name} exp={exp_idx} origin_key={this_origin_key} '
+                        f'expected_origin_key={origin_key}.')
                 # Enforce consistent origin length when available
-                if (
-                        origin_key[2] is not None
-                        and this_origin_key[2] is not None
-                        and origin_key[2] != this_origin_key[2]
-                ):
+                if (origin_key[2] is not None and this_origin_key[2] is not None and
+                        origin_key[2] != this_origin_key[2]):
                     raise RuntimeError(
                         'Benchmark split verification failed: stream experiences disagree on origin dataset length: '
-                        f'stream={stream_name} exp={exp_idx} origin_len={this_origin_key[2]} expected_origin_len={origin_key[2]}.'
-                    )
+                        f'stream={stream_name} exp={exp_idx} origin_len={this_origin_key[2]} '
+                        f'expected_origin_len={origin_key[2]}.')
 
             indices = ScenarioBuilder._extract_original_indices(dataset)
             if not indices:
@@ -808,20 +775,18 @@ class ScenarioBuilder(ABC):
 
             # No duplicates inside a single experience dataset
             if len(exp_set) != len(indices):
-                raise ValueError(
-                    'Benchmark split verification failed: duplicate `original_indices` found within an experience dataset: '
-                    f'stream={stream_name} exp={exp_idx} size={len(indices)} unique={len(exp_set)}.'
-                )
+                raise ValueError('Benchmark split verification failed: duplicate `original_indices` found '
+                                 'within an experience dataset: '
+                                 f'stream={stream_name} exp={exp_idx} size={len(indices)} unique={len(exp_set)}.')
 
             # No overlaps across experiences within the stream
             overlap = union.intersection(exp_set)
             if overlap:
                 overlap_sorted = sorted(overlap)
-                raise ValueError(
-                    'Benchmark split verification failed: overlapping example indices between experiences in the same stream: '
-                    f'stream={stream_name} exp={exp_idx} overlap_count={len(overlap_sorted)} '
-                    f'overlap_examples={overlap_sorted[:20]}{"..." if len(overlap_sorted) > 20 else ""}.'
-                )
+                raise ValueError('Benchmark split verification failed: overlapping example indices between '
+                                 'experiences in the same stream: '
+                                 f'stream={stream_name} exp={exp_idx} overlap_count={len(overlap_sorted)} '
+                                 f'overlap_examples={overlap_sorted[:20]}{"..." if len(overlap_sorted) > 20 else ""}.')
 
             union.update(exp_set)
 
@@ -829,9 +794,9 @@ class ScenarioBuilder(ABC):
 
     @staticmethod
     def _verify_origin_group_partitioning(
-            *,
-            group_key: tuple[str, int | None, int | None],
-            stream_to_indices: dict[str, set[int]],
+        *,
+        group_key: tuple[str, int | None, int | None],
+        stream_to_indices: dict[str, set[int]],
     ) -> None:
         """
         Verify that streams in the same origin group are disjoint and cover exactly the origin dataset.
@@ -840,24 +805,23 @@ class ScenarioBuilder(ABC):
           - pairwise disjoint stream unions within the group
           - combined union equals {0, 1, ..., origin_len-1}
         """
-        origin_type, origin_id, origin_len = group_key
+        _, _, origin_len = group_key
         if origin_len is None:
             raise RuntimeError(
                 'Benchmark split verification failed: cannot infer original dataset length for an origin group: '
                 f'origin_key={group_key} streams={sorted(stream_to_indices)}. '
-                'Ensure datasets expose `len(origin_dataset)` through Avalanche internal structures.'
-            )
+                'Ensure datasets expose `len(origin_dataset)` through Avalanche internal structures.')
 
         combined: set[int] = set()
-        for stream_name, idxs in stream_to_indices.items():
+        for _, idxs in stream_to_indices.items():
             overlap = combined.intersection(idxs)
             if overlap:
                 overlap_sorted = sorted(overlap)
                 raise ValueError(
-                    'Benchmark split verification failed: overlapping example indices across streams that share the same origin dataset: '
+                    'Benchmark split verification failed: overlapping example indices across streams '
+                    'that share the same origin dataset: '
                     f'origin_key={group_key} streams={sorted(stream_to_indices)} overlap_count={len(overlap_sorted)} '
-                    f'overlap_examples={overlap_sorted[:20]}{"..." if len(overlap_sorted) > 20 else ""}.'
-                )
+                    f'overlap_examples={overlap_sorted[:20]}{"..." if len(overlap_sorted) > 20 else ""}.')
             combined.update(idxs)
 
         expected = set(range(int(origin_len)))
@@ -865,12 +829,12 @@ class ScenarioBuilder(ABC):
             missing = sorted(expected - combined)
             extra = sorted(combined - expected)
             raise ValueError(
-                'Benchmark split verification failed: streams do not sum to the full original dataset length for their origin group: '
+                'Benchmark split verification failed: streams do not sum to the full original dataset length '
+                'for their origin group: '
                 f'origin_key={group_key} streams={sorted(stream_to_indices)} '
                 f'expected_len={int(origin_len)} union_len={len(combined)} '
                 f'missing={missing[:20]}{"..." if len(missing) > 20 else ""} '
-                f'extra={extra[:20]}{"..." if len(extra) > 20 else ""}.'
-            )
+                f'extra={extra[:20]}{"..." if len(extra) > 20 else ""}.')
 
     ############################
     # Dataset/origin utilities #
@@ -885,16 +849,12 @@ class ScenarioBuilder(ABC):
             AttributeError / RuntimeError if not extractable.
         """
         if not hasattr(experience_dataset, 'original_indices'):
-            raise AttributeError(
-                'Experience dataset is missing `original_indices` data attribute.'
-            )
+            raise AttributeError('Experience dataset is missing `original_indices` data attribute.')
         try:
             indices = list(getattr(experience_dataset, 'original_indices'))
             return [int(idx) for idx in indices]
         except Exception as exc:
-            raise RuntimeError(
-                f'Failed to extract indices from `original_indices`: {exc}'
-            ) from exc
+            raise RuntimeError(f'Failed to extract indices from `original_indices`: {exc}') from exc
 
     @staticmethod
     def _unwrap_to_base_dataset(ds: object, *, max_depth: int = 64) -> object:
@@ -920,28 +880,28 @@ class ScenarioBuilder(ABC):
             nxt = None
 
             # AvalancheDataset-like: underlying datasets stored in `_datasets`
-            for attr in ("_datasets", "datasets"):
+            for attr in ('_datasets', 'datasets'):
                 if hasattr(cur, attr):
                     try:
                         dlist = getattr(cur, attr)
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught
                         dlist = None
                     if isinstance(dlist, (list, tuple)) and len(dlist) == 1:
                         nxt = dlist[0]
                         break
 
             # PyTorch Subset / other wrappers: `.dataset`
-            if nxt is None and hasattr(cur, "dataset"):
+            if nxt is None and hasattr(cur, 'dataset'):
                 try:
-                    nxt = getattr(cur, "dataset")
-                except Exception:
+                    nxt = getattr(cur, 'dataset')
+                except Exception:  # pylint: disable=broad-exception-caught
                     nxt = None
 
             # Some Avalanche wrappers: `_dataset`
-            if nxt is None and hasattr(cur, "_dataset"):
+            if nxt is None and hasattr(cur, '_dataset'):
                 try:
-                    nxt = getattr(cur, "_dataset")
-                except Exception:
+                    nxt = getattr(cur, '_dataset')
+                except Exception:  # pylint: disable=broad-exception-caught
                     nxt = None
 
             if nxt is None or nxt is cur:
@@ -964,16 +924,16 @@ class ScenarioBuilder(ABC):
         origin_len: int | None
         try:
             origin_len = len(base)  # base should be CIFAR100 train/test, etc.
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             origin_len = None
 
         # Fallback: infer from original_indices if present
-        if origin_len is None and hasattr(experience_dataset, "original_indices"):
+        if origin_len is None and hasattr(experience_dataset, 'original_indices'):
             try:
                 idxs = ScenarioBuilder._extract_original_indices(experience_dataset)
                 if idxs:
                     origin_len = int(max(idxs)) + 1
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 pass
 
         return base, origin_len
@@ -984,7 +944,7 @@ class ScenarioBuilder(ABC):
         Build a comparable, process-stable signature for the origin dataset.
         """
         if origin_obj is None:
-            return ("unknown", origin_len)
+            return ('unknown', origin_len)
 
         parts: list[object] = [
             type(origin_obj).__module__,
@@ -993,11 +953,11 @@ class ScenarioBuilder(ABC):
         ]
 
         # Common dataset descriptors (torchvision-style)
-        for attr in ("root", "train", "split"):
+        for attr in ('root', 'train', 'split'):
             if hasattr(origin_obj, attr):
                 try:
                     parts.append((attr, str(getattr(origin_obj, attr))))
-                except Exception:
+                except Exception:  # pylint: disable=broad-exception-caught
                     pass
 
         return tuple(parts)
@@ -1008,7 +968,7 @@ class ScenarioBuilder(ABC):
         Grouping key for datasets that share the same origin.
         """
         origin_obj, origin_len = ScenarioBuilder._infer_origin_container_and_len(experience_dataset)
-        origin_type = type(origin_obj).__name__ if origin_obj is not None else "unknown"
+        origin_type = type(origin_obj).__name__ if origin_obj is not None else 'unknown'
         origin_sig = ScenarioBuilder._origin_signature(origin_obj, origin_len)
         return (origin_type, origin_sig, origin_len)
 
@@ -1062,7 +1022,7 @@ class ScenarioBuilder(ABC):
                 continue
             try:
                 setattr(sd, k, v)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 ok = False
 
         if ok:
@@ -1281,9 +1241,7 @@ class CUB200ScenarioBuilder(ScenarioBuilder):
         Returns:
             NCScenario: Avalanche scenario configured for class-incremental learning.
         """
-        dataset_root = self._ensure_cub200_available(
-            root_hint=self._resolve_download_root(dataset_path=dataset_path),
-        )
+        dataset_root = self._ensure_cub200_available(root_hint=self._resolve_download_root(dataset_path=dataset_path),)
         train_transform, eval_transform = self._build_default_transforms(
             transform_random_resized_crop=transform_random_resized_crop,
             transform_horizontal_flip=transform_horizontal_flip,
@@ -1291,9 +1249,7 @@ class CUB200ScenarioBuilder(ScenarioBuilder):
         )
         return SplitCUB200(
             n_experiences=num_experiences,
-            classes_first_batch=self._resolve_classes_first_batch(
-                num_experiences=num_experiences,
-            ),
+            classes_first_batch=self._resolve_classes_first_batch(num_experiences=num_experiences,),
             return_task_id=return_task_id,
             seed=seed,
             class_ids_from_zero_from_first_exp=True,
@@ -1361,17 +1317,13 @@ class CUB200ScenarioBuilder(ScenarioBuilder):
         """
         total_classes = cls._NUM_CLASSES
         if num_experiences > total_classes:
-            raise ValueError(
-                f'CUB-200 supports at most {total_classes} experiences, got {num_experiences}.'
-            )
+            raise ValueError(f'CUB-200 supports at most {total_classes} experiences, got {num_experiences}.')
         if num_experiences == 1:
             return total_classes
 
         classes_per_later_experience = total_classes // num_experiences
         if classes_per_later_experience <= 0:
-            raise ValueError(
-                f'CUB-200 cannot allocate classes across {num_experiences} experiences.'
-            )
+            raise ValueError(f'CUB-200 cannot allocate classes across {num_experiences} experiences.')
         return total_classes - (classes_per_later_experience * (num_experiences - 1))
 
     @classmethod
@@ -1421,10 +1373,8 @@ class CUB200ScenarioBuilder(ScenarioBuilder):
         if cls._has_extracted_dataset(root=normalized_root):
             return normalized_root
 
-        raise ValueError(
-            'CUB-200 dataset not found after download. '
-            f'Expected extracted files under: {normalized_root / cls._DATASET_DIR_NAME}'
-        )
+        raise ValueError('CUB-200 dataset not found after download. '
+                         f'Expected extracted files under: {normalized_root / cls._DATASET_DIR_NAME}')
 
     @classmethod
     def _normalize_dataset_root(cls, *, root: Path) -> Path:
@@ -1646,10 +1596,8 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         has_train_dir = train_dir.is_dir()
         has_test_dir = test_dir is not None and test_dir.is_dir()
         if has_train_dir != has_test_dir:
-            raise ValueError(
-                'ImageNet-R split layout must define both train and test directories. '
-                f'Found train={has_train_dir}, test={has_test_dir} under: {root}.'
-            )
+            raise ValueError('ImageNet-R split layout must define both train and test directories. '
+                             f'Found train={has_train_dir}, test={has_test_dir} under: {root}.')
 
         if has_train_dir and has_test_dir and test_dir is not None:
             train_dataset = ImageFolder(root=str(train_dir))
@@ -1664,10 +1612,8 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         # No explicit split directories: create deterministic per-class holdout from a single root.
         full_dataset = ImageFolder(root=str(root))
         if not full_dataset.targets:
-            raise ValueError(
-                'ImageNet-R root has no class samples. '
-                f'Expected class folders under: {root}.'
-            )
+            raise ValueError('ImageNet-R root has no class samples. '
+                             f'Expected class folders under: {root}.')
 
         train_indices, test_indices = cls._make_per_class_holdout_indices(
             targets=[int(target) for target in full_dataset.targets],
@@ -1736,10 +1682,8 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
             if cls._is_usable_dataset_root(root=candidate):
                 return candidate
 
-        raise ValueError(
-            'ImageNet-R dataset not found after auto-download. '
-            f'Checked roots: {[str(candidate) for candidate in candidates]}'
-        )
+        raise ValueError('ImageNet-R dataset not found after auto-download. '
+                         f'Checked roots: {[str(candidate) for candidate in candidates]}')
 
     @classmethod
     def _candidate_roots(cls, *, root_hint: Path) -> list[Path]:
@@ -1843,12 +1787,10 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         test_classes = set(test_class_to_idx.keys())
         missing_in_test = sorted(train_classes - test_classes)
         missing_in_train = sorted(test_classes - train_classes)
-        raise ValueError(
-            'ImageNet-R train/test class folders must match exactly. '
-            f'dataset_root={dataset_root} '
-            f'missing_in_test={missing_in_test[:20]}{"..." if len(missing_in_test) > 20 else ""} '
-            f'missing_in_train={missing_in_train[:20]}{"..." if len(missing_in_train) > 20 else ""}.'
-        )
+        raise ValueError('ImageNet-R train/test class folders must match exactly. '
+                         f'dataset_root={dataset_root} '
+                         f'missing_in_test={missing_in_test[:20]}{"..." if len(missing_in_test) > 20 else ""} '
+                         f'missing_in_train={missing_in_train[:20]}{"..." if len(missing_in_train) > 20 else ""}.')
 
     @staticmethod
     def _make_per_class_holdout_indices(
@@ -1873,7 +1815,7 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         """
         if not targets:
             raise ValueError('ImageNet-R split requires a non-empty target list.')
-        if not (0.0 < float(test_fraction) < 1.0):
+        if not 0.0 < float(test_fraction) < 1.0:
             raise ValueError('ImageNet-R split `test_fraction` must be in the open range (0, 1).')
 
         class_to_indices: dict[int, list[int]] = {}
@@ -1887,10 +1829,8 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         for class_id in sorted(class_to_indices):
             class_indices = np.asarray(class_to_indices[class_id], dtype=np.int64)
             if class_indices.size < 2:
-                raise ValueError(
-                    'ImageNet-R per-class holdout split requires at least 2 samples per class. '
-                    f'Class {class_id} has {int(class_indices.size)} sample(s).'
-                )
+                raise ValueError('ImageNet-R per-class holdout split requires at least 2 samples per class. '
+                                 f'Class {class_id} has {int(class_indices.size)} sample(s).')
 
             permuted = rng.permutation(class_indices)
             n_test = int(np.floor(float(class_indices.size) * float(test_fraction)))
@@ -1973,10 +1913,8 @@ class ImageNetRScenarioBuilder(ScenarioBuilder):
         required_params = ('train_dataset', 'test_dataset', 'n_experiences')
         missing_params = [name for name in required_params if name not in parameters]
         if missing_params:
-            raise RuntimeError(
-                'Incompatible Avalanche `nc_benchmark` signature. '
-                f'Missing expected parameters: {missing_params}.'
-            )
+            raise RuntimeError('Incompatible Avalanche `nc_benchmark` signature. '
+                               f'Missing expected parameters: {missing_params}.')
 
         kwargs: dict[str, object] = {
             'train_dataset': train_dataset,
@@ -2040,14 +1978,14 @@ def get_num_classes_from_experience(experience: NCExperience) -> int:
     if hasattr(experience, 'classes_seen_so_far'):
         try:
             classes = list(getattr(experience, 'classes_seen_so_far'))
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             classes = []
     else:
         prev = getattr(experience, 'previous_classes', [])
         cur = getattr(experience, 'classes_in_this_experience', [])
         try:
             classes = list(prev) + list(cur)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             classes = []
 
     if not classes:
@@ -2058,7 +1996,7 @@ def get_num_classes_from_experience(experience: NCExperience) -> int:
     for c in classes:
         try:
             c_int = int(c)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             continue
         if c_int in seen:
             continue

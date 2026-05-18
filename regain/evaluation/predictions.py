@@ -121,26 +121,18 @@ class PredictionRecorder:
         if not self._capture_predictions or self._current_exp_idx is None:
             return
         if int(logits.shape[1]) != self.num_classes:
-            raise ValueError(
-                'Prediction artifact width mismatch. '
-                f'expected={self.num_classes}, observed={int(logits.shape[1])}'
-            )
+            raise ValueError('Prediction artifact width mismatch. '
+                             f'expected={self.num_classes}, observed={int(logits.shape[1])}')
 
         targets_vec = targets.reshape(-1).to(device=logits.device, dtype=torch.long)
         if int(targets_vec.shape[0]) != int(logits.shape[0]):
-            raise ValueError(
-                'Prediction artifact batch mismatch. '
-                f'logits_batch={int(logits.shape[0])}, target_batch={int(targets_vec.shape[0])}'
-            )
+            raise ValueError('Prediction artifact batch mismatch. '
+                             f'logits_batch={int(logits.shape[0])}, target_batch={int(targets_vec.shape[0])}')
         if targets_vec.numel() <= 0:
             return
 
-        self._current_logits_chunks.append(
-            logits.detach().to(device='cpu', dtype=torch.float32).numpy()
-        )
-        self._current_targets_chunks.append(
-            targets_vec.detach().to(device='cpu', dtype=torch.int32).numpy()
-        )
+        self._current_logits_chunks.append(logits.detach().to(device='cpu', dtype=torch.float32).numpy())
+        self._current_targets_chunks.append(targets_vec.detach().to(device='cpu', dtype=torch.int32).numpy())
 
     def end_experience(self) -> None:
         """
@@ -192,10 +184,8 @@ class PredictionRecorder:
         Returns:
             Path: Relative artifact path.
         """
-        return Path(str(eval_tag)) / (
-            f'test_{EXPERIENCE_KEY_PREFIX}{int(test_exp_idx):03d}'
-            f'_after_{EXPERIENCE_KEY_PREFIX}{int(checkpoint_exp_idx):03d}.npz'
-        )
+        return Path(str(eval_tag)) / (f'test_{EXPERIENCE_KEY_PREFIX}{int(test_exp_idx):03d}'
+                                      f'_after_{EXPERIENCE_KEY_PREFIX}{int(checkpoint_exp_idx):03d}.npz')
 
     def _reset_current_experience(self) -> None:
         """

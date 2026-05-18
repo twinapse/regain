@@ -80,11 +80,7 @@ def flatten_prefixed_params(*, prefix: str | None, params: Mapping[str, object])
     normalized_prefix = _remove_kwargs_segment_from_path(path=prefix)
     for key, value in params.items():
         key_str = str(key)
-        raw_key_name = (
-            f'{normalized_prefix}{NS_SEP}{key_str}'
-            if normalized_prefix
-            else key_str
-        )
+        raw_key_name = (f'{normalized_prefix}{NS_SEP}{key_str}' if normalized_prefix else key_str)
         key_name = _remove_kwargs_segment_from_path(path=raw_key_name) or raw_key_name
         if isinstance(value, Mapping):
             flattened.update(flatten_prefixed_params(prefix=raw_key_name, params=value))
@@ -231,8 +227,7 @@ def log_run_params(
         flatten_experiment_config_params(
             experiment_config=experiment_config,
             include_backbone_params=include_backbone_params,
-        )
-    )
+        ))
 
     # Add flatten run config
     flattened_run_config = flatten_prefixed_params(prefix=None, params=run_config_payload)
@@ -255,15 +250,9 @@ def log_run_params(
                 for key, value in run_params.items()
                 if key != PARAM_BACKBONE and not key.startswith(f'{PARAM_BACKBONE}{NS_SEP}')
             }
-        if (
-            backbone_source_experiment_id is not None
-            and str(backbone_source_experiment_id).strip() != ''
-        ):
+        if (backbone_source_experiment_id is not None and str(backbone_source_experiment_id).strip() != ''):
             run_params[_PARAM_BACKBONE_SOURCE_EXPERIMENT_ID] = str(backbone_source_experiment_id)
-        if (
-            backbone_source_experiment_name is not None
-            and str(backbone_source_experiment_name).strip() != ''
-        ):
+        if (backbone_source_experiment_name is not None and str(backbone_source_experiment_name).strip() != ''):
             run_params[_PARAM_BACKBONE_SOURCE_EXPERIMENT_NAME] = str(backbone_source_experiment_name)
 
     # Add optimizer params with appropriate prefix only when the backbone training namespace is present
@@ -289,6 +278,7 @@ def log_run_params(
 
     # Log all params to MLflow (sorted by key for consistent ordering)
     mlflow.log_params({k: run_params[k] for k in sorted(run_params)})
+
 
 def extract_dataset_indices(experience_dataset: AvalancheDataset) -> list[int]:
     """
@@ -349,10 +339,8 @@ def log_dataset_indices(
                 exp_idx = int(getattr(experience, 'current_experience', 0))
                 dataset = getattr(experience, 'dataset', None)
                 if dataset is None:
-                    raise RuntimeError(
-                        'Experience dataset is missing while logging dataset indices: '
-                        f'stream={stream_name} exp={exp_idx}'
-                    )
+                    raise RuntimeError('Experience dataset is missing while logging dataset indices: '
+                                       f'stream={stream_name} exp={exp_idx}')
 
                 indices = extract_dataset_indices(dataset)
                 content = '\n'.join(str(idx) for idx in indices)

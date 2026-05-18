@@ -140,10 +140,7 @@ def write_plot_manifest_update(
 
 
 def _slugify(value: Any) -> str:
-    text = ''.join(
-        character.lower() if character.isalnum() else '_'
-        for character in str(value or '')
-    )
+    text = ''.join(character.lower() if character.isalnum() else '_' for character in str(value or ''))
     while '__' in text:
         text = text.replace('__', '_')
     return text.strip('_') or 'unknown'
@@ -186,12 +183,7 @@ def _grouped_mean_rows(
 
 def _choose_utility_delta_pair(*, frontier_rows: list[dict[str, Any]]) -> tuple[str, str] | None:
     controller_ids = sorted(
-        _sorted_unique(
-            row.get(_COLUMN_CONTROLLER_ID)
-            for row in frontier_rows
-            if row.get(_COLUMN_CONTROLLER_ID)
-        )
-    )
+        _sorted_unique(row.get(_COLUMN_CONTROLLER_ID) for row in frontier_rows if row.get(_COLUMN_CONTROLLER_ID)))
     if len(controller_ids) < 2:
         return None
 
@@ -276,7 +268,7 @@ def plot_analysis_outputs(
     else:
         save_dir_p = None
 
-    import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt  # pylint: disable=import-outside-toplevel
 
     def _save_or_show(*, fig: Any, filename: str) -> None:
         if save_dir_p is not None:
@@ -314,12 +306,10 @@ def plot_analysis_outputs(
 
     for (scenario, backbone_name, strategy_name), rows in sorted(grouped_recovery_rows.items()):
         filename = (
-            f'recovery_vs_budget__{_slugify(scenario)}__{_slugify(backbone_name)}__{_slugify(strategy_name)}.png'
-        )
+            f'recovery_vs_budget__{_slugify(scenario)}__{_slugify(backbone_name)}__{_slugify(strategy_name)}.png')
         valid_rows = [
-            row for row in rows
-            if to_float(row.get(COLUMN_REPAIR_BUDGET_FRACTION)) is not None
-            and to_float(row.get(_COLUMN_MEAN_ABSOLUTE_RECOVERY)) is not None
+            row for row in rows if to_float(row.get(COLUMN_REPAIR_BUDGET_FRACTION)) is not None and
+            to_float(row.get(_COLUMN_MEAN_ABSOLUTE_RECOVERY)) is not None
         ]
         if not valid_rows:
             _record_plot_skip(
@@ -358,9 +348,8 @@ def plot_analysis_outputs(
         _save_or_show(fig=fig, filename=filename)
 
     valid_frontier_rows = [
-        row for row in frontier_rows
-        if to_float(row.get(_COLUMN_MEAN_HARMED_TASK_FRACTION)) is not None
-        and to_float(row.get(_COLUMN_MEAN_ABSOLUTE_RECOVERY)) is not None
+        row for row in frontier_rows if to_float(row.get(_COLUMN_MEAN_HARMED_TASK_FRACTION)) is not None and
+        to_float(row.get(_COLUMN_MEAN_ABSOLUTE_RECOVERY)) is not None
     ]
     if valid_frontier_rows:
         fig = plt.figure()
@@ -389,8 +378,7 @@ def plot_analysis_outputs(
 
     utility_cost_rows = [
         row for row in frontier_rows
-        if _action_cost_x_value(row) is not None
-        and to_float(row.get(_COLUMN_UTILITY_CONSERVATIVE)) is not None
+        if _action_cost_x_value(row) is not None and to_float(row.get(_COLUMN_UTILITY_CONSERVATIVE)) is not None
     ]
     if utility_cost_rows:
         fig = plt.figure()
@@ -435,9 +423,8 @@ def plot_analysis_outputs(
                 row.get(COLUMN_B),
                 row.get(COLUMN_REPAIR_BUDGET_FRACTION),
                 row.get(COLUMN_REPAIR_BUDGET_TOTAL),
-            ): row
-            for row in frontier_rows
-            if row.get(_COLUMN_CONTROLLER_ID) == left_id
+            ):
+                row for row in frontier_rows if row.get(_COLUMN_CONTROLLER_ID) == left_id
         }
         right_rows = {
             (
@@ -448,9 +435,8 @@ def plot_analysis_outputs(
                 row.get(COLUMN_B),
                 row.get(COLUMN_REPAIR_BUDGET_FRACTION),
                 row.get(COLUMN_REPAIR_BUDGET_TOTAL),
-            ): row
-            for row in frontier_rows
-            if row.get(_COLUMN_CONTROLLER_ID) == right_id
+            ):
+                row for row in frontier_rows if row.get(_COLUMN_CONTROLLER_ID) == right_id
         }
         overlap_keys = sorted(set(left_rows) & set(right_rows))
         delta_rows: list[tuple[float, float]] = []
@@ -504,8 +490,8 @@ def plot_analysis_outputs(
         ).append(row)
 
     for (scenario, backbone_name), rows in sorted(
-        grouped_harm_rows.items(),
-        key=lambda item: tuple('' if value is None else str(value) for value in item[0]),
+            grouped_harm_rows.items(),
+            key=lambda item: tuple('' if value is None else str(value) for value in item[0]),
     ):
         filename = f'harm_vs_budget__{_slugify(scenario)}__{_slugify(backbone_name)}.png'
         aggregated_rows = _grouped_mean_rows(
@@ -522,9 +508,8 @@ def plot_analysis_outputs(
             value_key=_COLUMN_MEAN_HARMED_TASK_FRACTION,
         )
         valid_rows = [
-            row for row in aggregated_rows
-            if to_float(row.get(COLUMN_REPAIR_BUDGET_FRACTION)) is not None
-            and to_float(row.get(_COLUMN_MEAN_HARMED_TASK_FRACTION)) is not None
+            row for row in aggregated_rows if to_float(row.get(COLUMN_REPAIR_BUDGET_FRACTION)) is not None and
+            to_float(row.get(_COLUMN_MEAN_HARMED_TASK_FRACTION)) is not None
         ]
         if not valid_rows:
             _record_plot_skip(
@@ -561,11 +546,9 @@ def plot_analysis_outputs(
         _save_or_show(fig=fig, filename=filename)
 
     if mode in {'show', 'both'}:
-        import matplotlib.pyplot as plt_show
-        plt_show.show()
+        plt.show()
     else:
-        import matplotlib.pyplot as plt_close
-        plt_close.close('all')
+        plt.close('all')
 
     return PlotAnalysisResult(
         saved_paths=save_paths,

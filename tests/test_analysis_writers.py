@@ -4,8 +4,8 @@ Tests for analysis writer modules.
 
 import csv
 import json
-import re
 from pathlib import Path
+import re
 
 import pytest
 
@@ -191,6 +191,10 @@ def _experience_row(
 
 
 class TestWriteRecoverabilityCurves:
+    """
+    Tests for recoverability curve writing.
+    """
+
     def test_writes_recoverability_and_related_analysis_outputs(self, tmp_path: Path) -> None:
         runs_table = [
             {
@@ -281,10 +285,7 @@ class TestWriteRecoverabilityCurves:
 
         task_rows = _read_rows(task_path)
         assert len(task_rows) == 2
-        task_row_by_age = {
-            int(row[COLUMN_TASK_AGE]): row
-            for row in task_rows
-        }
+        task_row_by_age = {int(row[COLUMN_TASK_AGE]): row for row in task_rows}
         assert float(task_row_by_age[1][ANALYSIS_RHO_AVG]) == pytest.approx(0.20)
         assert float(task_row_by_age[0][ANALYSIS_RHO_AVG]) == pytest.approx(0.30)
 
@@ -300,6 +301,10 @@ class TestWriteRecoverabilityCurves:
 
 
 class TestWriteRepairabilityFrontierOutputs:
+    """
+    Tests for repairability frontier output writing.
+    """
+
     def test_writes_repair_prefixed_artifacts_and_omits_legacy_files(self, tmp_path: Path) -> None:
         runs_table = [
             _run_row(run_id='run_a', controller_name='repair_a'),
@@ -399,9 +404,7 @@ class TestWriteRepairabilityFrontierOutputs:
 
         repair_outcomes = _read_jsonl(paths['repair_outcomes'])
         by_exp_idx = {
-            int(row[COLUMN_EXP_IDX]): row
-            for row in repair_outcomes
-            if row[COLUMN_CONTROLLER_NAME] == 'repair_a'
+            int(row[COLUMN_EXP_IDX]): row for row in repair_outcomes if row[COLUMN_CONTROLLER_NAME] == 'repair_a'
         }
         assert sorted(by_exp_idx) == [1, 2]
         assert by_exp_idx[1]['rho'] is None
@@ -416,14 +419,12 @@ class TestWriteRepairabilityFrontierOutputs:
         assert manifest['normalization']['suspicious_value_count'] == 3
         suspicious_rows = manifest['normalization']['suspicious_values']
         assert len(suspicious_rows) == 3
-        assert {
-            (row[COLUMN_RUN_ID], row[COLUMN_EXP_IDX], row['field'], row['raw_value'])
-            for row in suspicious_rows
-        } == {
-            ('run_a', 0, 'A_ref', 90),
-            ('run_a', 0, 'A_post', 60),
-            ('run_a', 0, 'A_ctrl', 75),
-        }
+        assert {(row[COLUMN_RUN_ID], row[COLUMN_EXP_IDX], row['field'], row['raw_value']) for row in suspicious_rows
+               } == {
+                   ('run_a', 0, 'A_ref', 90),
+                   ('run_a', 0, 'A_post', 60),
+                   ('run_a', 0, 'A_ctrl', 75),
+               }
 
     def test_emits_no_op_rows_once_per_task_and_budget(self, tmp_path: Path) -> None:
         runs_table = [
@@ -485,10 +486,7 @@ class TestWriteRepairabilityFrontierOutputs:
         assert all(bool(re.fullmatch(r'[0-9a-f]{32}', str(row[COLUMN_RUN_ID]))) for row in no_op_rows)
         assert len({str(row[COLUMN_RUN_ID]) for row in no_op_rows}) == 1
         assert len({str(row[COLUMN_RUN_NAME]) for row in no_op_rows}) == 1
-        assert all(
-            row[COLUMN_RUN_NAME] == 'no_op-cifar100-vit_small-er-budget_50-seed_1'
-            for row in no_op_rows
-        )
+        assert all(row[COLUMN_RUN_NAME] == 'no_op-cifar100-vit_small-er-budget_50-seed_1' for row in no_op_rows)
 
         frontier_rows = _read_rows(paths['candidates'])
         no_op_frontier_row = next(row for row in frontier_rows if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME)
@@ -747,13 +745,11 @@ class TestWriteRepairabilityFrontierOutputs:
         )
 
         first_no_op_rows = [
-            row
-            for row in _read_jsonl(first_paths['repair_outcomes'])
+            row for row in _read_jsonl(first_paths['repair_outcomes'])
             if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME
         ]
         second_no_op_rows = [
-            row
-            for row in _read_jsonl(second_paths['repair_outcomes'])
+            row for row in _read_jsonl(second_paths['repair_outcomes'])
             if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME
         ]
 
@@ -790,17 +786,13 @@ class TestWriteRepairabilityFrontierOutputs:
         )
 
         no_op_rows = [
-            row
-            for row in _read_jsonl(paths['repair_outcomes'])
+            row for row in _read_jsonl(paths['repair_outcomes'])
             if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME
         ]
 
         assert len(no_op_rows) == 2
         assert len({str(row[COLUMN_RUN_ID]) for row in no_op_rows}) == 2
-        assert {
-            str(row[COLUMN_RUN_NAME])
-            for row in no_op_rows
-        } == {
+        assert {str(row[COLUMN_RUN_NAME]) for row in no_op_rows} == {
             'no_op-cifar100-resnet18-er-budget_50-seed_1',
             'no_op-cifar100-vit_small-er-budget_50-seed_1',
         }
@@ -847,34 +839,19 @@ class TestWriteRepairabilityFrontierOutputs:
         )
 
         repair_outcomes = _read_jsonl(paths['repair_outcomes'])
-        no_op_rows = [
-            row for row in repair_outcomes
-            if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME
-        ]
+        no_op_rows = [row for row in repair_outcomes if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME]
         assert len(no_op_rows) == 2
-        assert {
-            int(float(row[COLUMN_REPAIR_BUDGET_TOTAL]))
-            for row in no_op_rows
-        } == {5, 10}
+        assert {int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])) for row in no_op_rows} == {5, 10}
         assert len({str(row[COLUMN_RUN_ID]) for row in no_op_rows}) == 2
 
         frontier_rows = _read_rows(paths['candidates'])
-        no_op_frontier_rows = [
-            row for row in frontier_rows
-            if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME
-        ]
+        no_op_frontier_rows = [row for row in frontier_rows if row[COLUMN_CONTROLLER_NAME] == _NO_OP_CONTROLLER_NAME]
         assert len(no_op_frontier_rows) == 2
-        assert {
-            int(float(row[COLUMN_REPAIR_BUDGET_TOTAL]))
-            for row in no_op_frontier_rows
-        } == {5, 10}
+        assert {int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])) for row in no_op_frontier_rows} == {5, 10}
 
         selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 2
-        assert {
-            int(float(row[COLUMN_REPAIR_BUDGET_TOTAL]))
-            for row in selection_rows
-        } == {5, 10}
+        assert {int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])) for row in selection_rows} == {5, 10}
         for row in selection_rows:
             assert 'utility_primary__no_op' in row
             assert 'utility_conservative__no_op' in row
@@ -978,10 +955,7 @@ class TestWriteRepairabilityFrontierOutputs:
         )
 
         frontier_rows = _read_rows(paths['candidates'])
-        frontier_by_controller = {
-            row[COLUMN_CONTROLLER_NAME]: row
-            for row in frontier_rows
-        }
+        frontier_by_controller = {row[COLUMN_CONTROLLER_NAME]: row for row in frontier_rows}
         assert frontier_by_controller['Repair A']['controller_id'] == 'repair_a'
         assert frontier_by_controller['repair_a']['controller_id'] == 'repair_a__2'
         assert frontier_by_controller['Repair A']['is_pareto'] == 'True'
@@ -1017,10 +991,7 @@ class TestWriteRepairabilityFrontierOutputs:
         )
 
         frontier_rows = _read_rows(paths['candidates'])
-        frontier_by_controller = {
-            row[COLUMN_CONTROLLER_NAME]: row
-            for row in frontier_rows
-        }
+        frontier_by_controller = {row[COLUMN_CONTROLLER_NAME]: row for row in frontier_rows}
         assert frontier_by_controller['repair_a']['is_pareto'] == ''
         assert frontier_by_controller['repair_b']['is_pareto'] == 'True'
 
@@ -1029,10 +1000,7 @@ class TestWriteRepairabilityFrontierOutputs:
         warning_codes = {warning['code'] for warning in manifest['warnings']}
         assert 'pareto_missing_dimension' in warning_codes
         pareto_warning = next(
-            warning
-            for warning in manifest['warnings']
-            if warning['code'] == 'pareto_missing_dimension'
-        )
+            warning for warning in manifest['warnings'] if warning['code'] == 'pareto_missing_dimension')
         assert pareto_warning['context'][_COLUMN_BACKBONE_NAME] == 'vit_small'
         assert all(_COLUMN_BACKBONE_NAME in group for group in manifest['pareto_groups'])
 
@@ -1042,8 +1010,10 @@ class TestWriteRepairabilityFrontierOutputs:
             _run_row(run_id='run_b', controller_name='repair_a', backbone_name='resnet18'),
         ]
         experiences_table = [
-            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.84),
-            _experience_row(run_id='run_b', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.74),
+            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.84),
+            _experience_row(run_id='run_b', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.74),
         ]
 
         paths = write_repairability_frontier_outputs(
@@ -1080,8 +1050,10 @@ class TestWriteRepairabilityFrontierOutputs:
         run_high_budget[COLUMN_B] = 0.5
         runs_table = [run_low_budget, run_high_budget]
         experiences_table = [
-            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.85),
-            _experience_row(run_id='run_b', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.82),
+            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.85),
+            _experience_row(run_id='run_b', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.82),
         ]
 
         paths = write_repairability_frontier_outputs(
@@ -1096,14 +1068,11 @@ class TestWriteRepairabilityFrontierOutputs:
 
         selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 2
-        selection_keys = {
-            (
-                float(row[COLUMN_B]),
-                float(row[COLUMN_REPAIR_BUDGET_FRACTION]),
-                int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])),
-            )
-            for row in selection_rows
-        }
+        selection_keys = {(
+            float(row[COLUMN_B]),
+            float(row[COLUMN_REPAIR_BUDGET_FRACTION]),
+            int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])),
+        ) for row in selection_rows}
         assert selection_keys == {(0.5, 0.25, 5), (0.5, 0.5, 10)}
         assert all(float(row[_COLUMN_ORACLE_MARGIN]) == pytest.approx(0.0) for row in selection_rows)
 
@@ -1127,8 +1096,10 @@ class TestWriteRepairabilityFrontierOutputs:
             ),
         ]
         experiences_table = [
-            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.88),
-            _experience_row(run_id='run_b', controller_name='repair_b', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.78),
+            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.88),
+            _experience_row(run_id='run_b', controller_name='repair_b', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.78),
         ]
 
         paths = write_repairability_frontier_outputs(
@@ -1144,10 +1115,7 @@ class TestWriteRepairabilityFrontierOutputs:
 
         with paths['manifest'].open('r', encoding='utf-8') as f:
             manifest = json.load(f)
-        pareto_backbones = {
-            group[_COLUMN_BACKBONE_NAME]
-            for group in manifest['pareto_groups']
-        }
+        pareto_backbones = {group[_COLUMN_BACKBONE_NAME] for group in manifest['pareto_groups']}
         assert pareto_backbones == {'vit_small', 'resnet18'}
 
     def test_best_static_lookup_is_scoped_by_full_setting(self, tmp_path: Path) -> None:
@@ -1167,8 +1135,10 @@ class TestWriteRepairabilityFrontierOutputs:
         run_high_budget[COLUMN_B] = 0.5
         runs_table = [run_low_budget, run_high_budget]
         experiences_table = [
-            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.85),
-            _experience_row(run_id='run_b', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60, a_ctrl=0.55),
+            _experience_row(run_id='run_a', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.85),
+            _experience_row(run_id='run_b', controller_name='repair_a', exp_idx=0, a_ref=0.90, a_post=0.60,
+                            a_ctrl=0.55),
         ]
 
         paths = write_repairability_frontier_outputs(
@@ -1179,10 +1149,7 @@ class TestWriteRepairabilityFrontierOutputs:
 
         selection_rows = _read_rows(paths['selection'])
         assert len(selection_rows) == 2
-        rows_by_budget = {
-            int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])): row
-            for row in selection_rows
-        }
+        rows_by_budget = {int(float(row[COLUMN_REPAIR_BUDGET_TOTAL])): row for row in selection_rows}
 
         low_budget_row = rows_by_budget[5]
         high_budget_row = rows_by_budget[10]
@@ -1240,22 +1207,20 @@ class TestWriteRepairabilityFrontierOutputs:
 
     def test_plot_analysis_outputs_skips_utility_vs_cost_without_action_cost(self, tmp_path: Path) -> None:
         plot_result = plot_analysis_outputs(
-            frontier_rows=[
-                {
-                    _COLUMN_SCENARIO: 'cifar100',
-                    _COLUMN_BACKBONE_NAME: 'vit_small',
-                    _COLUMN_STRATEGY_NAME: 'er',
-                    COLUMN_CONTROLLER_NAME: 'repair_a',
-                    _COLUMN_CONTROLLER_ID: 'repair_a',
-                    COLUMN_SEED: 1,
-                    COLUMN_B: 0.5,
-                    COLUMN_REPAIR_BUDGET_FRACTION: 0.5,
-                    COLUMN_REPAIR_BUDGET_TOTAL: 5,
-                    'mean_absolute_recovery': 0.20,
-                    'mean_harmed_task_fraction': 0.10,
-                    'utility_conservative': 0.15,
-                }
-            ],
+            frontier_rows=[{
+                _COLUMN_SCENARIO: 'cifar100',
+                _COLUMN_BACKBONE_NAME: 'vit_small',
+                _COLUMN_STRATEGY_NAME: 'er',
+                COLUMN_CONTROLLER_NAME: 'repair_a',
+                _COLUMN_CONTROLLER_ID: 'repair_a',
+                COLUMN_SEED: 1,
+                COLUMN_B: 0.5,
+                COLUMN_REPAIR_BUDGET_FRACTION: 0.5,
+                COLUMN_REPAIR_BUDGET_TOTAL: 5,
+                'mean_absolute_recovery': 0.20,
+                'mean_harmed_task_fraction': 0.10,
+                'utility_conservative': 0.15,
+            }],
             impact_rows=[],
             mode='save',
             save_dir=tmp_path / 'plots',
@@ -1277,35 +1242,31 @@ class TestWriteRepairabilityFrontierOutputs:
             },
             'plots': {
                 'saved': ['old_plot.png'],
-                'skipped': [
-                    {
-                        'filename': 'old_missing.png',
-                        'reason': 'old skip reason',
-                        'context': {},
-                    }
-                ],
+                'skipped': [{
+                    'filename': 'old_missing.png',
+                    'reason': 'old skip reason',
+                    'context': {},
+                }],
             },
         }
         manifest_path.write_text(json.dumps(manifest_payload), encoding='utf-8')
 
         plot_result = plot_analysis_outputs(
             analysis_out=analysis_out,
-            frontier_rows=[
-                {
-                    _COLUMN_SCENARIO: 'cifar100',
-                    _COLUMN_BACKBONE_NAME: 'vit_small',
-                    _COLUMN_STRATEGY_NAME: 'er',
-                    COLUMN_CONTROLLER_NAME: 'repair_a',
-                    _COLUMN_CONTROLLER_ID: 'repair_a',
-                    COLUMN_SEED: 1,
-                    COLUMN_B: 0.5,
-                    COLUMN_REPAIR_BUDGET_FRACTION: 0.5,
-                    COLUMN_REPAIR_BUDGET_TOTAL: 5,
-                    'mean_absolute_recovery': 0.20,
-                    'mean_harmed_task_fraction': 0.10,
-                    'utility_conservative': 0.15,
-                }
-            ],
+            frontier_rows=[{
+                _COLUMN_SCENARIO: 'cifar100',
+                _COLUMN_BACKBONE_NAME: 'vit_small',
+                _COLUMN_STRATEGY_NAME: 'er',
+                COLUMN_CONTROLLER_NAME: 'repair_a',
+                _COLUMN_CONTROLLER_ID: 'repair_a',
+                COLUMN_SEED: 1,
+                COLUMN_B: 0.5,
+                COLUMN_REPAIR_BUDGET_FRACTION: 0.5,
+                COLUMN_REPAIR_BUDGET_TOTAL: 5,
+                'mean_absolute_recovery': 0.20,
+                'mean_harmed_task_fraction': 0.10,
+                'utility_conservative': 0.15,
+            }],
             impact_rows=[],
             mode='save',
             save_dir=tmp_path / 'plots',
@@ -1377,6 +1338,10 @@ class TestWriteRepairabilityFrontierOutputs:
 
 
 class TestWritePredictiveCorrelations:
+    """
+    Tests for predictive correlation writing.
+    """
+
     def test_writes_predictive_correlations_from_experience_rows(self, tmp_path: Path) -> None:
         experiences_table = [
             {

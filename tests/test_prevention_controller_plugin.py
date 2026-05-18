@@ -9,7 +9,7 @@ from torch import nn
 
 from regain.avalanche_utils.plugins import PreventionControllerPlugin
 # Ensure a stable import order for plugin module initialization.
-import regain.experiments.orchestrator  # noqa: F401
+import regain.experiments.orchestrator  # noqa: F401  # pylint: disable=unused-import
 from regain.models.controllers import PreventionController
 
 ################
@@ -18,11 +18,19 @@ from regain.models.controllers import PreventionController
 
 
 class _IdentityModel(nn.Module):
+    """
+    Identity model for testing.
+    """
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x
 
 
 class _DummyStrategy:
+    """
+    Dummy strategy for testing.
+    """
+
     def __init__(
         self,
         *,
@@ -38,6 +46,10 @@ class _DummyStrategy:
 
 
 class _SpyPreventionController(PreventionController):
+    """
+    Spy wrapper for PreventionController.
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self.eval_begin_args: tuple[Any, ...] | None = None
@@ -72,6 +84,10 @@ class _SpyPreventionController(PreventionController):
 
 
 class TestPreventionControllerPluginEvalHooks:
+    """
+    Tests for PreventionControllerPlugin eval hooks.
+    """
+
     def test_prevention_eval_hooks_do_not_receive_strategy_or_experience(self) -> None:
         controller = _SpyPreventionController()
         plugin = PreventionControllerPlugin(controller=controller)

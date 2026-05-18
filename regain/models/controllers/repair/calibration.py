@@ -111,7 +111,7 @@ class LogitBiasController(RepairController):
         new_bias = torch.zeros(num_classes, device=device, dtype=dtype)
         if old_n > 0:
             with torch.no_grad():
-                new_bias[:old_n].copy_(self.bias.detach())
+                new_bias[:old_n].copy_(self.bias.detach())  # pylint: disable=not-callable
 
         self.bias = nn.Parameter(new_bias)
 
@@ -137,6 +137,7 @@ class LogitBiasController(RepairController):
         Returns:
             None.
         """
+
         def _ensure_initialized(*, model: nn.Module, device: torch.device, sample_inputs: torch.Tensor) -> None:
             if new_classes:
                 self._ensure_num_classes(max(int(c) for c in new_classes) + 1)
@@ -181,7 +182,7 @@ class LogitBiasController(RepairController):
             if bias.device != x.device:
                 bias = bias.to(device=x.device)
             if int(bias.numel()) > int(logits.shape[1]):
-                bias = bias[: int(logits.shape[1])]
+                bias = bias[:int(logits.shape[1])]
 
             return logits + bias
 
@@ -211,6 +212,7 @@ class LogitBiasController(RepairController):
         Returns:
             Any: Adjusted logits.
         """
+        del model, inputs
         if not torch.is_tensor(outputs):
             return outputs
         if outputs.ndim != 2:
@@ -219,7 +221,7 @@ class LogitBiasController(RepairController):
         self._ensure_num_classes(int(outputs.shape[1]))
         bias = self.bias
         if int(bias.numel()) > int(outputs.shape[1]):
-            bias = bias[: int(outputs.shape[1])]
+            bias = bias[:int(outputs.shape[1])]
 
         return outputs + bias.to(outputs.device)
 
@@ -285,7 +287,7 @@ class WeightAligningController(RepairController):
         if not old_idx or not cur_idx:
             return
 
-        norms = torch.linalg.vector_norm(weight.detach().float(), ord=2, dim=1)
+        norms = torch.linalg.vector_norm(weight.detach().float(), ord=2, dim=1)  # pylint: disable=not-callable
         old_norm = float(norms[old_idx].mean().item())
         cur_norm = float(norms[cur_idx].mean().item())
         if cur_norm <= 0.0:
@@ -660,10 +662,11 @@ class BiCController(RepairController):
                 logits = model(x)
             return bias_layer(logits)
 
-        def _reg_term(_aux: Any) -> torch.Tensor | None:
+        def _reg_term(aux: Any) -> torch.Tensor | None:
+            del aux
             if self.l2_beta <= 0.0:
                 return None
-            return self.l2_beta * (bias_layer.beta.sum() ** 2) / 2.0
+            return self.l2_beta * (bias_layer.beta.sum()**2) / 2.0
 
         fit_repair_controller(
             controller=bias_layer,
@@ -687,6 +690,7 @@ class BiCController(RepairController):
         self._exp_idx += 1
 
     def correct_outputs(self, *, outputs: Any, model: nn.Module | None = None, inputs: Any | None = None) -> Any:
+        del model, inputs
         if self.bias_layer is None:
             return outputs
         if not torch.is_tensor(outputs) or outputs.ndim != 2:
@@ -855,9 +859,8 @@ class IL2MController(RepairController):
                     self.init_classes_means[int(cls)] /= float(c)
                     self.classes2exp[int(cls)] = int(self._exp_idx)
 
-            self.models_confidence[self._exp_idx] = (
-                float(model_conf_sum / float(model_conf_count)) if model_conf_count > 0 else 0.0
-            )
+            self.models_confidence[self._exp_idx] = (float(model_conf_sum /
+                                                           float(model_conf_count)) if model_conf_count > 0 else 0.0)
 
         self._exp_idx += 1
 
@@ -904,10 +907,7 @@ class IL2MController(RepairController):
             if self.current_classes_means[cls] == 0:
                 continue
 
-            scale = (
-                (self.init_classes_means[cls] / self.current_classes_means[cls])
-                * (cur_conf / old_conf)
-            )
+            scale = (self.init_classes_means[cls] / self.current_classes_means[cls]) * (cur_conf / old_conf)
             out[mask, cls] = out[mask, cls] * float(scale)
 
         return out

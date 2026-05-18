@@ -194,11 +194,8 @@ def _train_and_evaluate_strategy(
             else:
                 repair_split_fraction = float(experiment_config.repair.split_fraction)
             repair_budget_fraction = experiment_config.repair.budget_fraction
-            repair_budget_fraction_value = (
-                float(repair_budget_fraction)
-                if repair_budget_fraction is not None
-                else 1.0
-            )
+            repair_budget_fraction_value = (float(repair_budget_fraction)
+                                            if repair_budget_fraction is not None else 1.0)
             repair_fit_after_experience = experiment_config.repair.fit_schedule == 'per_experience'
 
             # Build the benchmark scenario
@@ -502,7 +499,7 @@ def run_experiment(
             raise ValueError(f'Run `{run_config.name}` is missing `controller`.')
         try:
             controller_type = resolve_controller_type(run_config.controller)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             if logger is not None:
                 logger.exception('Error resolving controller type for run: %s', run_config.name)
             continue
@@ -684,7 +681,7 @@ def run_experiment(
                     backbone_source_experiment_id=source_experiment_id_for_logging,
                     backbone_source_experiment_name=source_experiment_name_for_logging,
                 )
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 if logger is not None:
                     logger.exception('Error during run: %s', run_config.name)
                 continue

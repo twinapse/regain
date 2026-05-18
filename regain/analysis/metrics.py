@@ -168,10 +168,7 @@ def mean_ignore_invalid(values: Iterable[Optional[float]]) -> Optional[float]:
     Returns:
         Mean of valid values or None when no valid values are present.
     """
-    valid_values = [
-        v for v in values
-        if v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))
-    ]
+    valid_values = [v for v in values if v is not None and isinstance(v, (int, float)) and math.isfinite(float(v))]
     if not valid_values:
         return None
     return sum(valid_values) / len(valid_values)

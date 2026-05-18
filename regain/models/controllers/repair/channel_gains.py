@@ -147,7 +147,8 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
             )
 
             # Overwrite channels; un-probed keys become 0 (no stale counts).
-            for key, _module in units:
+            for key, module in units:
+                del module
                 c = int(probed.get(key, 0))
                 self._channels[key] = c
                 if c <= 0 and key in self._raw_gains:
@@ -155,7 +156,8 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
                     del self._raw_gains[key]
 
         # Ensure parameters exist and have correct group length.
-        for key, _module in units:
+        for key, module in units:
+            del module
             c = int(self._channels.get(key, 0))
             # Skip units without a valid channel count.
             if c <= 0:
@@ -204,11 +206,14 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         hooks: list[tuple[nn.Module, Callable[[nn.Module, tuple[Any, ...], Any], Any]]] = []
 
         def _make_probe_hook(key: str):
-            def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
+
+            def _hook(module: nn.Module, hook_inputs: tuple[Any, ...], out: Any) -> Any:
+                del module, hook_inputs
                 width = _GroupedChannelUnitGainController._infer_output_width(output=out)
                 if width > 0:
                     captured[key] = width
                 return out
+
             return _hook
 
         for key, module in units:
@@ -250,7 +255,9 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
         )
 
         def _make_hook(gain_groups: torch.Tensor):
-            def _hook(_module: nn.Module, _inp: tuple[Any, ...], out: Any) -> Any:
+
+            def _hook(module: nn.Module, hook_inputs: tuple[Any, ...], out: Any) -> Any:
+                del module, hook_inputs
                 # Skip non-tensor outputs or unsupported shapes.
                 if not torch.is_tensor(out) or out.ndim not in (2, 3, 4):
                     return out
@@ -268,7 +275,7 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
                     pad = torch.ones(pad_n, device=out.device, dtype=g.dtype)
                     g = torch.cat([g, pad], dim=0)
                 elif int(g.numel()) > int(needed_groups):
-                    g = g[: int(needed_groups)]
+                    g = g[:int(needed_groups)]
 
                 # Expand grouped gains across channels.
                 expanded = g.repeat_interleave(self.group_size)[:c]
@@ -279,6 +286,7 @@ class _GroupedChannelUnitGainController(BaseUnitGainController):
                 if out.ndim == 3:
                     return out * expanded.view(1, 1, c)
                 return out * expanded.view(1, c)
+
             return _hook
 
         # Build hook list matching unit keys to grouped gains.

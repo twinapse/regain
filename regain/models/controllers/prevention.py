@@ -1,3 +1,6 @@
+"""
+Prevention controllers that modify training to reduce catastrophic forgetting.
+"""
 import copy
 from typing import Any
 
@@ -105,8 +108,10 @@ class ContinualNormalizationController(PreventionController, BackboneControllerI
             return variants[groups]
 
         class _DynamicCN(ContinualNormalization32):
-            def setG(self) -> None:
-                self.G = groups
+
+            def set_num_groups(self) -> None:
+                # This override keeps original notation `setG` semantics via the clearer `num_groups` name.
+                self.num_groups = groups
 
         return _DynamicCN
 
@@ -139,14 +144,14 @@ class TaskBalancedBatchNormController(PreventionController, BackboneControllerIn
             eps (float): Numerical stability constant for TBBN layers.
             momentum (float): Running-stat momentum for TBBN layers.
         """
-        super().__init__(
-            train_batch_size=train_batch_size,
-            replay_batch_size=replay_batch_size,
-            replay_memory_size=replay_memory_size
-        )
+        super().__init__(train_batch_size=train_batch_size,
+                         replay_batch_size=replay_batch_size,
+                         replay_memory_size=replay_memory_size)
 
-        self.B_c = train_batch_size
-        self.B_p = replay_batch_size
+        # `current_batch_size` counts current-task samples per mixed minibatch (`B_c` in TBBN original notation).
+        self.current_batch_size = train_batch_size
+        # `replay_batch_size` counts replay-buffer samples in that same minibatch (`B_p` in TBBN original notation).
+        self.replay_batch_size = replay_batch_size
         self.batch_ratio: int | None = None
         self.eps = float(eps)
         self.momentum = float(momentum)
@@ -154,10 +159,13 @@ class TaskBalancedBatchNormController(PreventionController, BackboneControllerIn
         self._tbbn_layers: list[TaskBalancedBatchNorm] = []
         self._current_task: int = -1
 
-        if self.B_c is None or self.B_p is None:
+        if self.current_batch_size is None or self.replay_batch_size is None:
             raise ValueError('TaskBalancedBatchNormController requires train_batch_size and replay_batch_size.')
 
-        self._finalize_partition(B_c=self.B_c, B_p=self.B_p)
+        self._finalize_partition(
+            current_batch_size=self.current_batch_size,
+            replay_batch_size=self.replay_batch_size,
+        )
 
     def on_train_experience_begin(self, dataset: Dataset | None) -> None:
         """
@@ -169,6 +177,7 @@ class TaskBalancedBatchNormController(PreventionController, BackboneControllerIn
         Returns:
             None.
         """
+        del dataset
         self._current_task += 1
         for layer in self._tbbn_layers:
             layer.set_number_of_task(self._current_task)
@@ -187,11 +196,12 @@ class TaskBalancedBatchNormController(PreventionController, BackboneControllerIn
         Returns:
             None.
         """
-        if self.B_c is None or self.B_p is None:
-            raise ValueError('TaskBalancedBatchNormController requires B_c and B_p to be configured.')
+        if self.current_batch_size is None or self.replay_batch_size is None:
+            raise ValueError(
+                'TaskBalancedBatchNormController requires current_batch_size and replay_batch_size to be configured.')
 
-        B_c = int(self.B_c)
-        B_p = int(self.B_p)
+        current_batch_size = int(self.current_batch_size)
+        replay_batch_size = int(self.replay_batch_size)
 
         def _factory(target: nn.BatchNorm2d) -> nn.Module:
             layer = TaskBalancedBatchNorm(
@@ -201,8 +211,8 @@ class TaskBalancedBatchNormController(PreventionController, BackboneControllerIn
                 affine=bool(target.affine),
                 track_running_stats=bool(target.track_running_stats),
                 batch_ratio=int(self.batch_ratio) if self.batch_ratio is not None else None,
-                B_c=int(B_c),
-                B_p=int(B_p),
+                current_batch_size=int(current_batch_size),
+                replay_batch_size=int(replay_batch_size),
             )
 
             device = target.running_mean.device
@@ -222,33 +232,33 @@ class TaskBalancedBatchNormController(PreventionController, BackboneControllerIn
 
         replace_batchnorm2d(model, _factory)
 
-    def _finalize_partition(self, *, B_c: int, B_p: int) -> None:
+    def _finalize_partition(self, *, current_batch_size: int, replay_batch_size: int) -> None:
         """
         Validate and store the batch partition.
 
         Args:
-            B_c: Current-task batch size.
-            B_p: Replay batch size.
+            current_batch_size: Current-task batch size.
+            replay_batch_size: Replay batch size.
         """
-        resolved_B_c = int(B_c)
-        resolved_B_p = int(B_p)
-        if resolved_B_c <= 0 or resolved_B_p <= 0:
-            raise ValueError('B_c and B_p must be positive integers.')
+        # `resolved_*` are validated integer forms of the configured batch split.
+        resolved_current_batch_size = int(current_batch_size)
+        resolved_replay_batch_size = int(replay_batch_size)
+        if resolved_current_batch_size <= 0 or resolved_replay_batch_size <= 0:
+            raise ValueError('current_batch_size and replay_batch_size must be positive integers.')
 
-        implied_ratio = resolved_B_c // resolved_B_p
-        if implied_ratio * resolved_B_p != resolved_B_c:
-            raise ValueError('B_c must be an integer multiple of B_p for TBBN.')
+        implied_ratio = resolved_current_batch_size // resolved_replay_batch_size
+        if implied_ratio * resolved_replay_batch_size != resolved_current_batch_size:
+            raise ValueError('current_batch_size must be an integer multiple of replay_batch_size for TBBN.')
 
         if self.batch_ratio is None:
             self.batch_ratio = implied_ratio
         elif self.batch_ratio <= 0 or self.batch_ratio != implied_ratio:
-            raise ValueError(
-                f'Inconsistent batch partition: batch_ratio={self.batch_ratio}, '
-                f'but B_c={resolved_B_c} and B_p={resolved_B_p} imply {implied_ratio}.'
-            )
+            raise ValueError(f'Inconsistent batch partition: batch_ratio={self.batch_ratio}, '
+                             f'but current_batch_size={resolved_current_batch_size} and '
+                             f'replay_batch_size={resolved_replay_batch_size} imply {implied_ratio}.')
 
-        self.B_c = resolved_B_c
-        self.B_p = resolved_B_p
+        self.current_batch_size = resolved_current_batch_size
+        self.replay_batch_size = resolved_replay_batch_size
 
 
 class BaCEController(PreventionController, TrainingObjectiveControllerInterface):
@@ -303,11 +313,9 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
             dist_eps (float): Small constant for numerical stability in distance computations.
             self_exclude_eps (float): Distance threshold to exclude self-matches in KNN.
         """
-        super().__init__(
-            train_batch_size=train_batch_size,
-            replay_batch_size=replay_batch_size,
-            replay_memory_size=replay_memory_size
-        )
+        super().__init__(train_batch_size=train_batch_size,
+                         replay_batch_size=replay_batch_size,
+                         replay_memory_size=replay_memory_size)
 
         self.num_neighbors = int(num_neighbors)
         self.w0 = float(w0)
@@ -545,7 +553,7 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
                 if not torch.is_tensor(x):
                     raise ValueError('BaCEController expects the dataset to yield tensor inputs.')
                 x = x.to(model_device)
-                feats = teacher_backbone(x)
+                feats = teacher_backbone(x)  # pylint: disable=not-callable
                 if not torch.is_tensor(feats) or feats.ndim != 2:
                     raise ValueError('BaCEController backbone must return 2D features (B, D).')
                 feats_list.append(feats)
@@ -587,7 +595,7 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
                 s_param = student_state.get(name)
                 if s_param is None:
                     continue
-                t_param.mul_(beta).add_(s_param.detach(), alpha=(1.0 - beta))
+                t_param.mul_(beta).add_(s_param.detach(), alpha=1.0 - beta)
 
             # Buffers (e.g., BatchNorm running stats): copy directly (more stable than EMA for many buffers).
             teacher_buffers = dict(self._teacher.named_buffers())
@@ -683,7 +691,7 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
             error_message='BaCEController requires the model to expose a `.backbone` (or `.encoder`) module.',
         )
         with torch.inference_mode():
-            query_feats = teacher_backbone(cur_inputs)
+            query_feats = teacher_backbone(cur_inputs)  # pylint: disable=not-callable
         if not torch.is_tensor(query_feats) or query_feats.ndim != 2:
             return F.cross_entropy(cur_logits, cur_targets)
 
@@ -712,7 +720,7 @@ class BaCEController(PreventionController, TrainingObjectiveControllerInterface)
                     continue
                 bank_pos = int(top_idx_np[i, j])
                 pairs.append((bank_pos, d))
-            pairs = pairs[: self.num_neighbors]
+            pairs = pairs[:self.num_neighbors]
 
             if not pairs:
                 neighbor_idx.append([])

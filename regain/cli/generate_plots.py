@@ -109,11 +109,8 @@ def main() -> None:
         for target in targets:
             experiment_name = target.experiment_name
             analysis_out = analysis_root / experiment_name
-            destination_dir = (
-                Path(args.output_dir) / experiment_name / 'plots'
-                if args.output_dir is not None
-                else (analysis_out / 'plots')
-            )
+            destination_dir = (Path(args.output_dir) / experiment_name / 'plots' if args.output_dir is not None else
+                               (analysis_out / 'plots'))
             scope = f'experiment={experiment_name}'
 
             if not analysis_out.exists():
@@ -140,14 +137,10 @@ def main() -> None:
                             scope=scope,
                             source=staged_save_dir,
                             destination=destination_dir,
-                        )
-                    )
+                        ))
                 if args.output_dir is None and mode in ['save', 'both'] and has_plot_manifest_metadata:
-                    plot_destination_publishable = (
-                        not saved_plot_files
-                        or not destination_dir.exists()
-                        or bool(args.overwrite)
-                    )
+                    plot_destination_publishable = (not saved_plot_files or not destination_dir.exists() or
+                                                    bool(args.overwrite))
                     if plot_destination_publishable:
                         staged_manifest_path = staged_root / experiment_name / 'frontier' / 'manifest.json'
                         write_plot_manifest_update(
@@ -162,9 +155,8 @@ def main() -> None:
                                 source=staged_manifest_path,
                                 destination=analysis_out / 'frontier' / 'manifest.json',
                                 overwrite_destination=True,
-                            )
-                        )
-            except Exception as exc:
+                            ))
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 add_failure(
                     failures=failures,
                     scope=scope,
@@ -179,7 +171,7 @@ def main() -> None:
         )
 
     if published_count > 0:
-        logger.warning(f'Plots written for {published_count} experiment(s).')
+        logger.warning('Plots written for %d experiment(s).', published_count)
 
     print_failure_summary(
         command_name='regain-generate-plots',
@@ -190,8 +182,7 @@ def main() -> None:
             failures=failures,
             allow_partial=bool(args.allow_partial),
             published_count=published_count,
-        )
-    )
+        ))
 
 
 if __name__ == '__main__':

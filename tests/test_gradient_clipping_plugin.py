@@ -10,6 +10,10 @@ from regain.avalanche_utils.plugins import GradientClippingPlugin
 
 
 class TestGradientClippingPlugin:
+    """
+    Tests for GradientClippingPlugin.
+    """
+
     def test_clips_gradients_before_update(self) -> None:
         model = torch.nn.Linear(3, 1, bias=False)
         for parameter in model.parameters():

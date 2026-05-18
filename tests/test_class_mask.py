@@ -8,6 +8,10 @@ from regain.evaluation import ClassMask
 
 
 class TestClassMask:
+    """
+    Tests for ClassMask.
+    """
+
     def test_masks_unseen_columns(self) -> None:
         mask = ClassMask.from_seen_classes([0, 2], mask_value=-5.0)
         logits = torch.tensor(

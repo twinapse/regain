@@ -32,6 +32,10 @@ def _collect_warmup_cosine_lrs(*, total_epochs: int, warmup_epochs: int, min_lr:
 
 
 class TestWarmupCosineLRSchedulerPlugin:
+    """
+    Tests for WarmupCosine LR scheduler plugin.
+    """
+
     def test_tracks_expected_schedule_values(self) -> None:
         lrs = _collect_warmup_cosine_lrs(
             total_epochs=6,

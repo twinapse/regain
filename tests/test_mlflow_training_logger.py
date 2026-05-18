@@ -34,20 +34,22 @@ def _make_context(*, namespace: str, phase: MetricPhase, step: int) -> MetricCon
 
 
 class TestMlflowTrainingLogger:
+    """
+    Tests for MLflowTrainingLogger.
+    """
+
     def test_canonicalizes_train_loss_and_time_metrics(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         logged_metrics: list[tuple[str, float, int]] = []
-        logger = MLflowTrainingLogger(
-            context=_make_context(
-                namespace=NAMESPACE_TRAIN,
-                phase=MetricPhase.TRAIN,
-                step=7,
-            )
-        )
+        logger = MLflowTrainingLogger(context=_make_context(
+            namespace=NAMESPACE_TRAIN,
+            phase=MetricPhase.TRAIN,
+            step=7,
+        ))
 
-        monkeypatch.setattr(mlflow, 'active_run', lambda: object())
+        monkeypatch.setattr(mlflow, 'active_run', object)
         monkeypatch.setattr(
             mlflow,
             'log_metric',
@@ -84,16 +86,14 @@ class TestMlflowTrainingLogger:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        logger = MLflowTrainingLogger(
-            context=_make_context(
-                namespace=NAMESPACE_EVAL,
-                phase=MetricPhase.EVAL,
-                step=5,
-            )
-        )
+        logger = MLflowTrainingLogger(context=_make_context(
+            namespace=NAMESPACE_EVAL,
+            phase=MetricPhase.EVAL,
+            step=5,
+        ))
         logged_metrics: list[tuple[str, float, int]] = []
 
-        monkeypatch.setattr(mlflow, 'active_run', lambda: object())
+        monkeypatch.setattr(mlflow, 'active_run', object)
         monkeypatch.setattr(
             mlflow,
             'log_metric',
@@ -121,4 +121,4 @@ class TestMlflowTrainingLogger:
             x_plot=0,
         )
 
-        assert logged_metrics == []
+        assert not logged_metrics

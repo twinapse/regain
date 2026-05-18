@@ -53,6 +53,10 @@ def _make_run(
 
 
 class _FakeHistoryClient:
+    """
+    Fake MLflow history client for testing.
+    """
+
     def __init__(
         self,
         *,
@@ -70,13 +74,17 @@ class _FakeHistoryClient:
 
 
 class TestLogFatalErrorArtifact:
+    """
+    Tests for fatal error artifact logging.
+    """
+
     def test_logs_error_text_artifact_when_run_is_active(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         logged_payloads: list[tuple[str, str]] = []
 
-        monkeypatch.setattr(mlflow, 'active_run', lambda: object())
+        monkeypatch.setattr(mlflow, 'active_run', object)
         monkeypatch.setattr(
             mlflow,
             'log_text',
@@ -106,7 +114,7 @@ class TestLogFatalErrorArtifact:
 
         monkeypatch.setattr(mlflow, 'active_run', lambda: None)
 
-        def _log_text(_text: str, _artifact_file: str) -> None:
+        def _log_text(text: str, artifact_file: str) -> None:
             nonlocal called
             called = True
 
@@ -124,7 +132,7 @@ class TestLogFatalErrorArtifact:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(mlflow, 'active_run', lambda: object())
+        monkeypatch.setattr(mlflow, 'active_run', object)
 
         def _raise(*args, **kwargs) -> None:
             del args, kwargs
@@ -140,6 +148,10 @@ class TestLogFatalErrorArtifact:
 
 
 class TestLogFatalErrorContext:
+    """
+    Tests for fatal error logging context.
+    """
+
     def test_logs_and_reraises_when_exception_occurs(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -164,6 +176,10 @@ class TestLogFatalErrorContext:
 
 
 class TestGitCommitHelpers:
+    """
+    Tests for Git commit helper utilities.
+    """
+
     def test_extract_mlflow_run_git_commit_returns_tag_when_present(self) -> None:
         run = _make_run(
             metrics={},
@@ -195,6 +211,10 @@ class TestGitCommitHelpers:
 
 
 class TestBuildMlflowRunColumns:
+    """
+    Tests for MLflow run column building.
+    """
+
     def test_includes_git_commit_and_reserves_column_name(self) -> None:
         run = _make_run(
             metrics={
@@ -222,8 +242,7 @@ class TestBuildMlflowRunColumns:
                 'run.eval.forgetting.exp000': 0.22,
                 'run.eval.transfer.stream': 0.44,
                 RUN_ACC_FINAL_AVG_BASE: 0.77,
-            }
-        )
+            })
         client = _FakeHistoryClient(
             histories={
                 f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
@@ -237,8 +256,7 @@ class TestBuildMlflowRunColumns:
                     SimpleNamespace(step=20, value=0.33),
                     SimpleNamespace(step=30, value=0.44),
                 ],
-            }
-        )
+            })
 
         columns = build_mlflow_run_columns(
             run=run,
@@ -254,17 +272,13 @@ class TestBuildMlflowRunColumns:
         assert columns[RUN_ACC_FINAL_AVG_BASE] == pytest.approx(0.77)
 
     def test_raises_when_ref_accuracy_history_is_missing(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                'run.eval.forgetting.exp000': 0.22,
-            }
-        )
-        client = _FakeHistoryClient(
-            histories={
-                'run.eval.forgetting.exp000': [SimpleNamespace(step=10, value=0.22)],
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            'run.eval.forgetting.exp000': 0.22,
+        })
+        client = _FakeHistoryClient(histories={
+            'run.eval.forgetting.exp000': [SimpleNamespace(step=10, value=0.22)],
+        })
 
         with pytest.raises(ValueError, match='Missing required MLflow metric history'):
             build_mlflow_run_columns(
@@ -273,12 +287,10 @@ class TestBuildMlflowRunColumns:
             )
 
     def test_raises_when_ref_accuracy_history_is_ambiguous(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                'run.eval.forgetting.exp000': 0.22,
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            'run.eval.forgetting.exp000': 0.22,
+        })
         client = _FakeHistoryClient(
             histories={
                 f'{RUN_ACC_REF}.exp000.base': [
@@ -286,8 +298,7 @@ class TestBuildMlflowRunColumns:
                     SimpleNamespace(step=20, value=0.92),
                 ],
                 'run.eval.forgetting.exp000': [SimpleNamespace(step=10, value=0.22)],
-            }
-        )
+            })
 
         with pytest.raises(ValueError, match='exactly one checkpoint step'):
             build_mlflow_run_columns(
@@ -296,17 +307,13 @@ class TestBuildMlflowRunColumns:
             )
 
     def test_raises_when_history_bearing_metric_history_is_missing(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                'run.eval.forgetting.exp000': 0.22,
-            }
-        )
-        client = _FakeHistoryClient(
-            histories={
-                f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            'run.eval.forgetting.exp000': 0.22,
+        })
+        client = _FakeHistoryClient(histories={
+            f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
+        })
 
         with pytest.raises(ValueError, match='Missing required MLflow metric history'):
             build_mlflow_run_columns(
@@ -315,13 +322,11 @@ class TestBuildMlflowRunColumns:
             )
 
     def test_skips_unmapped_bootstrap_step_zero_when_other_steps_are_mapped(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                f'{RUN_ACC_REF}.exp001.base': 0.82,
-                'run.eval.forgetting.exp000': 0.22,
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            f'{RUN_ACC_REF}.exp001.base': 0.82,
+            'run.eval.forgetting.exp000': 0.22,
+        })
         client = _FakeHistoryClient(
             histories={
                 f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
@@ -330,8 +335,7 @@ class TestBuildMlflowRunColumns:
                     SimpleNamespace(step=0, value=0.05),
                     SimpleNamespace(step=20, value=0.22),
                 ],
-            }
-        )
+            })
 
         columns = build_mlflow_run_columns(
             run=run,
@@ -343,18 +347,15 @@ class TestBuildMlflowRunColumns:
         assert 'run.eval.forgetting.exp000' not in columns
 
     def test_skips_unmapped_bootstrap_step_zero_when_it_is_the_only_history_point(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                'run.eval.forgetting.exp000': 0.22,
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            'run.eval.forgetting.exp000': 0.22,
+        })
         client = _FakeHistoryClient(
             histories={
                 f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
                 'run.eval.forgetting.exp000': [SimpleNamespace(step=0, value=0.22)],
-            }
-        )
+            })
 
         columns = build_mlflow_run_columns(
             run=run,
@@ -365,13 +366,11 @@ class TestBuildMlflowRunColumns:
         assert 'run.eval.forgetting.exp000' not in columns
 
     def test_skips_unmapped_bootstrap_step_zero_for_stream_forgetting(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                f'{RUN_ACC_REF}.exp001.base': 0.82,
-                'run.eval.forgetting.stream': 0.18,
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            f'{RUN_ACC_REF}.exp001.base': 0.82,
+            'run.eval.forgetting.stream': 0.18,
+        })
         client = _FakeHistoryClient(
             histories={
                 f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
@@ -381,8 +380,7 @@ class TestBuildMlflowRunColumns:
                     SimpleNamespace(step=10, value=0.07),
                     SimpleNamespace(step=20, value=0.18),
                 ],
-            }
-        )
+            })
 
         columns = build_mlflow_run_columns(
             run=run,
@@ -394,20 +392,17 @@ class TestBuildMlflowRunColumns:
         assert 'run.eval.forgetting.stream' not in columns
 
     def test_raises_when_history_bearing_metric_step_is_unmapped(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                f'{RUN_ACC_REF}.exp001.base': 0.82,
-                'run.eval.forgetting.exp000': 0.22,
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            f'{RUN_ACC_REF}.exp001.base': 0.82,
+            'run.eval.forgetting.exp000': 0.22,
+        })
         client = _FakeHistoryClient(
             histories={
                 f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],
                 f'{RUN_ACC_REF}.exp001.base': [SimpleNamespace(step=20, value=0.82)],
                 'run.eval.forgetting.exp000': [SimpleNamespace(step=30, value=0.22)],
-            }
-        )
+            })
 
         with pytest.raises(ValueError, match='no matching checkpoint identity'):
             build_mlflow_run_columns(
@@ -416,12 +411,10 @@ class TestBuildMlflowRunColumns:
             )
 
     def test_raises_when_history_lookup_fails(self) -> None:
-        run = _make_run(
-            metrics={
-                f'{RUN_ACC_REF}.exp000.base': 0.91,
-                'run.eval.forgetting.exp000': 0.22,
-            }
-        )
+        run = _make_run(metrics={
+            f'{RUN_ACC_REF}.exp000.base': 0.91,
+            'run.eval.forgetting.exp000': 0.22,
+        })
         client = _FakeHistoryClient(
             histories={
                 f'{RUN_ACC_REF}.exp000.base': [SimpleNamespace(step=10, value=0.91)],

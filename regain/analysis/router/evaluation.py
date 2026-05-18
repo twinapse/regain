@@ -474,7 +474,7 @@ def evaluate_policies(
                     feature_rows=feature_rows,
                     test_indices=list(fold.test_indices),
                 )
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 manifest_warnings.append({
                     'code': 'policy_evaluation_failed',
                     'message': f'Policy `{policy.name}` failed on fold `{fold.fold_id}`: {exc}',

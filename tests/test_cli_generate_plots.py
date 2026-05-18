@@ -6,10 +6,11 @@ import json
 from pathlib import Path
 import sys
 
+import matplotlib.pyplot as plt
 import pytest
 
-import regain.analysis.plotting as plotting_module
 from regain.analysis.plotting import PlotAnalysisResult
+import regain.analysis.plotting as plotting_module
 from regain.cli._utils.output_helpers import CliFailure
 import regain.cli.generate_plots as generate_plots_cli
 
@@ -590,26 +591,24 @@ def test_generate_plots_rejects_removed_perf_key_flag() -> None:
     parser.add_argument('--overwrite', action='store_true')
 
     with pytest.raises(SystemExit):
-        parser.parse_args(
-            [
-                '--experiments',
-                'exp_1',
-                '--analysis-dir',
-                '/tmp/analysis',
-                '--perf-key',
-                'analysis.repair.rho.avg',
-            ]
-        )
+        parser.parse_args([
+            '--experiments',
+            'exp_1',
+            '--analysis-dir',
+            '/tmp/analysis',
+            '--perf-key',
+            'analysis.repair.rho.avg',
+        ])
 
 
-def test_plot_analysis_outputs_uses_action_cost_for_utility_plot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import matplotlib.pyplot as plt
-
+def test_plot_analysis_outputs_uses_action_cost_for_utility_plot(monkeypatch: pytest.MonkeyPatch,) -> None:
     figures: list[object] = []
 
     class _FakeAxis:
+        """
+        Fake matplotlib axis for testing.
+        """
+
         def __init__(self) -> None:
             self.xlabel: str | None = None
             self.ylabel: str | None = None
@@ -642,6 +641,10 @@ def test_plot_analysis_outputs_uses_action_cost_for_utility_plot(
             del args, kwargs
 
     class _FakeFigure:
+        """
+        Fake matplotlib figure for testing.
+        """
+
         def __init__(self) -> None:
             self.axis = _FakeAxis()
             figures.append(self)
@@ -652,7 +655,7 @@ def test_plot_analysis_outputs_uses_action_cost_for_utility_plot(
         def savefig(self, *args, **kwargs) -> None:
             del args, kwargs
 
-    monkeypatch.setattr(plt, 'figure', lambda: _FakeFigure())
+    monkeypatch.setattr(plt, 'figure', _FakeFigure)
     monkeypatch.setattr(plt, 'close', lambda *args, **kwargs: None)
     monkeypatch.setattr(plt, 'show', lambda: None)
 
@@ -701,17 +704,10 @@ def test_plot_analysis_outputs_uses_action_cost_for_utility_plot(
         mode='none',
     )
 
-    utility_axes = [
-        figure.axis
-        for figure in figures
-        if figure.axis.title == 'Utility vs cost'
-    ]
+    utility_axes = [figure.axis for figure in figures if figure.axis.title == 'Utility vs cost']
     assert len(utility_axes) == 1
     utility_axis = utility_axes[0]
     assert utility_axis.xlabel == 'action_repair_budget_fraction'
-    no_op_call = next(
-        call for call in utility_axis.scatter_calls
-        if call['label'] == 'no-op'
-    )
+    no_op_call = next(call for call in utility_axis.scatter_calls if call['label'] == 'no-op')
     assert no_op_call['xs'] == [0.0]
     assert {call['label'] for call in utility_axis.scatter_calls} == {'repair_a', 'no-op'}

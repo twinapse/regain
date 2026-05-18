@@ -150,6 +150,9 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
 
 
 class TestResolveActionFamily:
+    """
+    Tests for action family resolution.
+    """
 
     def test_handles_normalized_aliases(self) -> None:
         assert resolve_action_family(action_id='no-op') == 'no_op'
@@ -162,6 +165,9 @@ class TestResolveActionFamily:
 
 
 class TestValidateRouterFeatureSchema:
+    """
+    Tests for router feature schema validation.
+    """
 
     def test_rejects_outcome_columns(self) -> None:
         invalid = validate_router_feature_schema(feature_columns=[
@@ -183,6 +189,9 @@ class TestValidateRouterFeatureSchema:
 
 
 class TestWriteRepairRouterOutputs:
+    """
+    Tests for repair router output writing.
+    """
 
     def test_router_features_exclude_outcome_columns(self, tmp_path: Path) -> None:
         rows = [_selection_row(seed=seed, budget=0.5) for seed in (1, 2, 3)]

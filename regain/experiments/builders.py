@@ -60,7 +60,6 @@ _PARAM_CONTROLLER_TRAIN_BATCH_SIZE = 'train_batch_size'
 _PARAM_NAME_REPLAY_BATCH_SIZE_MEM = PARAM_BACKBONE_REPLAY_BATCH_SIZE_MEM.rsplit(NS_SEP, 1)[-1]
 _PARAM_NAME_REPLAY_MEM_SIZE = PARAM_BACKBONE_REPLAY_MEM_SIZE.rsplit(NS_SEP, 1)[-1]
 
-
 ##########################
 # Benchmarks (scenarios) #
 ##########################
@@ -105,9 +104,7 @@ def build_benchmark(
         ValueError: If the scenario name is empty or not in the registered builder map.
         RuntimeError: If the scenario builder fails to create a valid NCScenario.
     """
-    scenario_builder: ScenarioBuilder = get_scenario_builder(
-        scenario=experiment_config.scenario
-    )
+    scenario_builder: ScenarioBuilder = get_scenario_builder(scenario=experiment_config.scenario)
     benchmark = scenario_builder(
         num_experiences=experiment_config.num_experiences,
         return_task_id=False,
@@ -148,38 +145,26 @@ def build_backbone(
     if not inspect.isclass(model_cls):
         raise TypeError(f'Backbone symbol is not a class: {backbone_path}')
 
-    constructor_kwargs: dict[str, object] = (
-        dict(backbone_kwargs)
-        if backbone_kwargs is not None
-        else {}
-    )
+    constructor_kwargs: dict[str, object] = (dict(backbone_kwargs) if backbone_kwargs is not None else {})
     model_cls_sig = inspect.signature(model_cls.__init__)
     if 'n_classes' in model_cls_sig.parameters:
         if 'n_classes' in constructor_kwargs or PARAM_NUM_CLASSES in constructor_kwargs:
-            raise ValueError(
-                f'Backbone `{backbone_path}` constructor kwargs must not include '
-                '`n_classes` or `num_classes`.'
-            )
+            raise ValueError(f'Backbone `{backbone_path}` constructor kwargs must not include '
+                             '`n_classes` or `num_classes`.')
         constructor_kwargs['n_classes'] = int(num_classes)
     elif PARAM_NUM_CLASSES in model_cls_sig.parameters:
         if 'n_classes' in constructor_kwargs or PARAM_NUM_CLASSES in constructor_kwargs:
-            raise ValueError(
-                f'Backbone `{backbone_path}` constructor kwargs must not include '
-                '`n_classes` or `num_classes`.'
-            )
+            raise ValueError(f'Backbone `{backbone_path}` constructor kwargs must not include '
+                             '`n_classes` or `num_classes`.')
         constructor_kwargs[PARAM_NUM_CLASSES] = int(num_classes)
     else:
-        raise ValueError(
-            f'Backbone `{backbone_path}` must accept either `n_classes` or '
-            '`num_classes`.'
-        )
+        raise ValueError(f'Backbone `{backbone_path}` must accept either `n_classes` or '
+                         '`num_classes`.')
     try:
         backbone = model_cls(**constructor_kwargs)
     except TypeError as exc:
-        raise ValueError(
-            f'Backbone `{backbone_path}` could not be initialized with kwargs: '
-            f'{sorted(constructor_kwargs.keys())}.'
-        ) from exc
+        raise ValueError(f'Backbone `{backbone_path}` could not be initialized with kwargs: '
+                         f'{sorted(constructor_kwargs.keys())}.') from exc
 
     if not isinstance(backbone, torch.nn.Module):
         raise TypeError(f'Backbone `{backbone_path}` did not produce a torch.nn.Module.')
@@ -227,22 +212,13 @@ def make_strategy(
         optimizer=optimizer,
         criterion=criterion,
         train_mb_size=training_config.batch_size,
-        train_epochs=(
-            int(train_epochs_override)
-            if train_epochs_override is not None
-            else training_config.num_epochs
-        ),
+        train_epochs=(int(train_epochs_override) if train_epochs_override is not None else training_config.num_epochs),
         eval_mb_size=experiment_config.evaluation.batch_size,
         device=experiment_config.device,
         plugins=list(plugins),
         evaluator=evaluator,
-        eval_every=(
-            int(eval_every_override)
-            if eval_every_override is not None
-            else resolve_avalanche_eval_every(
-                avalanche_schedule=experiment_config.evaluation.avalanche_schedule
-            )
-        ),
+        eval_every=(int(eval_every_override) if eval_every_override is not None else resolve_avalanche_eval_every(
+            avalanche_schedule=experiment_config.evaluation.avalanche_schedule)),
     )
     common_kwarg_names = set(common_kwargs)
 
@@ -253,26 +229,18 @@ def make_strategy(
     if strategy_config.name == 'naive':
         reserved_overlap = common_kwarg_names.intersection(strategy_kwargs)
         if reserved_overlap:
-            raise ValueError(
-                f'Strategy kwargs should not override {sorted(reserved_overlap)}.'
-            )
+            raise ValueError(f'Strategy kwargs should not override {sorted(reserved_overlap)}.')
         return Naive(**common_kwargs, **strategy_kwargs)
 
     if strategy_config.name == 'replay':
         reserved_overlap = common_kwarg_names.intersection(strategy_kwargs)
         if reserved_overlap:
-            raise ValueError(
-                f'Strategy kwargs should not override {sorted(reserved_overlap)}.'
-            )
+            raise ValueError(f'Strategy kwargs should not override {sorted(reserved_overlap)}.')
 
         replay_batch_size = strategy_kwargs.pop(_PARAM_NAME_REPLAY_BATCH_SIZE_MEM, None)
-        if (
-            _PARAM_NAME_REPLAY_MEM_SIZE in strategy_kwargs
-            and strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE] is not None
-        ):
-            strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE] = int(
-                strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE]
-            )
+        if (_PARAM_NAME_REPLAY_MEM_SIZE in strategy_kwargs and
+                strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE] is not None):
+            strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE] = int(strategy_kwargs[_PARAM_NAME_REPLAY_MEM_SIZE])
         replay_kwargs = dict(**common_kwargs, **strategy_kwargs)
         strategy = Replay(**replay_kwargs)
 
@@ -281,20 +249,14 @@ def make_strategy(
             raise ValueError('Replay strategy did not expose any plugins.')
 
         replay_plugin = next(
-            (
-                plugin
-                for plugin in replay_plugins
-                if plugin.__class__.__name__ == 'ReplayPlugin'
-            ),
+            (plugin for plugin in replay_plugins if plugin.__class__.__name__ == 'ReplayPlugin'),
             None,
         )
         if replay_plugin is None or not hasattr(
-            replay_plugin,
-            _PARAM_NAME_REPLAY_BATCH_SIZE_MEM,
+                replay_plugin,
+                _PARAM_NAME_REPLAY_BATCH_SIZE_MEM,
         ):
-            raise ValueError(
-                'Replay strategy did not expose a ReplayPlugin with batch_size_mem.'
-            )
+            raise ValueError('Replay strategy did not expose a ReplayPlugin with batch_size_mem.')
 
         if replay_batch_size is None:
             setattr(replay_plugin, _PARAM_NAME_REPLAY_BATCH_SIZE_MEM, None)
@@ -307,13 +269,9 @@ def make_strategy(
         return strategy
 
     if strategy_config.name == 'bic':
-        raise ValueError(
-            'BiC is implemented as a post-hoc repair controller in this project'
-        )
+        raise ValueError('BiC is implemented as a post-hoc repair controller in this project')
     if strategy_config.name == 'il2m':
-        raise ValueError(
-            'IL2M is implemented as a post-hoc repair controller in this project'
-        )
+        raise ValueError('IL2M is implemented as a post-hoc repair controller in this project')
     raise ValueError(f'Unsupported strategy: {strategy_config.name}')
 
 
@@ -350,8 +308,10 @@ def build_optimizer(
             'weight_decay': 5e-4,
         }
         optimizer_kwargs = {
-            kwarg: float(value)
-            for kwarg, value in {**default_kwargs, **optimizer_kwargs_payload}.items()
+            kwarg: float(value) for kwarg, value in {
+                **default_kwargs,
+                **optimizer_kwargs_payload
+            }.items()
         }
         optimizer = SGD(model.parameters(), **optimizer_kwargs)
         return optimizer, optimizer_kwargs
@@ -365,10 +325,8 @@ def build_optimizer(
         merged_kwargs = {**default_kwargs, **optimizer_kwargs_payload}
         betas_raw = merged_kwargs.get('betas', [0.9, 0.999])
         if isinstance(betas_raw, str):
-            raise ValueError(
-                'AdamW optimizer `betas` must be provided as a YAML sequence like '
-                '`[0.9, 0.999]`.'
-            )
+            raise ValueError('AdamW optimizer `betas` must be provided as a YAML sequence like '
+                             '`[0.9, 0.999]`.')
         if not isinstance(betas_raw, (list, tuple)):
             raise ValueError('AdamW optimizer `betas` must be a sequence of two floats.')
         betas_values = list(betas_raw)
@@ -493,10 +451,7 @@ def build_controller(
     for param_name, param_value in injectable_kwargs.items():
         if param_value is None:
             continue
-        if (
-            param_name in controller_cls_sig.parameters
-            and param_name not in controller_kwargs
-        ):
+        if (param_name in controller_cls_sig.parameters and param_name not in controller_kwargs):
             controller_kwargs[param_name] = param_value
 
     forbidden_kwargs = (
@@ -507,10 +462,8 @@ def build_controller(
     )
     found_forbidden_kwargs = [key for key in forbidden_kwargs if key in controller_kwargs]
     if found_forbidden_kwargs:
-        raise ValueError(
-            f'Controller `{controller_path}` should not receive the following '
-            f'keyword arguments: {", ".join(found_forbidden_kwargs)}'
-        )
+        raise ValueError(f'Controller `{controller_path}` should not receive the following '
+                         f'keyword arguments: {", ".join(found_forbidden_kwargs)}')
 
     controller: Controller = controller_cls(**controller_kwargs)
     if not isinstance(controller, (PreventionController, RepairController)):
@@ -547,10 +500,8 @@ def _validate_controller_replay_requirements(
     if replay_batch_size is not None:
         return
 
-    raise ValueError(
-        f'Controller `{controller_path}` requires a replay-based strategy and replay batch size '
-        '(`training.strategy.kwargs.batch_size_mem`).'
-    )
+    raise ValueError(f'Controller `{controller_path}` requires a replay-based strategy and replay batch size '
+                     '(`training.strategy.kwargs.batch_size_mem`).')
 
 
 def build_controller_plugin(
@@ -587,19 +538,12 @@ def build_controller_plugin(
 
     if isinstance(controller, RepairController):
         if fit_after_experience is None or num_epochs is None or batch_size is None:
-            raise ValueError(
-                'Repair controllers require `fit_after_experience`, `num_epochs`, '
-                'and `batch_size` to be specified.'
-            )
+            raise ValueError('Repair controllers require `fit_after_experience`, `num_epochs`, '
+                             'and `batch_size` to be specified.')
         if debug:
-            if (
-                debug_epochs is None
-                or debug_experiences is None
-            ):
-                raise ValueError(
-                    'Debug controller plugin requires debug_epochs and '
-                    'debug_experiences.'
-                )
+            if (debug_epochs is None or debug_experiences is None):
+                raise ValueError('Debug controller plugin requires debug_epochs and '
+                                 'debug_experiences.')
             return DebugRepairControllerPlugin(
                 controller=controller,
                 fit_after_experience=fit_after_experience,
@@ -619,6 +563,4 @@ def build_controller_plugin(
             seed=seed,
         )
 
-    raise ValueError(
-        f'Unsupported controller plugin type: {type(controller).__name__}.'
-    )
+    raise ValueError(f'Unsupported controller plugin type: {type(controller).__name__}.')

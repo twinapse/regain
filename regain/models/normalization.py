@@ -41,12 +41,12 @@ def replace_batchnorm2d(module: nn.Module, nl: Callable[[nn.BatchNorm2d], nn.Mod
     """
     for attr_str in dir(module):
         target_attr = getattr(module, attr_str, None)
-        if type(target_attr) == nn.BatchNorm2d:
+        if target_attr.__class__ is nn.BatchNorm2d:
             new_bn = nl(target_attr)
             setattr(module, attr_str, new_bn)
 
     for name, child in module.named_children():
-        if type(child) == nn.BatchNorm2d:
+        if child.__class__ is nn.BatchNorm2d:
             new_bn = nl(child)
             setattr(module, name, new_bn)
         replace_batchnorm2d(child, nl)
@@ -71,11 +71,11 @@ class _ContinualNormalization(_BatchNorm):
     """
 
     def __init__(
-        self,
-        target: nn.BatchNorm2d,
-        eps: float = 1e-5,
-        momentum: float = 0.1,
-        affine: bool = True,  # Keep for API consistency
+            self,
+            target: nn.BatchNorm2d,
+            eps: float = 1e-5,
+            momentum: float = 0.1,
+            affine: bool = True,  # Keep for API consistency  # pylint: disable=unused-argument
     ) -> None:
         num_features = int(target.num_features)
         super().__init__(num_features=num_features, eps=eps, momentum=momentum, affine=True)
@@ -85,27 +85,36 @@ class _ContinualNormalization(_BatchNorm):
         self.weight = target.weight
         self.bias = target.bias
 
-        self.N = num_features
-        self.setG()
+        # `num_features_internal` stores the wrapped BN channel count for CN bookkeeping.
+        self.num_features_internal = num_features
+        # `set_num_groups` is the descriptive replacement for original notation `setG`.
+        # Implementations set `self.num_groups`, which is consumed by GroupNorm in `forward`.
+        self.set_num_groups()
 
-    def setG(self) -> None:
+    def set_num_groups(self) -> None:
         """Set the number of groups for the GroupNorm stage."""
         raise NotImplementedError
 
-    def _check_input_dim(self, input: torch.Tensor) -> None:
+    def _check_input_dim(
+            self,
+            input: torch.Tensor,  # pylint: disable=redefined-builtin
+    ) -> None:
         del input
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(
+            self,
+            input: torch.Tensor,  # pylint: disable=redefined-builtin
+    ) -> torch.Tensor:
         """
         Apply CN: GroupNorm without affine, followed by BatchNorm with affine.
 
         Args:
-            input: Feature map shaped `(B, C, H, W)`.
+            input (torch.Tensor): Feature map shaped `(B, C, H, W)`.
 
         Returns:
-            Normalized feature map.
+            torch.Tensor: Normalized feature map.
         """
-        out_gn = F.group_norm(input, self.G, None, None, self.eps)
+        out_gn = F.group_norm(input, self.num_groups, None, None, self.eps)
         out = F.batch_norm(
             out_gn,
             self.running_mean,
@@ -122,36 +131,36 @@ class _ContinualNormalization(_BatchNorm):
 class ContinualNormalization4(_ContinualNormalization):
     """CN variant with 4 GroupNorm groups."""
 
-    def setG(self) -> None:
-        self.G = 4
+    def set_num_groups(self) -> None:
+        self.num_groups = 4
 
 
 class ContinualNormalization8(_ContinualNormalization):
     """CN variant with 8 GroupNorm groups."""
 
-    def setG(self) -> None:
-        self.G = 8
+    def set_num_groups(self) -> None:
+        self.num_groups = 8
 
 
 class ContinualNormalization16(_ContinualNormalization):
     """CN variant with 16 GroupNorm groups."""
 
-    def setG(self) -> None:
-        self.G = 16
+    def set_num_groups(self) -> None:
+        self.num_groups = 16
 
 
 class ContinualNormalization32(_ContinualNormalization):
     """CN variant with 32 GroupNorm groups."""
 
-    def setG(self) -> None:
-        self.G = 32
+    def set_num_groups(self) -> None:
+        self.num_groups = 32
 
 
 class ContinualNormalization64(_ContinualNormalization):
     """CN variant with 64 GroupNorm groups."""
 
-    def setG(self) -> None:
-        self.G = 64
+    def set_num_groups(self) -> None:
+        self.num_groups = 64
 
 
 ############################################
@@ -166,8 +175,9 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
     Notes:
         - This layer assumes training minibatches are formed as:
           [current-task samples | replay/memory samples] with a fixed, integer batch ratio.
-        - B_c is the expected current-task minibatch size; B_p is the expected replay minibatch size.
-          The ratio is derived as B_c // B_p and must satisfy B_c == ratio * B_p.
+        - `current_batch_size` is the expected current-task minibatch size; `replay_batch_size` is the
+          expected replay minibatch size. The ratio is derived as `current_batch_size // replay_batch_size`
+          and must satisfy `current_batch_size == ratio * replay_batch_size`.
         - Call `set_number_of_task(t)` (0-indexed) at the beginning of each task/experience.
     """
 
@@ -179,8 +189,8 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
         affine: bool = True,
         track_running_stats: bool = True,
         batch_ratio: int | None = None,
-        B_c: int = 48,
-        B_p: int = 16,
+        current_batch_size: int = 48,
+        replay_batch_size: int = 16,
     ) -> None:
         super().__init__(
             num_features=num_features,
@@ -190,14 +200,17 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
             track_running_stats=track_running_stats,
         )
 
-        self.B_c = int(B_c)
-        self.B_p = int(B_p)
-        if self.B_c <= 0 or self.B_p <= 0:
-            raise ValueError('B_c and B_p must be positive integers.')
+        # The forward pass assumes every training minibatch follows the [current-task | replay] split.
+        # `current_batch_size` is the expected current-task minibatch size (`B_c` in TBBN original notation).
+        self.current_batch_size = int(current_batch_size)
+        # `replay_batch_size` is the expected replay minibatch size (`B_p` in TBBN original notation).
+        self.replay_batch_size = int(replay_batch_size)
+        if self.current_batch_size <= 0 or self.replay_batch_size <= 0:
+            raise ValueError('current_batch_size and replay_batch_size must be positive integers.')
 
-        implied_ratio = self.B_c // self.B_p
-        if implied_ratio * self.B_p != self.B_c:
-            raise ValueError('B_c must be an integer multiple of B_p for TBBN.')
+        implied_ratio = self.current_batch_size // self.replay_batch_size
+        if implied_ratio * self.replay_batch_size != self.current_batch_size:
+            raise ValueError('current_batch_size must be an integer multiple of replay_batch_size for TBBN.')
 
         if batch_ratio is None:
             self.batch_ratio = implied_ratio
@@ -206,33 +219,36 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
             if self.batch_ratio <= 0:
                 raise ValueError('batch_ratio must be a positive integer.')
             if self.batch_ratio != implied_ratio:
-                raise ValueError(
-                    f'Inconsistent batch partition: batch_ratio={self.batch_ratio}, '
-                    f'but B_c={self.B_c} and B_p={self.B_p} imply {implied_ratio}.'
-                )
+                raise ValueError(f'Inconsistent batch partition: batch_ratio={self.batch_ratio}, '
+                                 f'but current_batch_size={self.current_batch_size} and '
+                                 f'replay_batch_size={self.replay_batch_size} imply {implied_ratio}.')
 
         # The official code expects this to be set via `set_number_of_task`.
         # We default to 0 so the layer is usable even if the hook is missed.
-        self.T: int = 0
+        # `task_index` is the 0-based experience id (`T` in TBBN original notation).
+        self.task_index: int = 0
 
-    def set_number_of_task(self, T: int) -> None:
+    def set_number_of_task(self, task_index: int) -> None:
         """
         Set the task number (0-indexed).
 
         Args:
-            T: Task index (0-indexed).
+            task_index: Task index (0-indexed).
         """
-        self.T = int(T)
+        self.task_index = int(task_index)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(
+            self,
+            input: torch.Tensor,  # pylint: disable=redefined-builtin
+    ) -> torch.Tensor:
         """
         Forward pass for TBBN.
 
         Args:
-            input: Feature map shaped `(B, C, H, W)`.
+            input (torch.Tensor): Feature map shaped `(B, C, H, W)`.
 
         Returns:
-            Normalized feature map shaped `(B, C, H, W)`.
+            torch.Tensor: Normalized feature map shaped `(B, C, H, W)`.
         """
         self._check_input_dim(input)
 
@@ -246,15 +262,15 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
                 else:
                     exponential_average_factor = float(self.momentum)
 
-        # If T == 0: "general BN" branch (as in official code).
-        if self.T == 0:
+        # If task_index == 0: "general BN" branch (as in official code).
+        if self.task_index == 0:
             splits = 1
             if self.training:
                 running_mean_split = self.running_mean.repeat(splits)
                 running_var_split = self.running_var.repeat(splits)
 
-                N, C, H, W = input.shape
-                reshaped = input.view(-1, C * splits, H, W)
+                batch_size, num_channels, height, width = input.shape
+                reshaped = input.view(-1, num_channels * splits, height, width)
 
                 mean = reshaped.mean([0, 2, 3])
                 var = reshaped.var([0, 2, 3], unbiased=False)
@@ -262,28 +278,21 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
                 n = reshaped.numel() / reshaped.size(1)
 
                 with torch.no_grad():
-                    running_mean_split = (
-                        exponential_average_factor * mean + (1 - exponential_average_factor) * running_mean_split
-                    )
-                    running_var_split = (
-                        exponential_average_factor * var * n / (n - 1)
-                        + (1 - exponential_average_factor) * running_var_split
-                    )
+                    running_mean_split = (exponential_average_factor * mean +
+                                          (1 - exponential_average_factor) * running_mean_split)
+                    running_var_split = (exponential_average_factor * var * n / (n - 1) +
+                                         (1 - exponential_average_factor) * running_var_split)
 
-                reshaped = (reshaped - mean[None, :, None, None]) / torch.sqrt(
-                    var[None, :, None, None] + self.eps
-                )
+                reshaped = (reshaped - mean[None, :, None, None]) / torch.sqrt(var[None, :, None, None] + self.eps)
                 if self.affine:
-                    reshaped = (
-                        reshaped * self.weight.repeat(splits)[None, :, None, None]
-                        + self.bias.repeat(splits)[None, :, None, None]
-                    )
+                    reshaped = (reshaped * self.weight.repeat(splits)[None, :, None, None] +
+                                self.bias.repeat(splits)[None, :, None, None])
 
-                out = reshaped.view(N, C, H, W)
+                out = reshaped.view(batch_size, num_channels, height, width)
 
                 with torch.no_grad():
-                    self.running_mean.copy_(running_mean_split.view(splits, C).mean(dim=0))
-                    self.running_var.copy_(running_var_split.view(splits, C).mean(dim=0))
+                    self.running_mean.copy_(running_mean_split.view(splits, num_channels).mean(dim=0))
+                    self.running_var.copy_(running_var_split.view(splits, num_channels).mean(dim=0))
 
                 return out
 
@@ -295,24 +304,21 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
             return out
 
         if self.training:
-            N, C, H, W = input.shape
-            mem_count = self.B_p
-            curr_count = N - mem_count
+            batch_size, num_channels, height, width = input.shape
+            mem_count = self.replay_batch_size
+            curr_count = batch_size - mem_count
 
             if mem_count <= 0 or curr_count <= 0:
-                raise ValueError(
-                    f'TaskBalancedBatchNorm expects minibatches arranged as [current | replay] '
-                    f'with replay size B_p={self.B_p}, got batch size {N}.'
-                )
+                raise ValueError(f'TaskBalancedBatchNorm expects minibatches arranged as [current | replay] '
+                                 f'with replay_batch_size={self.replay_batch_size}, got batch size {batch_size}.')
 
             mem_batch = input[curr_count:, :, :, :]
             if mem_batch.shape[0] != mem_count:
-                raise ValueError(
-                    f'TaskBalancedBatchNorm expects minibatches arranged as [current | replay] '
-                    f'with replay size B_p={self.B_p}, got replay slice of size {mem_batch.shape[0]}.'
-                )
+                raise ValueError(f'TaskBalancedBatchNorm expects minibatches arranged as [current | replay] '
+                                 f'with replay_batch_size={self.replay_batch_size}, '
+                                 f'got replay slice of size {mem_batch.shape[0]}.')
 
-            r = self.batch_ratio * self.T
+            r = self.batch_ratio * self.task_index
             splits = max(1, math.gcd(int(curr_count), int(r)))
 
             running_mean_split = self.running_mean.repeat(splits)
@@ -321,7 +327,7 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
             curr_batch = input[:curr_count, :, :, :]
             mem_batch = input[curr_count:, :, :, :]
 
-            curr_batch = curr_batch.view(-1, C * splits, H, W)
+            curr_batch = curr_batch.view(-1, num_channels * splits, height, width)
             mem_batch_repeat = mem_batch.repeat(1, splits, 1, 1)
 
             concat_batch = torch.cat([curr_batch, mem_batch_repeat], dim=0)
@@ -332,29 +338,23 @@ class TaskBalancedBatchNorm(nn.BatchNorm2d):
             n = concat_batch.numel() / concat_batch.size(1)
 
             with torch.no_grad():
-                running_mean_split = (
-                    exponential_average_factor * repeat_mean + (1 - exponential_average_factor) * running_mean_split
-                )
-                running_var_split = (
-                    exponential_average_factor * repeat_var * n / (n - 1)
-                    + (1 - exponential_average_factor) * running_var_split
-                )
+                running_mean_split = (exponential_average_factor * repeat_mean +
+                                      (1 - exponential_average_factor) * running_mean_split)
+                running_var_split = (exponential_average_factor * repeat_var * n / (n - 1) +
+                                     (1 - exponential_average_factor) * running_var_split)
 
-                self.running_mean.copy_(running_mean_split.view(splits, C).mean(dim=0))
-                self.running_var.copy_(running_var_split.view(splits, C).mean(dim=0))
+                self.running_mean.copy_(running_mean_split.view(splits, num_channels).mean(dim=0))
+                self.running_var.copy_(running_var_split.view(splits, num_channels).mean(dim=0))
 
-            concat_batch = (concat_batch - repeat_mean[None, :, None, None]) / torch.sqrt(
-                repeat_var[None, :, None, None] + self.eps
-            )
+            concat_batch = (concat_batch -
+                            repeat_mean[None, :, None, None]) / torch.sqrt(repeat_var[None, :, None, None] + self.eps)
             if self.affine:
-                concat_batch = (
-                    concat_batch * self.weight.repeat(splits)[None, :, None, None]
-                    + self.bias.repeat(splits)[None, :, None, None]
-                )
+                concat_batch = (concat_batch * self.weight.repeat(splits)[None, :, None, None] +
+                                self.bias.repeat(splits)[None, :, None, None])
 
-            reshaped_curr_batch = concat_batch[: curr_batch.shape[0]].view(-1, C, H, W)
+            reshaped_curr_batch = concat_batch[:curr_batch.shape[0]].view(-1, num_channels, height, width)
             reshaped_mem_batch = torch.mean(
-                concat_batch[curr_batch.shape[0] :].view(-1, splits, C, H, W),
+                concat_batch[curr_batch.shape[0]:].view(-1, splits, num_channels, height, width),
                 dim=1,
             )
 

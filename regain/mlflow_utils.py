@@ -68,12 +68,9 @@ _HISTORY_BEARING_EVAL_METRIC_PREFIXES = (
     f'{NAMESPACE_EVAL}{NS_SEP}forgetting{NS_SEP}',
     f'{NAMESPACE_EVAL}{NS_SEP}transfer{NS_SEP}',
 )
-_REF_METRIC_RE = re.compile(
-    rf'^{re.escape(RUN_ACC_REF)}'
-    rf'{_NS_SEP_ESCAPED}{re.escape(EXPERIENCE_KEY_PREFIX)}(?P<idx>\d+)'
-    rf'{_NS_SEP_ESCAPED}base$'
-)
-
+_REF_METRIC_RE = re.compile(rf'^{re.escape(RUN_ACC_REF)}'
+                            rf'{_NS_SEP_ESCAPED}{re.escape(EXPERIENCE_KEY_PREFIX)}(?P<idx>\d+)'
+                            rf'{_NS_SEP_ESCAPED}base$')
 
 ############################
 # Metric logging utilities #
@@ -116,12 +113,13 @@ def to_scalar_metric_value(value: Any) -> float | None:
             if isinstance(item_value, (int, float)) and not isinstance(item_value, bool):
                 return float(item_value)
             return float(item_value)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
 
 ##########################
 # URI/path normalization #
@@ -281,11 +279,10 @@ def ensure_experiment(
     if normalized_artifact_location is not None:
         existing_location = resolve_artifact_location(artifact_location=existing.artifact_location)
         if existing_location is not None and existing_location != normalized_artifact_location:
-            raise ValueError(
-                'MLflow experiment already exists with a different artifact location. '
-                f'Experiment={experiment_name}, existing={existing_location}, requested={normalized_artifact_location}. '
-                'Use a new experiment name or delete the existing experiment to change artifact storage.'
-            )
+            raise ValueError('MLflow experiment already exists with a different artifact location. '
+                             f'Experiment={experiment_name}, existing={existing_location}, '
+                             f'requested={normalized_artifact_location}. '
+                             'Use a new experiment name or delete the existing experiment to change artifact storage.')
 
     return str(existing.experiment_id)
 
@@ -339,17 +336,15 @@ def _log_fatal_error_artifact(
     if mlflow.active_run() is None:
         return
     timestamp_utc = datetime.now(timezone.utc).isoformat()
-    payload = (
-        f'timestamp_utc: {timestamp_utc}\n'
-        f'run_name: {run_name}\n'
-        f'exception_type: {type(exc).__name__}\n'
-        f'exception_message: {exc}\n'
-        'traceback:\n'
-        f'{traceback_text.rstrip()}\n'
-    )
+    payload = (f'timestamp_utc: {timestamp_utc}\n'
+               f'run_name: {run_name}\n'
+               f'exception_type: {type(exc).__name__}\n'
+               f'exception_message: {exc}\n'
+               'traceback:\n'
+               f'{traceback_text.rstrip()}\n')
     try:
         mlflow.log_text(payload, MLFLOW_ARTIFACT_ERROR_FILE)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         return
 
 
@@ -401,6 +396,7 @@ def resolve_experiment_id(
     Raises:
         ValueError: If the experiment cannot be resolved.
     """
+
     def _try_name() -> str | None:
         exp = client.get_experiment_by_name(experiment)
         if exp is not None:
@@ -410,7 +406,7 @@ def resolve_experiment_id(
     def _try_id() -> str | None:
         try:
             exp = client.get_experiment(experiment_id=str(experiment))
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
         if exp is not None:
             return str(exp.experiment_id)
@@ -637,10 +633,7 @@ def _is_history_bearing_eval_metric(*, metric_key: str) -> bool:
         bool: True when the exporter should inject an `after_exp###` token.
     """
     metric_key_str = str(metric_key)
-    return any(
-        metric_key_str.startswith(prefix)
-        for prefix in _HISTORY_BEARING_EVAL_METRIC_PREFIXES
-    )
+    return any(metric_key_str.startswith(prefix) for prefix in _HISTORY_BEARING_EVAL_METRIC_PREFIXES)
 
 
 def _insert_after_experience_token(
@@ -686,24 +679,18 @@ def _require_metric_history(
         ValueError: If the client is missing, the lookup fails, or no history exists.
     """
     if client is None:
-        raise ValueError(
-            'History-bearing eval metric export requires an MLflow client. '
-            f'run_id={run_id}, metric_key={metric_key}'
-        )
+        raise ValueError('History-bearing eval metric export requires an MLflow client. '
+                         f'run_id={run_id}, metric_key={metric_key}')
 
     try:
         history = list(client.get_metric_history(str(run_id), str(metric_key)))
     except Exception as exc:
-        raise ValueError(
-            'Failed to fetch required MLflow metric history. '
-            f'run_id={run_id}, metric_key={metric_key}'
-        ) from exc
+        raise ValueError('Failed to fetch required MLflow metric history. '
+                         f'run_id={run_id}, metric_key={metric_key}') from exc
 
     if not history:
-        raise ValueError(
-            'Missing required MLflow metric history. '
-            f'run_id={run_id}, metric_key={metric_key}'
-        )
+        raise ValueError('Missing required MLflow metric history. '
+                         f'run_id={run_id}, metric_key={metric_key}')
     return history
 
 
@@ -735,20 +722,16 @@ def _ref_checkpoint_step_map(
         ref_metric_pairs.append((int(match.group('idx')), str(metric_key)))
 
     if not ref_metric_pairs:
-        raise ValueError(
-            'Missing required reference accuracy metrics for history-bearing export. '
-            f'run_id={run_id}, required_prefix={RUN_ACC_REF}'
-        )
+        raise ValueError('Missing required reference accuracy metrics for history-bearing export. '
+                         f'run_id={run_id}, required_prefix={RUN_ACC_REF}')
 
     observed_exp_indices = sorted(exp_idx for exp_idx, _ in ref_metric_pairs)
     expected_exp_indices = list(range(observed_exp_indices[-1] + 1))
     if observed_exp_indices != expected_exp_indices:
         missing_exp_indices = sorted(set(expected_exp_indices) - set(observed_exp_indices))
         missing_tokens = ', '.join(f'exp{exp_idx:03d}' for exp_idx in missing_exp_indices)
-        raise ValueError(
-            'Missing required reference accuracy metrics for history-bearing export. '
-            f'run_id={run_id}, missing={missing_tokens}'
-        )
+        raise ValueError('Missing required reference accuracy metrics for history-bearing export. '
+                         f'run_id={run_id}, missing={missing_tokens}')
 
     step_map: dict[int, int] = {}
     for exp_idx, metric_key in sorted(ref_metric_pairs):
@@ -757,22 +740,15 @@ def _ref_checkpoint_step_map(
             run_id=run_id,
             metric_key=metric_key,
         )
-        distinct_steps = {
-            int(getattr(metric, 'step', 0) or 0)
-            for metric in history
-        }
+        distinct_steps = {int(getattr(metric, 'step', 0) or 0) for metric in history}
         if len(distinct_steps) != 1:
-            raise ValueError(
-                'Reference accuracy history must map to exactly one checkpoint step. '
-                f'run_id={run_id}, metric_key={metric_key}, steps={sorted(distinct_steps)}'
-            )
+            raise ValueError('Reference accuracy history must map to exactly one checkpoint step. '
+                             f'run_id={run_id}, metric_key={metric_key}, steps={sorted(distinct_steps)}')
         step = next(iter(distinct_steps))
         if step in step_map:
-            raise ValueError(
-                'Reference accuracy histories map multiple experiences to the same checkpoint step. '
-                f'run_id={run_id}, step={step}, after_exp_existing={step_map[step]:03d}, '
-                f'after_exp_new={exp_idx:03d}'
-            )
+            raise ValueError('Reference accuracy histories map multiple experiences to the same checkpoint step. '
+                             f'run_id={run_id}, step={step}, after_exp_existing={step_map[step]:03d}, '
+                             f'after_exp_new={exp_idx:03d}')
         step_map[step] = exp_idx
     return step_map
 
@@ -823,10 +799,8 @@ def _materialize_metric_history_columns(
             # before training begins — but keep raising on any other unmapped step.
             if step == 0:
                 continue
-            raise ValueError(
-                'History-bearing eval metric uses a step with no matching checkpoint identity. '
-                f'run_id={run_id}, metric_key={metric_key}, step={step}'
-            )
+            raise ValueError('History-bearing eval metric uses a step with no matching checkpoint identity. '
+                             f'run_id={run_id}, metric_key={metric_key}, step={step}')
         flattened_key = _insert_after_experience_token(
             metric_key=str(metric_key),
             after_exp_idx=int(checkpoint_step_map[step]),
@@ -951,18 +925,16 @@ def download_json_artifact(
             if not local_path.exists():
                 return None
             return json.loads(local_path.read_text(encoding='utf-8'))
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         try:
-            local_path = Path(
-                mlflow.artifacts.download_artifacts(
-                    run_id=run_id,
-                    artifact_path=artifact_path,
-                )
-            )
+            local_path = Path(mlflow.artifacts.download_artifacts(
+                run_id=run_id,
+                artifact_path=artifact_path,
+            ))
             if local_path.is_dir():
                 local_path = local_path / Path(artifact_path).name
             if not local_path.exists():
                 return None
             return json.loads(local_path.read_text(encoding='utf-8'))
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None

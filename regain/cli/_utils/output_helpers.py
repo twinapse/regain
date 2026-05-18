@@ -278,7 +278,7 @@ def _publish_outputs_best_effort(
                 overwrite=bool(overwrite or output.overwrite_destination),
             )
             published_count += 1
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             add_failure(
                 failures=failures,
                 scope=output.scope,
@@ -322,7 +322,7 @@ def _publish_outputs_transactionally(
                 output.destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(output.source), str(output.destination))
                 published_outputs.append((output, destination_backup_path))
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 _rollback_transaction(
                     published_outputs=published_outputs,
                     failed_output=output,
@@ -380,7 +380,7 @@ def _rollback_transaction(
         try:
             failed_output.destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(failed_output_backup), str(failed_output.destination))
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             pass
 
     for output, backup_path in reversed(list(published_outputs)):
@@ -391,7 +391,7 @@ def _rollback_transaction(
             if backup_path is not None and backup_path.exists():
                 output.destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(backup_path), str(output.destination))
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             continue
 
 

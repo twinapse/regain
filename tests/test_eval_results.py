@@ -10,6 +10,10 @@ from regain.evaluation import EvaluationPassResult
 
 
 class TestEvalResults:
+    """
+    Tests for EvalResults.
+    """
+
     def test_derives_masked_ref_accuracy_from_backbone_logits(self) -> None:
         result = EvaluationPassResult(
             label='ckpt',

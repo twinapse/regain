@@ -100,10 +100,8 @@ def build_analysis_artifacts(
                 else:
                     vector_values.append(float(value))
             if len(vector_values) != len(a_exp_base_list):
-                raise ValueError(
-                    f'Extra vector `{key}` length mismatch. '
-                    f'expected={len(a_exp_base_list)}, observed={len(vector_values)}'
-                )
+                raise ValueError(f'Extra vector `{key}` length mismatch. '
+                                 f'expected={len(a_exp_base_list)}, observed={len(vector_values)}')
             payload[str(key)] = vector_values
 
     if extra_scalars is not None:

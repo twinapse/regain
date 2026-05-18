@@ -15,15 +15,16 @@ from torch.utils.data import Dataset
 from regain.avalanche_utils.plugins import RepairControllerPlugin
 from regain.constants import _DEBUG_N_SAMPLES
 from regain.constants import _DEBUG_NUM_CLASSES
-# Ensure a stable import order for plugin module initialization.
-import regain.experiments.orchestrator  # noqa: F401
-import regain.debug.avalanche_utils as debug_utils
 from regain.debug.avalanche_utils import DebugRepairControllerPlugin
+import regain.debug.avalanche_utils as debug_utils
+# Ensure a stable import order for plugin module initialization.
+import regain.experiments.orchestrator  # noqa: F401  # pylint: disable=unused-import
 from regain.models.controllers import RepairController
 
 ################
 # Test helpers #
 ################
+
 
 class _IdentityModel(nn.Module):
     """Minimal model that returns its inputs unchanged."""
@@ -181,9 +182,7 @@ def _make_repair_strategy(
 ) -> _DummyStrategy:
     """Build a strategy stub whose experience exposes a repair stream."""
     experience = types.SimpleNamespace(
-        benchmark=types.SimpleNamespace(
-            repair_stream=[types.SimpleNamespace(dataset=repair_dataset)],
-        ),
+        benchmark=types.SimpleNamespace(repair_stream=[types.SimpleNamespace(dataset=repair_dataset)],),
         classes_in_this_experience=seen_classes,
         current_experience=exp_idx,
     )
@@ -204,13 +203,17 @@ class TestRepairControllerPluginBudgetSelection:
     """Tests for repair budget selection behavior."""
 
     def test_requires_explicit_seed(self) -> None:
+
+        def _build_plugin_with_kwargs(kwargs: dict[str, Any]) -> Any:
+            return RepairControllerPlugin(**kwargs)
+
         with pytest.raises(TypeError, match="missing 1 required keyword-only argument: 'seed'"):
-            RepairControllerPlugin(
-                controller=_ScriptedRepairController(),
-                fit_after_experience=False,
-                repair_epochs=1,
-                repair_batch_size=1,
-            )
+            _build_plugin_with_kwargs({
+                'controller': _ScriptedRepairController(),
+                'fit_after_experience': False,
+                'repair_epochs': 1,
+                'repair_batch_size': 1,
+            })
 
     def test_raises_when_budget_fraction_is_out_of_range(self) -> None:
         with pytest.raises(ValueError, match='range'):
@@ -393,20 +396,16 @@ class TestRepairControllerPluginRngIsolation:
             plugin.after_training_exp(strategy)
             return torch.random.get_rng_state()
 
-        state_a = _run_after_training_exp(
-            fit_side_effect=lambda: (
-                random.random(),
-                np.random.rand(2),
-                torch.rand(4),
-            ),
-        )
-        state_b = _run_after_training_exp(
-            fit_side_effect=lambda: (
-                random.random(),
-                np.random.rand(32),
-                torch.rand(32),
-            ),
-        )
+        state_a = _run_after_training_exp(fit_side_effect=lambda: (
+            random.random(),
+            np.random.rand(2),
+            torch.rand(4),
+        ),)
+        state_b = _run_after_training_exp(fit_side_effect=lambda: (
+            random.random(),
+            np.random.rand(32),
+            torch.rand(32),
+        ),)
 
         assert torch.equal(state_a, state_b)
 
@@ -470,6 +469,7 @@ class TestDebugRepairControllerPlugin:
 # Output contract coverage #
 ###########################
 
+
 class TestRepairControllerPluginOutputContract:
     """Tests for controller output-shape and seen-class update rules."""
 
@@ -519,6 +519,7 @@ class TestRepairControllerPluginOutputContract:
 # Anti-cheat coverage #
 #######################
 
+
 class TestRepairControllerPluginAntiCheat:
     """Tests that repair controllers cannot alter unseen-class behavior."""
 
@@ -565,6 +566,7 @@ class TestRepairControllerPluginAntiCheat:
 ########################
 # Eval hook boundaries #
 ########################
+
 
 class TestRepairControllerPluginEvalHooks:
     """Tests for repair controller evaluation hook boundaries."""

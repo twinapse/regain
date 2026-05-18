@@ -1,3 +1,6 @@
+"""
+Symbol registry and scenario/backbone enumeration utilities.
+"""
 import importlib
 from types import MappingProxyType
 from typing import Mapping
@@ -99,9 +102,7 @@ def _resolve_registry_entry(
     path = mapping.get(key)
     if path is None:
         supported_names = ', '.join(sorted(mapping)) or 'none'
-        raise ValueError(
-            f'Unsupported {label}: {key}. Supported {supported_label}: {supported_names}.'
-        )
+        raise ValueError(f'Unsupported {label}: {key}. Supported {supported_label}: {supported_names}.')
     return path
 
 
@@ -122,14 +123,12 @@ def _list_registry_entries(mapping: Mapping[str, str]) -> tuple[str, ...]:
 # Scenarios #
 #############
 
-_SCENARIOS: Mapping[str, str] = MappingProxyType(
-    {
-        'cifar100': 'regain.avalanche_utils.scenarios.CIFAR100ScenarioBuilder',
-        'cub200': 'regain.avalanche_utils.scenarios.CUB200ScenarioBuilder',
-        'imagenet_r': 'regain.avalanche_utils.scenarios.ImageNetRScenarioBuilder',
-        'tiny_imagenet': 'regain.avalanche_utils.scenarios.TinyImageNetScenarioBuilder',
-    }
-)
+_SCENARIOS: Mapping[str, str] = MappingProxyType({
+    'cifar100': 'regain.avalanche_utils.scenarios.CIFAR100ScenarioBuilder',
+    'cub200': 'regain.avalanche_utils.scenarios.CUB200ScenarioBuilder',
+    'imagenet_r': 'regain.avalanche_utils.scenarios.ImageNetRScenarioBuilder',
+    'tiny_imagenet': 'regain.avalanche_utils.scenarios.TinyImageNetScenarioBuilder',
+})
 
 
 def list_scenarios() -> tuple[str, ...]:
@@ -168,13 +167,11 @@ def get_scenario_builder_path(scenario: str) -> str:
 # Backbones #
 #############
 
-_BACKBONES: Mapping[str, str] = MappingProxyType(
-    {
-        'resnet18': 'regain.models.classifiers.ResNet18Classifier',
-        'vit_base': 'regain.models.classifiers.ViTBaseClassifier',
-        'vit_small': 'regain.models.classifiers.ViTSmallClassifier',
-    }
-)
+_BACKBONES: Mapping[str, str] = MappingProxyType({
+    'resnet18': 'regain.models.classifiers.ResNet18Classifier',
+    'vit_base': 'regain.models.classifiers.ViTBaseClassifier',
+    'vit_small': 'regain.models.classifiers.ViTSmallClassifier',
+})
 
 
 def list_backbones() -> tuple[str, ...]:
@@ -213,12 +210,10 @@ def get_backbone_path(name: str) -> str:
 # LR Schedulers #
 #################
 
-_LR_SCHEDULERS: Mapping[str, str] = MappingProxyType(
-    {
-        'multi_step': 'torch.optim.lr_scheduler.MultiStepLR',
-        'warmup_cosine': 'regain.experiments.lr_schedulers.WarmupCosineLR',
-    }
-)
+_LR_SCHEDULERS: Mapping[str, str] = MappingProxyType({
+    'multi_step': 'torch.optim.lr_scheduler.MultiStepLR',
+    'warmup_cosine': 'regain.experiments.lr_schedulers.WarmupCosineLR',
+})
 
 
 def list_lr_schedulers() -> tuple[str, ...]:
@@ -257,27 +252,25 @@ def get_lr_scheduler_path(name: str) -> str:
 # Controllers #
 ###############
 
-_CONTROLLERS: Mapping[str, str] = MappingProxyType(
-    {
-        'bace': 'regain.models.controllers.prevention.BaCEController',
-        'bic': 'regain.models.controllers.repair.BiCController',
-        'channel_block': 'regain.models.controllers.repair.ChannelBlockGainController',
-        'channel_stage': 'regain.models.controllers.repair.ChannelStageGainController',
-        'cn': 'regain.models.controllers.prevention.ContinualNormalizationController',
-        'conditioned_block': 'regain.models.controllers.repair.InputConditionedBlockGainController',
-        'conditioned_stage': 'regain.models.controllers.repair.InputConditionedStageGainController',
-        'il2m': 'regain.models.controllers.repair.IL2MController',
-        'linear_probe': 'regain.models.controllers.repair.LinearProbeController',
-        'logit_bias': 'regain.models.controllers.repair.LogitBiasController',
-        'prototype_blend': 'regain.models.controllers.repair.PrototypeBlendController',
-        'scalar_block': 'regain.models.controllers.repair.ScalarBlockGainController',
-        'scalar_stage': 'regain.models.controllers.repair.ScalarStageGainController',
-        'tcil_lite': 'regain.models.controllers.repair.TCILLiteController',
-        'tbbn': 'regain.models.controllers.prevention.TaskBalancedBatchNormController',
-        'temperature_scaling': 'regain.models.controllers.repair.TemperatureScalingController',
-        'weight_aligning': 'regain.models.controllers.repair.WeightAligningController',
-    }
-)
+_CONTROLLERS: Mapping[str, str] = MappingProxyType({
+    'bace': 'regain.models.controllers.prevention.BaCEController',
+    'bic': 'regain.models.controllers.repair.BiCController',
+    'channel_block': 'regain.models.controllers.repair.ChannelBlockGainController',
+    'channel_stage': 'regain.models.controllers.repair.ChannelStageGainController',
+    'cn': 'regain.models.controllers.prevention.ContinualNormalizationController',
+    'conditioned_block': 'regain.models.controllers.repair.InputConditionedBlockGainController',
+    'conditioned_stage': 'regain.models.controllers.repair.InputConditionedStageGainController',
+    'il2m': 'regain.models.controllers.repair.IL2MController',
+    'linear_probe': 'regain.models.controllers.repair.LinearProbeController',
+    'logit_bias': 'regain.models.controllers.repair.LogitBiasController',
+    'prototype_blend': 'regain.models.controllers.repair.PrototypeBlendController',
+    'scalar_block': 'regain.models.controllers.repair.ScalarBlockGainController',
+    'scalar_stage': 'regain.models.controllers.repair.ScalarStageGainController',
+    'tcil_lite': 'regain.models.controllers.repair.TCILLiteController',
+    'tbbn': 'regain.models.controllers.prevention.TaskBalancedBatchNormController',
+    'temperature_scaling': 'regain.models.controllers.repair.TemperatureScalingController',
+    'weight_aligning': 'regain.models.controllers.repair.WeightAligningController',
+})
 
 
 def list_controllers() -> tuple[str, ...]:
@@ -318,12 +311,10 @@ def get_controller_path(name: str) -> str:
 # Optional repair-buffer policy registry.                     #
 ###############################################################
 
-_REPAIR_BUFFER_POLICIES: Mapping[str, str] = MappingProxyType(
-    {
-        'balanced_fifo': 'regain.models.controllers.sampling.RepairBufferBalancedFIFOPolicy',
-        'fifo': 'regain.models.controllers.sampling.RepairBufferFIFOPolicy',
-    }
-)
+_REPAIR_BUFFER_POLICIES: Mapping[str, str] = MappingProxyType({
+    'balanced_fifo': 'regain.models.controllers.sampling.RepairBufferBalancedFIFOPolicy',
+    'fifo': 'regain.models.controllers.sampling.RepairBufferFIFOPolicy',
+})
 
 
 def list_repair_buffer_policies() -> tuple[str, ...]:
