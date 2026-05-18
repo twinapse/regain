@@ -12,33 +12,33 @@ used throughout the repository.
 - [Post-hoc repair controllers](#post-hoc-repair-controllers)
   - [Readout repair](#readout-repair)
     - [Linear probe](#linear-probe)
-    - [Ridge probe (not implemented)](#ridge-probe-not-implemented)
     - [Low-rank probe (not implemented)](#low-rank-probe-not-implemented)
     - [Prototype classifier](#prototype-classifier)
+    - [Ridge probe (not implemented)](#ridge-probe-not-implemented)
   - [Bias / calibration repair](#bias--calibration-repair)
-    - [Weight Aligning](#weight-aligning)
-    - [Logit bias](#logit-bias)
     - [BiC (bias correction)](#bic-bias-correction)
     - [IL2M (class incremental learning with dual memory)](#il2m-class-incremental-learning-with-dual-memory)
-    - [Temperature scaling](#temperature-scaling)
+    - [Logit bias](#logit-bias)
     - [T-CIL-Lite calibration](#t-cil-lite-calibration)
+    - [Temperature scaling](#temperature-scaling)
+    - [Weight Aligning](#weight-aligning)
   - [Statistical drift repair](#statistical-drift-repair)
-    - [MACIL (not implemented)](#macil-not-implemented)
     - [DPCR-style repair (not implemented)](#dpcr-style-repair-not-implemented)
+    - [MACIL (not implemented)](#macil-not-implemented)
   - [Modulation repair](#modulation-repair)
-    - [Scalar stage gain](#scalar-stage-gain)
-    - [Scalar block gain](#scalar-block-gain)
-    - [Channel stage gain](#channel-stage-gain)
     - [Channel block gain](#channel-block-gain)
-    - [Input-conditioned stage gain](#input-conditioned-stage-gain)
+    - [Channel stage gain](#channel-stage-gain)
     - [Input-conditioned block gain](#input-conditioned-block-gain)
+    - [Input-conditioned stage gain](#input-conditioned-stage-gain)
+    - [Scalar block gain](#scalar-block-gain)
+    - [Scalar stage gain](#scalar-stage-gain)
     - [TMCL (not implemented)](#tmcl-not-implemented)
   - [Test-time repair](#test-time-repair)
     - [ARC (adaptive retention and correction) (not implemented)](#arc-adaptive-retention-and-correction-not-implemented)
 - [Training-time / prevention controllers](#training-time--prevention-controllers)
+  - [BaCE](#bace)
   - [CN (continual normalization)](#cn-continual-normalization)
   - [TBBN (task-balanced batch normalization)](#tbbn-task-balanced-batch-normalization)
-  - [BaCE](#bace)
 
 ## Post-hoc repair controllers
 
@@ -56,20 +56,15 @@ but is no longer expressed well by the trained classifier head.
 | Method | Registry name | Class name | Reference | Purpose |
 | --- | --- | --- | --- | --- |
 | Linear probe | `linear_probe` | `LinearProbeController` | [*Knowledge Accumulation and Feature Forgetting*](https://arxiv.org/abs/2304.00933) | Evaluate representation quality and readout-repairability. |
-| Ridge probe | `N/A` | `N/A` | `N/A` | Ridge-regularized frozen-feature readout baseline for small repair budgets. |
 | Low-rank probe | `N/A` | `N/A` | `N/A` | Low-rank readout baseline for lower-parameter repair comparisons. |
 | Prototype classifier | `prototype_blend` | `PrototypeBlendController` | iCaRL nearest-mean-of-exemplars [classifier](https://arxiv.org/abs/1611.07725) | Blend frozen-head logits with class-prototype similarity scores. |
+| Ridge probe | `N/A` | `N/A` | `N/A` | Ridge-regularized frozen-feature readout baseline for small repair budgets. |
 
 #### Implementation notes
 
 ##### Linear probe
 
 - We use this method to evaluate the quality of learned representations and to measure readout-repairability.
-
-##### Ridge probe (not implemented)
-
-- Ridge-regularized linear readout baseline on frozen representations.
-- Useful for testing whether modest shrinkage improves readout repair under small repair budgets.
 
 ##### Low-rank probe (not implemented)
 
@@ -88,6 +83,11 @@ keeps the trained head and blends prototype similarity scores into its logits.
 - It blends frozen classifier logits with frozen-feature prototype similarity scores
   estimated from repair examples.
 
+##### Ridge probe (not implemented)
+
+- Ridge-regularized linear readout baseline on frozen representations.
+- Useful for testing whether modest shrinkage improves readout repair under small repair budgets.
+
 ### Bias / calibration repair
 
 Bias and calibration repair methods test whether forgetting can be recovered by correcting logits,
@@ -98,24 +98,14 @@ changing the backbone representation.
 
 | Method | Registry name | Class name | Reference | Purpose |
 | --- | --- | --- | --- | --- |
-| Weight Aligning | `weight_aligning` | `WeightAligningController` | [arXiv:1911.07053](https://arxiv.org/abs/1911.07053) | Rescale new-class logits using classifier-head weight norms. |
-| Logit bias | `logit_bias` | `LogitBiasController` | N/A (repository baseline) | Learn an additive per-class bias vector on repair data. |
 | BiC (bias correction) | `bic` | `BiCController` | [arXiv:1905.13260](https://arxiv.org/abs/1905.13260) | Fit a bias layer on repair data to correct classifier bias. |
 | IL2M (class incremental learning with dual memory) | `il2m` | `IL2MController` | [IEEE:9009019](https://ieeexplore.ieee.org/document/9009019) | Accumulate class statistics and rectify logits after each experience. |
-| Temperature scaling | `temperature_scaling` | `TemperatureScalingController` | [arXiv:1706.04599](https://arxiv.org/abs/1706.04599) | Calibrate frozen logits with one global temperature. |
+| Logit bias | `logit_bias` | `LogitBiasController` | N/A (repository baseline) | Learn an additive per-class bias vector on repair data. |
 | T-CIL-Lite calibration | `tcil_lite` | `TCILLiteController` | [arXiv:2503.22163](https://arxiv.org/abs/2503.22163) | Fit one temperature per experience class group as a lightweight T-CIL approximation. |
+| Temperature scaling | `temperature_scaling` | `TemperatureScalingController` | [arXiv:1706.04599](https://arxiv.org/abs/1706.04599) | Calibrate frozen logits with one global temperature. |
+| Weight Aligning | `weight_aligning` | `WeightAligningController` | [arXiv:1911.07053](https://arxiv.org/abs/1911.07053) | Rescale new-class logits using classifier-head weight norms. |
 
 #### Implementation notes
-
-##### Weight Aligning
-
-- Estimates the classifier-head weight-norm ratio between old and newly introduced classes
-  and applies that near-zero-cost scalar to the logits of the new classes.
-
-##### Logit bias
-
-- Learns an additive per-class bias vector on repair data and applies `logits' = logits + b`
-  during post-hoc evaluation.
 
 ##### BiC (bias correction)
 
@@ -129,11 +119,10 @@ changing the backbone representation.
 - The controller accumulates IL2M statistics from repair data after each experience and
   applies IL2M rectification during post-hoc evaluation.
 
-##### Temperature scaling
+##### Logit bias
 
-- One-parameter calibration baseline that rescales logits uniformly.
-- Useful as a minimal-capacity reference point below per-class bias methods such as `logit_bias` or BiC.
-- Optimizes one scalar temperature on frozen repair-set logits using NLL.
+- Learns an additive per-class bias vector on repair data and applies `logits' = logits + b`
+  during post-hoc evaluation.
 
 ##### T-CIL-Lite calibration
 
@@ -142,6 +131,17 @@ changing the backbone representation.
 - Useful for documenting the space between global temperature scaling and richer class-specific correction methods.
 - It is a lightweight approximation of T-CIL: it fits one temperature per observed
   experience class group. It should not be considered a faithful T-CIL reproduction.
+
+##### Temperature scaling
+
+- One-parameter calibration baseline that rescales logits uniformly.
+- Useful as a minimal-capacity reference point below per-class bias methods such as `logit_bias` or BiC.
+- Optimizes one scalar temperature on frozen repair-set logits using NLL.
+
+##### Weight Aligning
+
+- Estimates the classifier-head weight-norm ratio between old and newly introduced classes
+  and applies that near-zero-cost scalar to the logits of the new classes.
 
 ### Statistical drift repair
 
@@ -153,15 +153,10 @@ classifiers.
 
 | Method | Registry name | Class name | Reference | Purpose |
 | --- | --- | --- | --- | --- |
-| MACIL | `N/A` | `N/A` | `N/A` | Compensate semantic drift through mean/covariance-shift calibration. |
 | DPCR-style repair | `N/A` | `N/A` | `N/A` | Placeholder for prototype/distribution-reconstruction repair methods. |
+| MACIL | `N/A` | `N/A` | `N/A` | Compensate semantic drift through mean/covariance-shift calibration. |
 
 #### Implementation notes
-
-##### MACIL (not implemented)
-
-- MACIL is a statistical drift repair baseline for task-agnostic class-incremental learning.
-- It frames semantic drift as mean/covariance shift and applies lightweight calibration to compensate for that drift.
 
 ##### DPCR-style repair (not implemented)
 
@@ -170,6 +165,11 @@ classifiers.
 - Useful for documenting statistical repair baselines that sit between logit-only correction
   and fitting a new probe.
 - No DPCR-style controller is currently implemented in this repository.
+
+##### MACIL (not implemented)
+
+- MACIL is a statistical drift repair baseline for task-agnostic class-incremental learning.
+- It frames semantic drift as mean/covariance shift and applies lightweight calibration to compensate for that drift.
 
 ### Modulation repair
 
@@ -180,12 +180,12 @@ channel-, or state-dependent modulations rather than replacing only the final re
 
 | Method | Registry name | Class name | Reference | Purpose |
 | --- | --- | --- | --- | --- |
-| Scalar stage gain | `scalar_stage` | `ScalarStageGainController` | N/A (repository-native modulation baseline) | Learn one multiplicative gain per resolved stage. |
-| Scalar block gain | `scalar_block` | `ScalarBlockGainController` | N/A (repository-native modulation baseline) | Learn one multiplicative gain per resolved block. |
-| Channel stage gain | `channel_stage` | `ChannelStageGainController` | N/A (repository-native modulation baseline) | Learn grouped per-channel gains for each resolved stage. |
 | Channel block gain | `channel_block` | `ChannelBlockGainController` | N/A (repository-native modulation baseline) | Learn grouped per-channel gains for each resolved block. |
-| Input-conditioned stage gain | `conditioned_stage` | `InputConditionedStageGainController` | N/A (repository-native modulation baseline) | Predict per-example stage gains from backbone features. |
+| Channel stage gain | `channel_stage` | `ChannelStageGainController` | N/A (repository-native modulation baseline) | Learn grouped per-channel gains for each resolved stage. |
 | Input-conditioned block gain | `conditioned_block` | `InputConditionedBlockGainController` | N/A (repository-native modulation baseline) | Predict per-example block gains from backbone features. |
+| Input-conditioned stage gain | `conditioned_stage` | `InputConditionedStageGainController` | N/A (repository-native modulation baseline) | Predict per-example stage gains from backbone features. |
+| Scalar block gain | `scalar_block` | `ScalarBlockGainController` | N/A (repository-native modulation baseline) | Learn one multiplicative gain per resolved block. |
+| Scalar stage gain | `scalar_stage` | `ScalarStageGainController` | N/A (repository-native modulation baseline) | Learn one multiplicative gain per resolved stage. |
 | TMCL | `N/A` | `N/A` | `N/A` | Top-down modulation baseline for continual learning. |
 
 #### Implementation notes
@@ -194,18 +194,10 @@ All six gain-controller variants are repository-native repair baselines rather t
 of one published method. They are fit on repair data with the backbone frozen and act only during
 post-hoc evaluation.
 
-##### Scalar stage gain
+##### Channel block gain
 
-- Learns one multiplicative gain per resolved stage and applies those gains via temporary
-  forward hooks during post-hoc evaluation.
-- It serves as an exploratory modulation probe for testing whether stage-level feature
-  modulation can recover forgetting under constrained controller budgets.
-
-##### Scalar block gain
-
-- Learns one multiplicative gain per resolved block and applies those gains via temporary
-  forward hooks during post-hoc evaluation.
-- It serves as an exploratory modulation probe for testing whether block-level feature
+- Learns grouped per-channel gains for each resolved block.
+- It serves as an exploratory modulation probe for testing whether block-level channel
   modulation can recover forgetting under constrained controller budgets.
 
 ##### Channel stage gain
@@ -214,10 +206,11 @@ post-hoc evaluation.
 - It serves as an exploratory modulation probe for testing whether stage-level channel
   modulation can recover forgetting under constrained controller budgets.
 
-##### Channel block gain
+##### Input-conditioned block gain
 
-- Learns grouped per-channel gains for each resolved block.
-- It serves as an exploratory modulation probe for testing whether block-level channel
+- Predicts per-example block gains from backbone features with a small MLP, then re-runs
+  the model with those input-conditioned gains applied.
+- It serves as an exploratory modulation probe for testing whether per-example block-level
   modulation can recover forgetting under constrained controller budgets.
 
 ##### Input-conditioned stage gain
@@ -227,11 +220,18 @@ post-hoc evaluation.
 - It serves as an exploratory modulation probe for testing whether per-example stage-level
   modulation can recover forgetting under constrained controller budgets.
 
-##### Input-conditioned block gain
+##### Scalar block gain
 
-- Predicts per-example block gains from backbone features with a small MLP, then re-runs
-  the model with those input-conditioned gains applied.
-- It serves as an exploratory modulation probe for testing whether per-example block-level
+- Learns one multiplicative gain per resolved block and applies those gains via temporary
+  forward hooks during post-hoc evaluation.
+- It serves as an exploratory modulation probe for testing whether block-level feature
+  modulation can recover forgetting under constrained controller budgets.
+
+##### Scalar stage gain
+
+- Learns one multiplicative gain per resolved stage and applies those gains via temporary
+  forward hooks during post-hoc evaluation.
+- It serves as an exploratory modulation probe for testing whether stage-level feature
   modulation can recover forgetting under constrained controller budgets.
 
 ##### TMCL (not implemented)
@@ -273,11 +273,55 @@ sufficient and when training-time intervention is needed.
 
 | Method | Registry name | Class name | Reference | Purpose |
 | --- | --- | --- | --- | --- |
+| BaCE | `bace` | `BaCEController` | [OpenReview:EOTgj37XNM](https://openreview.net/forum?id=EOTgj37XNM) | Combine KNN-assisted adaptation, distillation, and replay-aware loss terms during training. |
 | CN (continual normalization) | `cn` | `ContinualNormalizationController` | [arXiv:2203.16102](https://arxiv.org/abs/2203.16102) | Replace BatchNorm2d layers with continual-normalization layers during training. |
 | TBBN (task-balanced batch normalization) | `tbbn` | `TaskBalancedBatchNormController` | [arXiv:2201.12559](https://arxiv.org/abs/2201.12559) | Rebalance current-vs-replay batch statistics during training. |
-| BaCE | `bace` | `BaCEController` | [OpenReview:EOTgj37XNM](https://openreview.net/forum?id=EOTgj37XNM) | Combine KNN-assisted adaptation, distillation, and replay-aware loss terms during training. |
 
 ### Implementation notes
+
+#### BaCE
+
+BaCE plugs into Avalanche training via `TrainingObjectiveControllerInterface`.
+
+What we implement:
+
+- **Teacher / student setup with epoch-level teacher updates.**
+  - We keep a frozen teacher copy initialized at the start of each experience.
+  - We update teacher parameters via **EMA at the end of each training epoch** (rather than per-iteration).
+- **Effect\_new (learning new classes with “old” causal effect included) via a joint-score KNN objective:**
+  - We build a **KNN feature bank** in the *teacher’s* feature space over the **current experience dataset**.
+    - For efficiency, the bank is built once per epoch and can be subsampled (`bank_max_samples`).
+  - For current-task samples in a minibatch, we compute:
+    - student self-scores (`softmax(logits)`), and
+    - neighbor contributions from the **student’s predictions on retrieved neighbors**, weighted
+      and mixed with self-score via `w0`.
+  - Neighbor weights are computed by an **inverse-distance** rule (with eps for stability)
+    and we exclude self-matches / duplicates using a small distance threshold.
+  - The loss is a negative log-likelihood on the target probability under these **joint scores**.
+- **Effect\_old (stabilizing old classes) via distillation on old-class scores:**
+  - On current-task samples, we compute **KL divergence** between student and teacher softmax
+    scores restricted to the **old-class subset**.
+  - If replay/buffer samples are present in the minibatch, we switch to a different weighting
+    (`alpha_with_buffer` vs `alpha_no_buffer`) consistent with the idea that buffer availability
+    changes the required strength of the effect.
+- **Replay enhancement (when replay samples exist) in a DER++-style form:**
+  - CE on replay samples (standard supervised loss),
+  - plus MSE distillation between student and teacher **old-class logits** on replay samples.
+
+Important differences / simplifications vs a faithful reproduction:
+
+- Our implementation is **scoped to image classification-style models** that expose a
+  `.backbone` (or `.encoder`) returning 2D features; we do not reproduce the paper’s broader
+  PTM/NLP setups.
+- The KNN bank in this repo is built over the **current experience dataset** (with the teacher’s
+  representation), not a specialized multi-source retrieval system. This is a pragmatic
+  approximation of BaCE’s “use prior/old knowledge to assist adaptation” idea.
+- We update the teacher **once per epoch** (EMA). If an official implementation updates more
+  frequently, results may differ.
+- We detect “current vs replay” samples by **class membership in the minibatch labels**, not
+  by relying on a particular sampler ordering. This makes the controller more robust across
+  Avalanche strategies, but it may not match an exact paper protocol if the protocol assumes a
+  strict batch construction process.
 
 #### CN (continual normalization)
 
@@ -323,47 +367,3 @@ sufficient and when training-time intervention is needed.
     whose current-part size is not divisible by the configured split factor. We reduce splits
     via `gcd` per minibatch to avoid invalid reshapes; a stricter reference implementation may
     simply assume divisibility and error out.
-
-#### BaCE
-
-BaCE plugs into Avalanche training via `TrainingObjectiveControllerInterface`.
-
-What we implement:
-
-- **Teacher / student setup with epoch-level teacher updates.**
-  - We keep a frozen teacher copy initialized at the start of each experience.
-  - We update teacher parameters via **EMA at the end of each training epoch** (rather than per-iteration).
-- **Effect\_new (learning new classes with “old” causal effect included) via a joint-score KNN objective:**
-  - We build a **KNN feature bank** in the *teacher’s* feature space over the **current experience dataset**.
-    - For efficiency, the bank is built once per epoch and can be subsampled (`bank_max_samples`).
-  - For current-task samples in a minibatch, we compute:
-    - student self-scores (`softmax(logits)`), and
-    - neighbor contributions from the **student’s predictions on retrieved neighbors**, weighted
-      and mixed with self-score via `w0`.
-  - Neighbor weights are computed by an **inverse-distance** rule (with eps for stability)
-    and we exclude self-matches / duplicates using a small distance threshold.
-  - The loss is a negative log-likelihood on the target probability under these **joint scores**.
-- **Effect\_old (stabilizing old classes) via distillation on old-class scores:**
-  - On current-task samples, we compute **KL divergence** between student and teacher softmax
-    scores restricted to the **old-class subset**.
-  - If replay/buffer samples are present in the minibatch, we switch to a different weighting
-    (`alpha_with_buffer` vs `alpha_no_buffer`) consistent with the idea that buffer availability
-    changes the required strength of the effect.
-- **Replay enhancement (when replay samples exist) in a DER++-style form:**
-  - CE on replay samples (standard supervised loss),
-  - plus MSE distillation between student and teacher **old-class logits** on replay samples.
-
-Important differences / simplifications vs a faithful reproduction:
-
-- Our implementation is **scoped to image classification-style models** that expose a
-  `.backbone` (or `.encoder`) returning 2D features; we do not reproduce the paper’s broader
-  PTM/NLP setups.
-- The KNN bank in this repo is built over the **current experience dataset** (with the teacher’s
-  representation), not a specialized multi-source retrieval system. This is a pragmatic
-  approximation of BaCE’s “use prior/old knowledge to assist adaptation” idea.
-- We update the teacher **once per epoch** (EMA). If an official implementation updates more
-  frequently, results may differ.
-- We detect “current vs replay” samples by **class membership in the minibatch labels**, not
-  by relying on a particular sampler ordering. This makes the controller more robust across
-  Avalanche strategies, but it may not match an exact paper protocol if the protocol assumes a
-  strict batch construction process.
